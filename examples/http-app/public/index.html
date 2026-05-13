@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Codex Local Bridge Example</title>
+	<style>
+		:root {
+			color-scheme: light dark;
+			font-family: Arial, sans-serif;
+			background: #101820;
+			color: #eef6fb;
+		}
+		body {
+			margin: 0;
+			padding: 24px;
+		}
+		main {
+			max-width: 980px;
+			margin: 0 auto;
+		}
+		h1 {
+			margin: 0 0 8px;
+			font-size: 28px;
+		}
+		p {
+			line-height: 1.5;
+		}
+		.panel {
+			border: 1px solid #304352;
+			border-radius: 8px;
+			padding: 16px;
+			margin: 16px 0;
+			background: #152330;
+		}
+		label {
+			display: block;
+			margin: 10px 0 6px;
+			font-weight: 700;
+		}
+		input, textarea, select, button {
+			font: inherit;
+		}
+		input, textarea, select {
+			box-sizing: border-box;
+			width: 100%;
+			border: 1px solid #455e70;
+			border-radius: 6px;
+			padding: 10px;
+			background: #0d151d;
+			color: #eef6fb;
+		}
+		textarea {
+			min-height: 120px;
+			resize: vertical;
+		}
+		.actions {
+			display: flex;
+			flex-wrap: wrap;
+			gap: 8px;
+			margin-top: 12px;
+		}
+		button {
+			border: 0;
+			border-radius: 6px;
+			padding: 10px 14px;
+			background: #31b4f2;
+			color: #061018;
+			font-weight: 700;
+			cursor: pointer;
+		}
+		button.secondary {
+			background: #d1e2ec;
+		}
+		pre {
+			overflow: auto;
+			min-height: 180px;
+			padding: 12px;
+			border-radius: 8px;
+			background: #071017;
+			color: #d7f3ff;
+			white-space: pre-wrap;
+		}
+		img {
+			max-width: min(420px, 100%);
+			border-radius: 8px;
+			margin-top: 12px;
+			background: #071017;
+		}
+	</style>
+</head>
+<body>
+	<main>
+		<h1>Codex Local Bridge Example</h1>
+		<p>This page is served from a real localhost origin so it can pair with the tray bridge and call the raw `/v1` bridge API.</p>
+
+		<section class="panel">
+			<label for="bridgeUrl">Bridge URL</label>
+			<input id="bridgeUrl" value="http://127.0.0.1:8765">
+			<label for="pairingCode">Pairing code</label>
+			<input id="pairingCode" inputmode="numeric" placeholder="Shown in tray app">
+			<div class="actions">
+				<button id="statusBtn" type="button">Check Status</button>
+				<button id="pairBtn" type="button">Pair Origin</button>
+				<button id="modelsBtn" type="button">List Models</button>
+				<button id="unpairBtn" class="secondary" type="button">Unpair</button>
+			</div>
+		</section>
+
+		<section class="panel">
+			<label for="chatModel">Chat model</label>
+			<input id="chatModel" value="codex-local:auto">
+			<label for="chatPrompt">Chat prompt</label>
+			<textarea id="chatPrompt">Write one concise sentence describing what this local bridge does.</textarea>
+			<div class="actions">
+				<button id="chatBtn" type="button">Run Chat</button>
+			</div>
+		</section>
+
+		<section class="panel">
+			<label for="imagePrompt">Image prompt</label>
+			<textarea id="imagePrompt">A clean product icon for a secure local desktop bridge, simple geometric style</textarea>
+			<label for="imageSize">Image size</label>
+			<select id="imageSize">
+				<option value="1024x1024">1024x1024</option>
+				<option value="1024x1536">1024x1536</option>
+				<option value="1536x1024">1536x1024</option>
+			</select>
+			<div class="actions">
+				<button id="imageBtn" type="button">Run Image</button>
+			</div>
+			<img id="imageResult" alt="" hidden>
+		</section>
+
+		<section class="panel">
+			<label for="output">Output</label>
+			<pre id="output"></pre>
+		</section>
+	</main>
+
+	<script>
+		(function () {
+			'use strict';
+
+			const output = document.getElementById('output');
+			const imageResult = document.getElementById('imageResult');
+			const tokenKey = 'alorbachBridgeExampleToken:' + window.location.origin;
+
+			function bridgeUrl() {
+				return document.getElementById('bridgeUrl').value.replace(/\/$/, '');
+			}
+
+			function token() {
+				return window.localStorage.getItem(tokenKey) || '';
+			}
+
+			function setToken(value) {
+				if (value) {
+					window.localStorage.setItem(tokenKey, value);
+				} else {
+					window.localStorage.removeItem(tokenKey);
+				}
+			}
+
+			function log(value) {
+				output.textContent = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+			}
+
+			async function jsonFetch(url, options) {
+				const response = await fetch(url, options);
+				const body = await response.json().catch(() => ({}));
+				if (!response.ok) {
+					throw body && body.message ? body : { message: response.status + ' ' + response.statusText, body };
+				}
+				return body;
+			}
+
+			async function bridgeFetch(path, options) {
+				const requestId = crypto.randomUUID();
+				const headers = {
+					'Content-Type': 'application/json',
+					'X-Alorbach-Request-Id': requestId,
+				};
+				if (token()) {
+					headers['X-Alorbach-Bridge-Token'] = token();
+				}
+				const opts = Object.assign({ method: 'GET', headers }, options || {});
+				if (opts.body && typeof opts.body !== 'string') {
+					opts.body = JSON.stringify(opts.body);
+				}
+				return jsonFetch(bridgeUrl() + path, opts);
+			}
+
+			async function sha256(value) {
+				const bytes = new TextEncoder().encode(value);
+				const digest = await crypto.subtle.digest('SHA-256', bytes);
+				return Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, '0')).join('');
+			}
+
+			async function jobEnvelope(type, payload) {
+				const requestId = crypto.randomUUID();
+				const requestHash = await sha256(JSON.stringify({ origin: window.location.origin, type, payload, requestId }));
+				return {
+					job_token: 'example-only-' + requestId,
+					request_hash: requestHash,
+					request_id: requestId,
+					payload,
+				};
+			}
+
+			document.getElementById('statusBtn').addEventListener('click', async () => {
+				try {
+					log(await bridgeFetch('/v1/status'));
+				} catch (error) {
+					log(error);
+				}
+			});
+
+			document.getElementById('pairBtn').addEventListener('click', async () => {
+				try {
+					const pairingCode = document.getElementById('pairingCode').value.trim();
+					const result = await bridgeFetch('/v1/pair', {
+						method: 'POST',
+						body: { origin: window.location.origin, pairing_code: pairingCode },
+					});
+					setToken(result.token || '');
+					log(result);
+				} catch (error) {
+					log(error);
+				}
+			});
+
+			document.getElementById('modelsBtn').addEventListener('click', async () => {
+				try {
+					log(await bridgeFetch('/v1/models'));
+				} catch (error) {
+					log(error);
+				}
+			});
+
+			document.getElementById('unpairBtn').addEventListener('click', async () => {
+				try {
+					const result = await bridgeFetch('/v1/unpair', { method: 'POST', body: {} });
+					setToken('');
+					log(result);
+				} catch (error) {
+					log(error);
+				}
+			});
+
+			document.getElementById('chatBtn').addEventListener('click', async () => {
+				try {
+					imageResult.hidden = true;
+					const payload = {
+						model: document.getElementById('chatModel').value.trim() || 'codex-local:auto',
+						messages: [
+							{ role: 'user', content: document.getElementById('chatPrompt').value },
+						],
+						max_tokens: 256,
+					};
+					const result = await bridgeFetch('/v1/chat', {
+						method: 'POST',
+						body: await jobEnvelope('chat', payload),
+					});
+					log(result);
+				} catch (error) {
+					log(error);
+				}
+			});
+
+			document.getElementById('imageBtn').addEventListener('click', async () => {
+				try {
+					imageResult.hidden = true;
+					const payload = {
+						model: 'codex-local:image',
+						prompt: document.getElementById('imagePrompt').value,
+						size: document.getElementById('imageSize').value,
+						quality: 'high',
+					};
+					const result = await bridgeFetch('/v1/images', {
+						method: 'POST',
+						body: await jobEnvelope('image', payload),
+					});
+					const first = result.response && result.response.data && result.response.data[0];
+					if (first && first.b64_json) {
+						imageResult.src = 'data:image/png;base64,' + first.b64_json;
+						imageResult.hidden = false;
+					}
+					log(result);
+				} catch (error) {
+					log(error);
+				}
+			});
+		})();
+	</script>
+</body>
+</html>

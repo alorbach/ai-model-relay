@@ -1,0 +1,63 @@
+name: Release Windows Bridge
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Compute version
+        id: vars
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}" -replace '^v', ''
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Set package version
+        shell: pwsh
+        run: npm version "${{ steps.vars.outputs.version }}" --no-git-tag-version
+
+      - name: Generate icons
+        run: npm run icons
+
+      - name: Check JavaScript syntax
+        shell: pwsh
+        run: |
+          node --check src/main.js
+          node --check src/server.js
+          node --check scripts/build-win.js
+          node --check scripts/generate-icons.js
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build Windows installer and portable ZIP
+        run: npm run dist:win
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            dist/*.exe
+            dist/*.zip

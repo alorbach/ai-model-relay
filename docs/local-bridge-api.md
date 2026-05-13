@@ -1,0 +1,237 @@
+# Local Bridge API
+
+Default base URL:
+
+```text
+http://127.0.0.1:8765
+```
+
+The port can be changed with `ALORBACH_CODEX_BRIDGE_PORT`.
+
+All routes return JSON and set `Cache-Control: no-store`. The bridge accepts only localhost socket clients. Browser callers must use an `http` or `https` origin; `file://` origins are rejected.
+
+## Headers
+
+Paired routes require:
+
+```http
+Origin: http://127.0.0.1:8787
+Content-Type: application/json
+X-Alorbach-Bridge-Token: <pairing-token>
+X-Alorbach-Request-Id: <request-id>
+```
+
+`X-Alorbach-Request-Id` is currently forwarded as a request identity header for clients and CORS, while `request_id` in the JSON body is the required bridge-side field for execution routes.
+
+## Body Limit
+
+The maximum JSON request body is 12 MiB. This is intended to support normal chat payloads and image prompts, not binary uploads.
+
+## `GET /v1/status`
+
+Checks bridge and local Codex readiness. This route does not require pairing.
+
+Example response:
+
+```json
+{
+  "success": true,
+  "message": "Local Codex CLI is installed and logged in.",
+  "details": {
+    "codex_binary": "<path-to-codex-executable>",
+    "codex_home": "<user-home>\\.codex",
+    "auth_path": "<user-home>\\.codex\\auth.json",
+    "generated_images_dir": "<user-home>\\.codex\\generated_images",
+    "version": "codex ...",
+    "login_status": "Logged in ..."
+  },
+  "bridge": {
+    "version": "1.0.0",
+    "paired_origins": [
+      "http://127.0.0.1:8787"
+    ]
+  }
+}
+```
+
+`success: false` means the tray bridge is reachable but Codex is missing, not executable, or not logged in for the current Windows user.
+
+## `POST /v1/pair`
+
+Pairs a browser origin with the bridge.
+
+Request:
+
+```json
+{
+  "origin": "http://127.0.0.1:8787",
+  "pairing_code": "123456"
+}
+```
+
+Response:
+
+```json
+{
+  "success": true,
+  "origin": "http://127.0.0.1:8787",
+  "token": "..."
+}
+```
+
+Store the token in browser storage scoped to the origin. Treat it as a bearer secret. If pairing succeeds, the bridge rotates the tray pairing code.
+
+## `POST /v1/unpair`
+
+Removes the pairing for the request origin.
+
+Request headers must include `Origin` and `X-Alorbach-Bridge-Token`.
+
+Response:
+
+```json
+{
+  "success": true
+}
+```
+
+## `GET /v1/models`
+
+Returns local model IDs after pairing.
+
+Response:
+
+```json
+{
+  "success": true,
+  "models": {
+    "text": [
+      "codex-local:auto"
+    ],
+    "image": [
+      "codex-local:image"
+    ]
+  }
+}
+```
+
+If `CODEX_HOME/models_cache.json` exists, additional text model IDs from that cache are returned as `codex-local:<id>`.
+
+## `POST /v1/chat`
+
+Runs a local Codex chat completion.
+
+Request:
+
+```json
+{
+  "job_token": "<wordpress-job-token>",
+  "request_hash": "<wordpress-request-hash>",
+  "request_id": "<wordpress-request-id>",
+  "payload": {
+    "model": "codex-local:auto",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Write a short status line."
+      }
+    ],
+    "max_tokens": 256
+  }
+}
+```
+
+Response:
+
+```json
+{
+  "success": true,
+  "response": {
+    "id": "local-codex-...",
+    "object": "chat.completion",
+    "model": "codex-local:auto",
+    "choices": [
+      {
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": "..."
+        },
+        "finish_reason": "stop"
+      }
+    ],
+    "usage": {
+      "total_tokens": 0,
+      "local_unmetered": true
+    }
+  }
+}
+```
+
+The bridge requires `job_token`, `request_hash`, and `request_id` to be present. In production, these fields come from WordPress and are validated when the browser posts the result back to Gateway.
+
+## `POST /v1/images`
+
+Runs a local Codex image request.
+
+Request:
+
+```json
+{
+  "job_token": "<wordpress-job-token>",
+  "request_hash": "<wordpress-request-hash>",
+  "request_id": "<wordpress-request-id>",
+  "payload": {
+    "model": "codex-local:image",
+    "prompt": "A product-style image of a small desktop bridge icon",
+    "size": "1024x1024",
+    "quality": "high"
+  }
+}
+```
+
+Response:
+
+```json
+{
+  "success": true,
+  "response": {
+    "data": [
+      {
+        "b64_json": "..."
+      }
+    ],
+    "usage": {
+      "total_tokens": 0,
+      "local_unmetered": true
+    },
+    "provider_details": {
+      "image_path": "<user-home>\\.codex\\generated_images\\...",
+      "generated_images_dir": "<user-home>\\.codex\\generated_images"
+    }
+  }
+}
+```
+
+The bridge returns exactly one detected generated image. If Codex completes without creating a new image under `CODEX_HOME/generated_images`, the bridge returns `success: false`.
+
+## Error Shape
+
+Most errors use:
+
+```json
+{
+  "success": false,
+  "message": "Human-readable failure.",
+  "details": {}
+}
+```
+
+Common status codes:
+
+- `400`: invalid JSON, oversized body, missing required fields, invalid origin, invalid payload.
+- `403`: non-localhost socket, bad pairing code, missing or invalid pairing token.
+- `404`: unknown route.
+- `405`: unsupported method.
+- `500`: Codex execution failed or unexpected bridge failure.
+- `503`: status route reached the bridge, but Codex is not ready.

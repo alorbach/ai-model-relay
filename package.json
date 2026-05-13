@@ -1,0 +1,55 @@
+{
+  "name": "alorbach-codex-local-bridge",
+  "version": "1.0.0",
+  "description": "Windows tray companion for Alorbach AI Gateway that exposes a secure localhost bridge to a user's own Codex CLI login, enabling browser-mediated WordPress chat and image generation through the user's local Codex/ChatGPT allowance.",
+  "private": true,
+  "main": "src/main.js",
+  "scripts": {
+    "icons": "node scripts/generate-icons.js",
+    "start": "electron .",
+    "serve": "node src/server.js",
+    "example:http": "node examples/http-app/server.js",
+    "test": "node test/security.test.js",
+    "smoke": "node src/server.js --check",
+    "dist:win": "npm run icons && node scripts/build-win.js"
+  },
+  "author": "Andre Lorbach",
+  "license": "GPL-2.0-or-later",
+  "devDependencies": {
+    "electron": "^42.0.1",
+    "electron-builder": "^26.8.1"
+  },
+  "build": {
+    "appId": "com.alorbach.codexlocalbridge",
+    "productName": "Codex Local Bridge",
+    "artifactName": "Codex-Local-Bridge-${version}-${os}-${arch}.${ext}",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
+    "win": {
+      "icon": "assets/icon.ico",
+      "target": [
+        "nsis",
+        "zip"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  },
+  "homepage": "https://github.com/alorbach/codex-local-bridge#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alorbach/codex-local-bridge.git"
+  },
+  "bugs": {
+    "url": "https://github.com/alorbach/codex-local-bridge/issues"
+  }
+}
