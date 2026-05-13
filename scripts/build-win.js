@@ -52,6 +52,7 @@ const artifactName = `Codex-Local-Bridge-${version}-build.${buildNumber}-\${os}-
 builder.build({
 	projectDir: root,
 	targets: builder.Platform.WINDOWS.createTarget(['nsis', 'zip'], builder.Arch.x64),
+	publish: 'never',
 	config: {
 		buildVersion,
 		artifactName,

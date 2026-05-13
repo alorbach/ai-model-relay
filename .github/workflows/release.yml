@@ -33,7 +33,7 @@ jobs:
 
       - name: Set package version
         shell: pwsh
-        run: npm version "${{ steps.vars.outputs.version }}" --no-git-tag-version
+        run: npm version "${{ steps.vars.outputs.version }}" --no-git-tag-version --allow-same-version
 
       - name: Generate icons
         run: npm run icons
