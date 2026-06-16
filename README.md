@@ -126,6 +126,7 @@ Routes:
 - `GET /status`: minimal visual bridge status page.
 - `GET /v1/status`: local bridge and Codex readiness.
 - `GET /v1/status/events`: local job-state event stream used by the status page.
+- `GET /v1/status/stream`: paired live status stream for browser/API clients.
 - `GET /v1/capabilities`: bridge, Codex, video, and media-analysis capability metadata.
 - `POST /v1/pair`: exchange tray pairing code for an origin token.
 - `POST /v1/unpair`: remove the pairing for the request origin.
@@ -178,7 +179,21 @@ In production, these values come from WordPress Gateway. The bridge checks that 
 }
 ```
 
-The `/status` page auto-refreshes and shows bounded live Codex session output for running jobs. Failed bridge requests include a `debug_help` object with the request id when available, links to `/status` and `/v1/status`, and safe troubleshooting checks. Recent failed jobs keep bounded Codex session output such as stderr/stdout/last response text when available.
+The `/status` page auto-refreshes and shows active, queued, and recent job activity with bounded live Codex session output for running jobs. Failed bridge requests include a `debug_help` object with the request id when available, links to `/status` and `/v1/status`, and safe troubleshooting checks. Recent failed jobs keep bounded Codex session output such as stderr/stdout/last response text when available.
+
+Paired browser/API clients can subscribe to `GET /v1/status/stream` with their normal `Origin` and `X-Alorbach-Bridge-Token` headers. Browsers set `Origin` automatically; non-browser clients must send the paired origin explicitly. The stream emits `status`, `capabilities`, `jobs`, and `heartbeat` server-sent events. Use `fetch()` streaming for browser clients because native `EventSource` cannot send the required bearer header:
+
+```js
+const response = await fetch('http://127.0.0.1:8765/v1/status/stream', {
+	headers: {
+		'X-Alorbach-Bridge-Token': bridgeToken,
+	},
+});
+
+for await (const chunk of response.body.pipeThrough(new TextDecoderStream())) {
+	console.log(chunk);
+}
+```
 
 ## Security Model
 

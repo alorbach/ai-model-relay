@@ -160,7 +160,7 @@ Clear the browser's stored token for the origin and pair again. Also check the t
 
 The bridge detects new files under `CODEX_HOME\generated_images`. Confirm Codex writes generated images there for the current `CODEX_HOME`.
 
-Image jobs run exclusively even when multiple chat jobs are allowed, because image result detection uses the shared generated-images directory.
+Only one image job runs at a time because image result detection uses the shared generated-images directory. Chat jobs may still run beside an image job up to `ALORBACH_CODEX_MAX_CONCURRENT_JOBS`.
 
 ### WordPress retry says duplicate request
 

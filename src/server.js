@@ -8,6 +8,7 @@ const mediaAnalysis = require('./media-analysis');
 const security = require('./security');
 const { statusPageHtml } = require('./status-page');
 const video = require('./video');
+const packageInfo = require('../package.json');
 
 let pairingCode = security.createPairingCode();
 
@@ -27,31 +28,61 @@ function sendJobStateSnapshot(snapshot) {
 	}
 }
 
+function sseHeaders(origin = '') {
+	const headers = {
+		'Content-Type': 'text/event-stream; charset=utf-8',
+		'Cache-Control': 'no-store, no-transform',
+		Connection: 'keep-alive',
+		'X-Accel-Buffering': 'no',
+	};
+	if (origin) {
+		headers['Access-Control-Allow-Origin'] = origin;
+		headers['Access-Control-Allow-Headers'] = 'Content-Type, X-Alorbach-Bridge-Token, X-Alorbach-Request-Id';
+		headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS';
+		headers.Vary = 'Origin';
+	}
+	return headers;
+}
+
 function createStatusEvents() {
 	const clients = new Set();
 	return {
-		add(res, initialJobs) {
-			clients.add(res);
-			res.writeHead(200, {
-				'Content-Type': 'text/event-stream; charset=utf-8',
-				'Cache-Control': 'no-store, no-transform',
-				Connection: 'keep-alive',
-				'X-Accel-Buffering': 'no',
-			});
+		add(res, options = {}) {
+			const client = {
+				res,
+				events: new Set(options.events || ['jobs']),
+				heartbeatTimer: null,
+			};
+			clients.add(client);
+			res.writeHead(200, sseHeaders(options.origin || ''));
 			res.write('retry: 3000\n\n');
-			this.send(res, 'jobs', initialJobs);
+			for (const [event, payload] of options.initialEvents || []) {
+				this.send(client, event, payload);
+			}
+			client.heartbeatTimer = setInterval(() => {
+				this.send(client, 'heartbeat', { time: new Date().toISOString() });
+			}, 15000);
+			if (typeof client.heartbeatTimer.unref === 'function') {
+				client.heartbeatTimer.unref();
+			}
 			res.on('close', () => {
-				clients.delete(res);
+				if (client.heartbeatTimer) {
+					clearInterval(client.heartbeatTimer);
+				}
+				clients.delete(client);
 			});
 		},
 		broadcast(event, payload) {
-			for (const res of clients) {
-				this.send(res, event, payload);
+			for (const client of clients) {
+				this.send(client, event, payload);
 			}
 		},
-		send(res, event, payload) {
-			res.write(`event: ${event}\n`);
-			res.write(`data: ${JSON.stringify(payload)}\n\n`);
+		send(client, event, payload) {
+			if (!client.events.has(event) && event !== 'heartbeat') {
+				return;
+			}
+			client.res.write(`event: ${event}\n`);
+			client.res.write(`data: ${JSON.stringify(payload)}\n\n`);
 		},
 	};
 }
@@ -158,12 +189,27 @@ function capabilitiesPayload(context) {
 	return {
 		success: true,
 		bridge: {
-			version: require('../package.json').version,
+			version: packageInfo.version,
 		},
 		codex: codexCapabilities.codex || {},
 		features: codexCapabilities.bridge_features || {},
 		video: context.video.capabilities ? context.video.capabilities() : { enabled: false },
 		media_analysis: context.mediaAnalysis.capabilities ? context.mediaAnalysis.capabilities() : { enabled: false },
+	};
+}
+
+function statusPayload(context, options = {}) {
+	const status = context.codex.checkStatus();
+	const bridge = {
+		version: packageInfo.version,
+	};
+	if (options.includePairedOrigins !== false) {
+		bridge.paired_origins = Object.keys(context.security.getPairings());
+	}
+	return {
+		...status,
+		bridge,
+		jobs: context.jobManager.snapshot(),
 	};
 }
 
@@ -199,15 +245,8 @@ async function route(req, res, context) {
 	}
 
 	if (req.method === 'GET' && url.pathname === '/v1/status') {
-		const status = codexAdapter.checkStatus();
-		sendJson(res, status.success ? 200 : 503, {
-			...status,
-			bridge: {
-				version: require('../package.json').version,
-				paired_origins: Object.keys(bridgeSecurity.getPairings()),
-			},
-			jobs: jobManager.snapshot(),
-		}, origin || pairedOriginForCors(req, bridgeSecurity));
+		const status = statusPayload(context);
+		sendJson(res, status.success ? 200 : 503, status, origin || pairedOriginForCors(req, bridgeSecurity));
 		return;
 	}
 
@@ -217,7 +256,31 @@ async function route(req, res, context) {
 	}
 
 	if (req.method === 'GET' && url.pathname === '/v1/status/events') {
-		context.statusEvents.add(res, jobManager.snapshot());
+		context.statusEvents.add(res, {
+			events: ['status', 'capabilities', 'jobs'],
+			initialEvents: [
+				['status', statusPayload(context)],
+				['capabilities', capabilitiesPayload(context)],
+				['jobs', jobManager.snapshot()],
+			],
+		});
+		return;
+	}
+
+	if (req.method === 'GET' && url.pathname === '/v1/status/stream') {
+		const pairedOrigin = requirePairing(req, res, bridgeSecurity);
+		if (!pairedOrigin) {
+			return;
+		}
+		context.statusEvents.add(res, {
+			origin: pairedOrigin,
+			events: ['status', 'capabilities', 'jobs'],
+			initialEvents: [
+				['status', statusPayload(context, { includePairedOrigins: false })],
+				['capabilities', capabilitiesPayload(context)],
+				['jobs', jobManager.snapshot()],
+			],
+		});
 		return;
 	}
 

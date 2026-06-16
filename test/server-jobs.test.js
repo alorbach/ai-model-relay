@@ -59,6 +59,61 @@ function waitFor(predicate) {
 	});
 }
 
+function requestEvents(port, pathname, headers, eventNames) {
+	return new Promise((resolve, reject) => {
+		const wanted = new Set(eventNames);
+		const events = {};
+		let raw = '';
+		let done = false;
+		const finish = (req, result) => {
+			if (done) {
+				return;
+			}
+			done = true;
+			clearTimeout(timer);
+			req.destroy();
+			resolve(result);
+		};
+		const timer = setTimeout(() => {
+			if (done) {
+				return;
+			}
+			done = true;
+			req.destroy();
+			reject(new Error('Timed out waiting for status events.'));
+		}, 2000);
+		const req = http.get({ hostname: '127.0.0.1', port, path: pathname, headers }, (res) => {
+			res.setEncoding('utf8');
+			res.on('data', (chunk) => {
+				raw += chunk;
+				const regex = /event: ([^\n]+)\ndata: ([^\n]+)\n\n/g;
+				let match;
+				while ((match = regex.exec(raw))) {
+					if (wanted.has(match[1]) && !events[match[1]]) {
+						events[match[1]] = JSON.parse(match[2]);
+					}
+				}
+				if (eventNames.every((eventName) => events[eventName])) {
+					finish(req, {
+						statusCode: res.statusCode,
+						contentType: res.headers['content-type'],
+						allowOrigin: res.headers['access-control-allow-origin'],
+						events,
+						raw,
+					});
+				}
+			});
+		});
+		req.on('error', (error) => {
+			if (!done && error.code !== 'ECONNRESET') {
+				done = true;
+				clearTimeout(timer);
+				reject(error);
+			}
+		});
+	});
+}
+
 function createMockSecurity() {
 	return {
 		MAX_BODY_BYTES: 12 * 1024 * 1024,
@@ -136,6 +191,12 @@ function createMockSecurity() {
 		assert.ok(page.body.includes('/v1/status'));
 		assert.ok(page.body.includes('/v1/capabilities'));
 		assert.ok(page.body.includes('/v1/status/events'));
+		assert.ok(page.body.includes('Queued Jobs'));
+		assert.ok(page.body.includes('Recent Activity'));
+		assert.ok(page.body.includes('connectionPill'));
+		assert.ok(page.body.includes('copyRawStatus'));
+		assert.ok(page.body.includes('tickElapsedCells'));
+		assert.ok(page.body.includes('heartbeat'));
 		assert.ok(page.body.includes('Codex CLI Version'));
 		assert.ok(page.body.includes('Detected Features'));
 		assert.ok(page.body.includes('Structured exec JSON'));
@@ -206,6 +267,24 @@ function createMockSecurity() {
 		assert.ok(streamPayload.contentType.includes('text/event-stream'));
 		assert.strictEqual(streamPayload.body.running_count, 2);
 		assert.strictEqual(streamPayload.body.queued_count, 1);
+
+		const rejectedStream = await requestJson(port, 'GET', '/v1/status/stream', null, { 'X-Alorbach-Bridge-Token': '' });
+		assert.strictEqual(rejectedStream.statusCode, 403);
+
+		const pairedStream = await requestEvents(port, '/v1/status/stream', {
+			Origin: 'http://127.0.0.1:8787',
+			'X-Alorbach-Bridge-Token': 'test-token',
+		}, ['status', 'capabilities', 'jobs']);
+		assert.strictEqual(pairedStream.statusCode, 200);
+		assert.ok(pairedStream.contentType.includes('text/event-stream'));
+		assert.strictEqual(pairedStream.allowOrigin, 'http://127.0.0.1:8787');
+		assert.strictEqual(pairedStream.events.status.success, true);
+		assert.ok(!Object.prototype.hasOwnProperty.call(pairedStream.events.status.bridge, 'paired_origins'));
+		assert.strictEqual(pairedStream.events.capabilities.success, true);
+		assert.strictEqual(pairedStream.events.jobs.running_count, 2);
+		assert.strictEqual(pairedStream.events.jobs.queued_count, 1);
+		assert.ok(!pairedStream.raw.includes('test-token'));
+		assert.ok(!pairedStream.raw.includes('secret prompt'));
 
 		pending[1].resolve({ success: true, response: { id: 'second' } });
 		const secondResult = await second;

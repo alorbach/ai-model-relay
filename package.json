@@ -1,6 +1,6 @@
 {
   "name": "alorbach-codex-local-bridge",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Windows tray companion for Alorbach AI Gateway that exposes a secure localhost bridge to a user's own Codex CLI login, enabling browser-mediated WordPress chat and image generation through the user's local Codex/ChatGPT allowance.",
   "private": true,
   "main": "src/main.js",

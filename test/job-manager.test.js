@@ -1,7 +1,7 @@
 'use strict';
 
 const assert = require('assert');
-const { JobManager, collectSessionOutput, truncateOutput } = require('../src/job-manager');
+const { JobManager, collectSessionOutput, normalizeDiagnosticText, truncateOutput } = require('../src/job-manager');
 
 function tick() {
 	return new Promise((resolve) => setImmediate(resolve));
@@ -68,23 +68,45 @@ function deferredRunner(label, started, resolvers, result = { success: true }) {
 		const image = manager.run({ requestId: 'image-1', type: 'images' }, deferredRunner('image', started, resolvers));
 		const chatTwo = manager.run({ requestId: 'chat-2', type: 'chat' }, deferredRunner('chat-two', started, resolvers));
 		await tick();
-		assert.deepStrictEqual(started, ['chat-one', 'chat-two']);
+		assert.deepStrictEqual(started, ['chat-one', 'image']);
 		assert.strictEqual(manager.snapshot().queued_count, 1);
 
 		resolvers['chat-one']();
-		resolvers['chat-two']();
-		await Promise.all([chatOne, chatTwo]);
+		await chatOne;
 		await tick();
-		assert.deepStrictEqual(started, ['chat-one', 'chat-two', 'image']);
-		assert.strictEqual(manager.snapshot().running_count, 1);
+		assert.deepStrictEqual(started, ['chat-one', 'image', 'chat-two']);
+		assert.strictEqual(manager.snapshot().running_count, 2);
+		resolvers['chat-two']();
 		resolvers.image();
-		await image;
+		await Promise.all([image, chatTwo]);
+		assert.strictEqual(manager.snapshot().running_count, 0);
+	}
+
+	{
+		const started = [];
+		const resolvers = {};
+		const manager = new JobManager({ maxConcurrent: 2 });
+		const imageOne = manager.run({ requestId: 'image-1', type: 'images' }, deferredRunner('image-one', started, resolvers));
+		const imageTwo = manager.run({ requestId: 'image-2', type: 'images' }, deferredRunner('image-two', started, resolvers));
+		await tick();
+		assert.deepStrictEqual(started, ['image-one']);
+		assert.strictEqual(manager.snapshot().running_count, 1);
+		assert.strictEqual(manager.snapshot().queued_count, 1);
+
+		resolvers['image-one']();
+		await imageOne;
+		await tick();
+		assert.deepStrictEqual(started, ['image-one', 'image-two']);
+		resolvers['image-two']();
+		await imageTwo;
 		assert.strictEqual(manager.snapshot().running_count, 0);
 	}
 
 	assert.ok(collectSessionOutput({ details: { stdout: 'out', stderr: 'err', response_text: 'last' } }).includes('STDOUT:\nout'));
 	assert.ok(collectSessionOutput({ details: { stdout: 'out', stderr: 'err', response_text: 'last' } }).includes('STDERR:\nerr'));
 	assert.ok(collectSessionOutput({ details: { stdout: 'out', stderr: 'err', response_text: 'last' } }).includes('RESPONSE_TEXT:\nlast'));
+	assert.strictEqual(normalizeDiagnosticText('I\u00e2\u0080\u0099m ready \u00e2\u0080\u0094 wait\u00e2\u0080\u00a6'), "I'm ready - wait...");
+	assert.strictEqual(collectSessionOutput({ details: { stderr: 'I\u00e2\u0080\u0099m ready' } }), "STDERR:\nI'm ready");
 	assert.ok(truncateOutput('x'.repeat(13000)).includes('[truncated'));
 
 	console.log('job manager tests passed');

@@ -52,6 +52,17 @@ function statusPageHtml() {
 			font-size: 12px;
 			white-space: nowrap;
 		}
+		.status-meta {
+			display: flex;
+			align-items: center;
+			justify-content: flex-end;
+			flex-wrap: wrap;
+			gap: 8px;
+		}
+		.connection-pill {
+			font-size: 12px;
+			padding: 5px 9px;
+		}
 		.grid {
 			display: grid;
 			grid-template-columns: repeat(12, 1fr);
@@ -99,6 +110,13 @@ function statusPageHtml() {
 		.ok .dot { background: var(--ok); }
 		.warn .dot { background: var(--warn); }
 		.bad .dot { background: var(--bad); }
+		.status-text {
+			font-weight: 650;
+		}
+		.status-completed { color: var(--ok); }
+		.status-failed { color: var(--bad); }
+		.status-running { color: var(--info); }
+		.status-queued { color: var(--warn); }
 		.table {
 			width: 100%;
 			border-collapse: collapse;
@@ -176,8 +194,24 @@ function statusPageHtml() {
 			padding: 7px 10px;
 			white-space: nowrap;
 		}
+		.copy-value {
+			appearance: none;
+			border: 1px solid var(--line);
+			border-radius: 5px;
+			background: #0e1520;
+			color: #d7e7ff;
+			cursor: pointer;
+			font: inherit;
+			font-size: 12px;
+			padding: 2px 6px;
+			max-width: 100%;
+			overflow-wrap: anywhere;
+			text-align: left;
+		}
 		.copy-session-output:hover,
-		.copy-session-output:focus-visible {
+		.copy-session-output:focus-visible,
+		.copy-value:hover,
+		.copy-value:focus-visible {
 			border-color: var(--info);
 			outline: none;
 		}
@@ -237,9 +271,15 @@ function statusPageHtml() {
 			border-radius: 0;
 			max-height: 420px;
 		}
+		.raw-actions {
+			display: flex;
+			justify-content: flex-end;
+			padding: 0 14px 12px;
+		}
 		@media (max-width: 760px) {
 			main { width: min(100% - 20px, 1080px); margin-top: 12px; }
 			header { align-items: flex-start; flex-direction: column; }
+			.status-meta { justify-content: flex-start; }
 			.span-4,
 			.span-6 { grid-column: span 12; }
 			.feature-grid { grid-template-columns: 1fr; }
@@ -251,7 +291,11 @@ function statusPageHtml() {
 	<main>
 		<header>
 			<h1>Codex Local Bridge</h1>
-			<div class="updated" id="updated">Loading</div>
+			<div class="status-meta">
+				<span class="pill connection-pill warn" id="connectionPill"><span class="dot"></span><span>Connecting</span></span>
+				<div class="updated" id="updated">Loading</div>
+				<div class="updated" id="lastEvent">No live events yet</div>
+			</div>
 		</header>
 		<section class="grid">
 			<div class="panel span-4">
@@ -294,10 +338,17 @@ function statusPageHtml() {
 				</table>
 			</div>
 			<div class="panel span-12">
-				<div class="label">Recent Failures</div>
+				<div class="label">Queued Jobs</div>
 				<table class="table">
-					<thead><tr><th>Request</th><th>Type</th><th>Model</th><th>Error</th><th>Finished</th></tr></thead>
-					<tbody id="recentFailures"><tr><td colspan="5" class="muted">No recent failures</td></tr></tbody>
+					<thead><tr><th>Request</th><th>Type</th><th>Model</th><th>Status</th><th>Waited</th></tr></thead>
+					<tbody id="queuedJobs"><tr><td colspan="5" class="muted">No queued jobs</td></tr></tbody>
+				</table>
+			</div>
+			<div class="panel span-12">
+				<div class="label">Recent Activity</div>
+				<table class="table">
+					<thead><tr><th>Request</th><th>Type</th><th>Model</th><th>Status</th><th>Elapsed</th><th>Finished</th></tr></thead>
+					<tbody id="recentActivity"><tr><td colspan="6" class="muted">No recent activity</td></tr></tbody>
 				</table>
 			</div>
 			<div class="panel span-12">
@@ -322,6 +373,7 @@ function statusPageHtml() {
 			</div>
 			<details class="panel span-12">
 				<summary>Raw Status</summary>
+				<div class="raw-actions"><button type="button" class="copy-session-output" id="copyRawStatus">Copy diagnostics JSON</button></div>
 				<pre class="raw-status" id="rawStatus">{}</pre>
 			</details>
 		</section>
@@ -336,6 +388,8 @@ function statusPageHtml() {
 		let jobEvents = null;
 		const fields = {
 			updated: document.getElementById('updated'),
+			lastEvent: document.getElementById('lastEvent'),
+			connectionPill: document.getElementById('connectionPill'),
 			bridgePill: document.getElementById('bridgePill'),
 			codexPill: document.getElementById('codexPill'),
 			jobCounts: document.getElementById('jobCounts'),
@@ -345,15 +399,30 @@ function statusPageHtml() {
 			codexBinary: document.getElementById('codexBinary'),
 			detectedFeatures: document.getElementById('detectedFeatures'),
 			activeJobs: document.getElementById('activeJobs'),
-			recentFailures: document.getElementById('recentFailures'),
+			queuedJobs: document.getElementById('queuedJobs'),
+			recentActivity: document.getElementById('recentActivity'),
 			pairedSites: document.getElementById('pairedSites'),
 			codexDetails: document.getElementById('codexDetails'),
 			rawStatus: document.getElementById('rawStatus'),
+			copyRawStatus: document.getElementById('copyRawStatus'),
 		};
 
 		function text(value, fallback = '-') {
 			const normalized = String(value ?? '').trim();
 			return normalized || fallback;
+		}
+
+		function normalizeText(value) {
+			return String(value || '')
+				.replace(/\u00e2\u0080\u0098/g, "'")
+				.replace(/\u00e2\u0080\u0099/g, "'")
+				.replace(/\u00e2\u0080\u009c/g, '"')
+				.replace(/\u00e2\u0080\u009d/g, '"')
+				.replace(/\u00e2\u0080\u0093/g, '-')
+				.replace(/\u00e2\u0080\u0094/g, '-')
+				.replace(/\u00e2\u0080\u00a6/g, '...')
+				.replace(/\u00c2\u00a0/g, ' ')
+				.replace(/\u00c2/g, '');
 		}
 
 		function escapeHtml(value) {
@@ -375,6 +444,47 @@ function statusPageHtml() {
 		function setPill(element, state, label) {
 			element.className = 'pill ' + state;
 			element.querySelector('span:last-child').textContent = label;
+		}
+
+		function setConnection(state, label) {
+			fields.connectionPill.className = 'pill connection-pill ' + state;
+			fields.connectionPill.querySelector('span:last-child').textContent = label;
+		}
+
+		function markLiveEvent(label) {
+			fields.lastEvent.textContent = label + ' event ' + new Date().toLocaleTimeString();
+		}
+
+		function requestButton(job) {
+			const requestId = text(job.request_id || job.id || job.short_request_id);
+			const label = text(job.short_request_id || job.request_id || job.id);
+			return '<button type="button" class="copy-value" data-copy-value="' + escapeHtml(requestId) + '" title="Copy request id">' + escapeHtml(label) + '</button>';
+		}
+
+		function statusClass(status) {
+			const normalized = String(status || '').toLowerCase();
+			if (normalized === 'completed') {
+				return 'status-completed';
+			}
+			if (normalized === 'failed') {
+				return 'status-failed';
+			}
+			if (normalized === 'running') {
+				return 'status-running';
+			}
+			if (normalized === 'queued') {
+				return 'status-queued';
+			}
+			return '';
+		}
+
+		function statusText(status) {
+			return '<span class="status-text ' + statusClass(status) + '">' + escapeHtml(status) + '</span>';
+		}
+
+		function elapsedSpan(job, live) {
+			const base = Number(job.elapsed_ms || 0);
+			return '<span class="elapsed" data-live-elapsed="' + (live ? 'true' : 'false') + '" data-elapsed-base="' + base + '" data-elapsed-captured="' + Date.now() + '">' + elapsed(base) + '</span>';
 		}
 
 		function sessionOutputBlock(label, options = {}) {
@@ -407,23 +517,32 @@ function statusPageHtml() {
 		}
 
 		function activeSummaryCells(job) {
-			return '<td><code>' + escapeHtml(job.short_request_id || job.request_id || job.id) + '</code></td>' +
+			return '<td>' + requestButton(job) + '</td>' +
 				'<td>' + escapeHtml(job.type) + '</td>' +
 				'<td>' + escapeHtml(job.model) + '</td>' +
-				'<td>' + escapeHtml(job.status) + '</td>' +
-				'<td>' + elapsed(job.elapsed_ms) + '</td>';
+				'<td>' + statusText(job.status) + '</td>' +
+				'<td>' + elapsedSpan(job, true) + '</td>';
 		}
 
-		function failureSummaryCells(job) {
-			return '<td><code>' + escapeHtml(job.short_request_id || job.request_id || job.id) + '</code></td>' +
+		function queuedSummaryCells(job) {
+			return '<td>' + requestButton(job) + '</td>' +
 				'<td>' + escapeHtml(job.type) + '</td>' +
 				'<td>' + escapeHtml(job.model) + '</td>' +
-				'<td>' + escapeHtml(job.error_message || 'Request failed') + '</td>' +
+				'<td>' + statusText(job.status || 'queued') + '</td>' +
+				'<td>' + elapsedSpan(job, true) + '</td>';
+		}
+
+		function recentSummaryCells(job) {
+			return '<td>' + requestButton(job) + '</td>' +
+				'<td>' + escapeHtml(job.type) + '</td>' +
+				'<td>' + escapeHtml(job.model) + '</td>' +
+				'<td>' + statusText(job.status) + (job.error_message ? '<div class="muted">' + escapeHtml(job.error_message) + '</div>' : '') + '</td>' +
+				'<td>' + elapsedSpan(job, false) + '</td>' +
 				'<td>' + (job.finished_at ? new Date(job.finished_at).toLocaleTimeString() : '-') + '</td>';
 		}
 
 		function updateSessionOutput(output, nextValue) {
-			const next = text(nextValue, '');
+			const next = normalizeText(text(nextValue, ''));
 			const current = output.textContent || '';
 			if (next === current) {
 				return;
@@ -437,8 +556,9 @@ function statusPageHtml() {
 
 		function renderJobTable(tbody, jobs, options) {
 			const visibleJobs = options.filter ? jobs.filter(options.filter) : jobs;
+			const colspan = Number(options.colspan || 5);
 			if (!visibleJobs.length) {
-				tbody.innerHTML = '<tr><td colspan="5" class="muted">' + escapeHtml(options.emptyText) + '</td></tr>';
+				tbody.innerHTML = '<tr><td colspan="' + colspan + '" class="muted">' + escapeHtml(options.emptyText) + '</td></tr>';
 				return;
 			}
 
@@ -464,7 +584,7 @@ function statusPageHtml() {
 				if (job.session_output) {
 					if (!outputRow) {
 						outputRow = createSessionRow(key, 'output');
-						outputRow.innerHTML = '<td colspan="5">' + sessionOutputBlock(options.outputLabel, {
+						outputRow.innerHTML = '<td colspan="' + colspan + '">' + sessionOutputBlock(options.outputLabel, {
 							live: !!options.live,
 							key,
 						}) + '</td>';
@@ -496,13 +616,23 @@ function statusPageHtml() {
 			});
 		}
 
-		function renderRecentFailures(jobs) {
-			renderJobTable(fields.recentFailures, jobs, {
-				emptyText: 'No recent failures',
-				filter: (job) => job.status === 'failed',
-				keyPrefix: 'failed',
+		function renderQueuedJobs(jobs) {
+			renderJobTable(fields.queuedJobs, jobs, {
+				emptyText: 'No queued jobs',
+				keyPrefix: 'queued',
+				live: true,
+				outputLabel: 'Queued Session Output',
+				summaryCells: queuedSummaryCells,
+			});
+		}
+
+		function renderRecentActivity(jobs) {
+			renderJobTable(fields.recentActivity, jobs, {
+				emptyText: 'No recent activity',
+				keyPrefix: 'recent',
 				outputLabel: 'Session Output',
-				summaryCells: failureSummaryCells,
+				summaryCells: recentSummaryCells,
+				colspan: 6,
 			});
 		}
 
@@ -611,12 +741,26 @@ function statusPageHtml() {
 		}
 
 		document.addEventListener('click', async (event) => {
+			const copyValue = event.target.closest('.copy-value');
+			if (copyValue) {
+				const original = copyValue.textContent;
+				try {
+					await copyToClipboard(copyValue.dataset.copyValue || original || '');
+					copyValue.textContent = 'Copied';
+				} catch (error) {
+					copyValue.textContent = 'Copy failed';
+				}
+				setTimeout(() => {
+					copyValue.textContent = original;
+				}, 1800);
+				return;
+			}
 			const button = event.target.closest('.copy-session-output');
 			if (!button) {
 				return;
 			}
 			const block = button.closest('.session-output-block');
-			const output = block ? block.querySelector('.session-output') : null;
+			const output = button === fields.copyRawStatus ? fields.rawStatus : (block ? block.querySelector('.session-output') : null);
 			if (!output) {
 				return;
 			}
@@ -637,11 +781,20 @@ function statusPageHtml() {
 			fields.jobCounts.textContent = 'Running ' + Number(jobs.running_count || 0) + ' / Queued ' + Number(jobs.queued_count || 0);
 			fields.maxConcurrent.textContent = text(jobs.max_concurrent);
 			renderActiveJobs(Array.isArray(jobs.active) ? jobs.active : []);
-			renderRecentFailures(Array.isArray(jobs.recent) ? jobs.recent : []);
+			renderQueuedJobs(Array.isArray(jobs.queued) ? jobs.queued : []);
+			renderRecentActivity(Array.isArray(jobs.recent) ? jobs.recent : []);
 			currentStatus.jobs = jobs;
 			fields.rawStatus.textContent = JSON.stringify(currentStatus, null, 2);
 			fields.updated.textContent = 'Live updates on - updated ' + new Date().toLocaleTimeString();
 			queueRestoreSessionOutputScrolls(scrollStates);
+		}
+
+		function tickElapsedCells() {
+			document.querySelectorAll('.elapsed[data-live-elapsed="true"]').forEach((cell) => {
+				const base = Number(cell.dataset.elapsedBase || 0);
+				const captured = Number(cell.dataset.elapsedCaptured || Date.now());
+				cell.textContent = elapsed(base + Math.max(0, Date.now() - captured));
+			});
 		}
 
 		function renderStatus(payload, ok) {
@@ -677,6 +830,7 @@ function statusPageHtml() {
 				if (capabilitiesResponse && capabilitiesResponse.ok) {
 					renderCapabilities(await capabilitiesResponse.json());
 				}
+				fields.updated.textContent = 'Polled - updated ' + new Date().toLocaleTimeString();
 			} catch (error) {
 				renderStatus({ success: false, message: error.message, jobs: {} }, false);
 			}
@@ -686,7 +840,9 @@ function statusPageHtml() {
 			if (fallbackPollTimer) {
 				return;
 			}
+			setConnection('warn', 'Polling fallback');
 			fields.updated.textContent = 'Live updates unavailable - polling';
+			refresh();
 			fallbackPollTimer = setInterval(refresh, 5000);
 		}
 
@@ -696,12 +852,34 @@ function statusPageHtml() {
 				return;
 			}
 			jobEvents = new EventSource(jobEventsUrl);
+			jobEvents.addEventListener('open', () => {
+				setConnection('ok', 'Connected');
+				fields.updated.textContent = 'Live updates connected';
+			});
+			jobEvents.addEventListener('status', (event) => {
+				try {
+					markLiveEvent('Status');
+					const payload = JSON.parse(event.data || '{}');
+					renderStatus(payload, payload.success !== false);
+				} catch (error) {}
+			});
+			jobEvents.addEventListener('capabilities', (event) => {
+				try {
+					markLiveEvent('Capabilities');
+					renderCapabilities(JSON.parse(event.data || '{}'));
+				} catch (error) {}
+			});
 			jobEvents.addEventListener('jobs', (event) => {
 				try {
+					markLiveEvent('Jobs');
 					renderJobs(JSON.parse(event.data || '{}'));
 				} catch (error) {}
 			});
+			jobEvents.addEventListener('heartbeat', () => {
+				markLiveEvent('Heartbeat');
+			});
 			jobEvents.onerror = () => {
+				setConnection('warn', 'Reconnecting');
 				if (jobEvents) {
 					jobEvents.close();
 					jobEvents = null;
@@ -710,6 +888,7 @@ function statusPageHtml() {
 			};
 		}
 
+		setInterval(tickElapsedCells, 1000);
 		refresh().then(connectJobEvents).catch(() => {
 			startFallbackPolling();
 		});

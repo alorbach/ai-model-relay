@@ -29,7 +29,7 @@ The maximum JSON request body is 12 MiB. This is intended to support normal chat
 
 ## `GET /status`
 
-Shows a minimal local HTML status page for the same runtime data exposed by `GET /v1/status`. The page uses the local job event stream to append bounded live Codex session output for running jobs without repeatedly reloading the full status payload. The tray app opens this page when the tray icon is double-clicked.
+Shows a local HTML status page for the same runtime data exposed by `GET /v1/status`. The page uses the local event stream to show bridge readiness, capabilities, active jobs, queued jobs, recent activity, heartbeat state, and bounded live Codex session output without repeatedly reloading the full status payload. The tray app opens this page when the tray icon is double-clicked.
 
 ## `GET /v1/status`
 
@@ -79,7 +79,39 @@ Example response:
 
 ## `GET /v1/status/events`
 
-Streams job-state updates as server-sent events for the local status page. This route does not require pairing and emits `jobs` events whose JSON payload matches the `jobs` object from `GET /v1/status`.
+Streams local status-page updates as server-sent events. This route does not require pairing because the bridge still accepts only localhost socket clients. It emits:
+
+- `status`: JSON payload compatible with `GET /v1/status`.
+- `capabilities`: JSON payload compatible with `GET /v1/capabilities`.
+- `jobs`: the `jobs` object from `GET /v1/status`.
+- `heartbeat`: `{ "time": "<iso-date>" }` keepalive events.
+
+Existing consumers that listen only for `jobs` events remain compatible.
+
+## `GET /v1/status/stream`
+
+Streams authenticated status updates for paired browser/API clients. This route requires:
+
+```http
+Origin: <paired-browser-origin>
+X-Alorbach-Bridge-Token: <pairing-token>
+```
+
+The response uses `text/event-stream`, includes CORS headers for the paired origin, and emits `status`, `capabilities`, `jobs`, and `heartbeat` events. The `status` event intentionally omits `bridge.paired_origins` so a paired site cannot enumerate other paired sites. Job payloads remain bounded diagnostics only and do not include prompts, messages, or bearer tokens.
+
+Browser clients should use `fetch()` streaming because native `EventSource` cannot send the required `X-Alorbach-Bridge-Token` header. Browsers set `Origin` automatically:
+
+```js
+const response = await fetch('http://127.0.0.1:8765/v1/status/stream', {
+	headers: {
+		'X-Alorbach-Bridge-Token': bridgeToken,
+	},
+});
+
+for await (const chunk of response.body.pipeThrough(new TextDecoderStream())) {
+	console.log(chunk);
+}
+```
 
 ## `GET /v1/capabilities`
 
@@ -91,7 +123,7 @@ Example response:
 {
   "success": true,
   "bridge": {
-    "version": "1.0.2"
+    "version": "1.0.3"
   },
   "codex": {
     "binary": "<path-to-codex-executable>",

@@ -10,8 +10,21 @@ function shortRequestId(value) {
 	return text.length > 18 ? `${text.slice(0, 8)}...${text.slice(-6)}` : text;
 }
 
+function normalizeDiagnosticText(value) {
+	return String(value || '')
+		.replace(/\u00e2\u0080\u0098/g, "'")
+		.replace(/\u00e2\u0080\u0099/g, "'")
+		.replace(/\u00e2\u0080\u009c/g, '"')
+		.replace(/\u00e2\u0080\u009d/g, '"')
+		.replace(/\u00e2\u0080\u0093/g, '-')
+		.replace(/\u00e2\u0080\u0094/g, '-')
+		.replace(/\u00e2\u0080\u00a6/g, '...')
+		.replace(/\u00c2\u00a0/g, ' ')
+		.replace(/\u00c2/g, '');
+}
+
 function truncateOutput(value, maxLength = 12000) {
-	const text = String(value || '').trim();
+	const text = normalizeDiagnosticText(value).trim();
 	if (text.length <= maxLength) {
 		return text;
 	}
@@ -24,11 +37,11 @@ function collectSessionOutput(failure) {
 	for (const key of ['error', 'stderr', 'stdout', 'response_text', 'generated_images_dir']) {
 		const value = details[key];
 		if (value) {
-			sections.push(`${key.toUpperCase()}:\n${String(value).trim()}`);
+			sections.push(`${key.toUpperCase()}:\n${normalizeDiagnosticText(value).trim()}`);
 		}
 	}
 	if (!sections.length && failure && failure.error && failure.error.message) {
-		sections.push(`ERROR:\n${failure.error.message}`);
+		sections.push(`ERROR:\n${normalizeDiagnosticText(failure.error.message).trim()}`);
 	}
 	return truncateOutput(sections.join('\n\n'));
 }
@@ -79,9 +92,9 @@ class JobManager {
 		}
 		const hasRunningImage = Array.from(this.running.values()).some((runningJob) => runningJob.type === 'images');
 		if (job.type === 'images') {
-			return this.running.size === 0;
+			return !hasRunningImage;
 		}
-		return !hasRunningImage;
+		return true;
 	}
 
 	drain() {
@@ -119,7 +132,7 @@ class JobManager {
 	}
 
 	appendSessionOutput(job, stream, chunk) {
-		const text = String(chunk || '').trim();
+		const text = normalizeDiagnosticText(chunk).trim();
 		if (!text) {
 			return;
 		}
@@ -210,6 +223,7 @@ module.exports = {
 	JobManager,
 	clampMaxConcurrent,
 	collectSessionOutput,
+	normalizeDiagnosticText,
 	shortRequestId,
 	truncateOutput,
 };

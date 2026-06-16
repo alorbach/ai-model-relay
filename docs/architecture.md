@@ -26,7 +26,7 @@ The bridge listens on `127.0.0.1` and defaults to port `8765`. It exposes a smal
 
 The bridge does not call WordPress directly. It receives a WordPress-created job envelope from the browser, runs Codex locally, and returns the result to the browser. The browser then completes or fails the WordPress job with the original one-time token and request hash.
 
-Execution requests are scheduled through an in-memory queue. The default limit is two parallel Codex jobs and can be changed with `ALORBACH_CODEX_MAX_CONCURRENT_JOBS`. Image generation jobs run exclusively because generated image detection currently watches the shared `CODEX_HOME/generated_images` directory.
+Execution requests are scheduled through an in-memory queue. The default limit is two parallel Codex jobs and can be changed with `ALORBACH_CODEX_MAX_CONCURRENT_JOBS`. Image generation jobs are limited to one running image job at a time because generated image detection currently watches the shared `CODEX_HOME/generated_images` directory; chat jobs may still run beside an image job up to the configured parallel limit.
 
 ### Codex CLI adapter
 
