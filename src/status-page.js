@@ -276,6 +276,116 @@ function statusPageHtml() {
 			justify-content: flex-end;
 			padding: 0 14px 12px;
 		}
+		.settings-editor {
+			display: grid;
+			gap: 14px;
+		}
+		.settings-grid {
+			display: grid;
+			grid-template-columns: repeat(3, minmax(0, 1fr));
+			gap: 10px;
+		}
+		.field {
+			display: grid;
+			gap: 5px;
+			min-width: 0;
+		}
+		.field span,
+		.checkbox-row span {
+			color: var(--muted);
+			font-size: 12px;
+			font-weight: 600;
+		}
+		.field input,
+		.field select,
+		.settings-editor textarea {
+			width: 100%;
+			background: #0e1520;
+			border: 1px solid var(--line);
+			color: #d7e7ff;
+			border-radius: 6px;
+			font: inherit;
+			padding: 8px 9px;
+			min-width: 0;
+		}
+		.settings-editor textarea {
+			min-height: 220px;
+			resize: vertical;
+			font: 12px/1.45 Consolas, "SFMono-Regular", monospace;
+		}
+		.checkbox-row {
+			display: flex;
+			align-items: center;
+			gap: 8px;
+			min-width: 0;
+			background: var(--panel-2);
+			border: 1px solid var(--line);
+			border-radius: 6px;
+			padding: 9px 10px;
+		}
+		.checkbox-row input {
+			flex: 0 0 auto;
+		}
+		.model-settings-grid {
+			display: grid;
+			grid-template-columns: repeat(3, minmax(0, 1fr));
+			gap: 10px;
+		}
+		.model-settings-card {
+			display: grid;
+			gap: 8px;
+			background: var(--panel-2);
+			border: 1px solid var(--line);
+			border-radius: 8px;
+			padding: 12px;
+			min-width: 0;
+		}
+		.model-settings-card .model-heading {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			gap: 10px;
+			font-weight: 650;
+			overflow-wrap: anywhere;
+		}
+		.settings-advanced {
+			border: 1px solid var(--line);
+			border-radius: 8px;
+			background: var(--panel-2);
+		}
+		.settings-advanced summary {
+			padding: 10px 12px;
+		}
+		.settings-advanced textarea {
+			border-width: 1px 0 0;
+			border-radius: 0 0 8px 8px;
+		}
+		.settings-actions {
+			display: flex;
+			align-items: center;
+			gap: 10px;
+			justify-content: flex-end;
+		}
+		.settings-actions .label {
+			margin-right: auto;
+			margin-bottom: 0;
+		}
+		.settings-actions button {
+			appearance: none;
+			border: 1px solid var(--line);
+			border-radius: 6px;
+			background: var(--panel-2);
+			color: var(--text);
+			cursor: pointer;
+			font: inherit;
+			font-size: 12px;
+			padding: 8px 11px;
+		}
+		.settings-actions button:hover,
+		.settings-actions button:focus-visible {
+			border-color: var(--info);
+			outline: none;
+		}
 		@media (max-width: 760px) {
 			main { width: min(100% - 20px, 1080px); margin-top: 12px; }
 			header { align-items: flex-start; flex-direction: column; }
@@ -283,6 +393,8 @@ function statusPageHtml() {
 			.span-4,
 			.span-6 { grid-column: span 12; }
 			.feature-grid { grid-template-columns: 1fr; }
+			.settings-grid,
+			.model-settings-grid { grid-template-columns: 1fr; }
 			.table { display: block; overflow-x: auto; }
 		}
 	</style>
@@ -329,6 +441,37 @@ function statusPageHtml() {
 			<div class="panel span-12">
 				<div class="label">Detected Features</div>
 				<div class="feature-grid" id="detectedFeatures"></div>
+			</div>
+			<div class="panel span-12">
+				<div class="label">Local Whisper Runtime</div>
+				<table class="table">
+					<tbody id="asrDetails"><tr><td class="muted">Loading</td></tr></tbody>
+				</table>
+			</div>
+			<div class="panel span-12">
+				<div class="label">Local Whisper Settings</div>
+				<form class="settings-editor" id="asrSettingsForm">
+					<div class="settings-grid" id="asrGeneralSettings"></div>
+					<div>
+						<div class="settings-actions">
+							<span class="label">Models</span>
+							<button type="button" id="addAsrModel">Add model</button>
+						</div>
+						<div class="model-settings-grid" id="asrModelSettings"></div>
+					</div>
+					<details class="settings-advanced">
+						<summary>Advanced JSON</summary>
+						<textarea id="asrSettingsJson" spellcheck="false"></textarea>
+						<div class="settings-actions">
+							<button type="button" id="applyAsrSettingsJson">Apply JSON to form</button>
+						</div>
+					</details>
+					<div class="settings-actions">
+						<span class="muted" id="asrSettingsMessage">Loading settings</span>
+						<button type="button" id="reloadAsrSettings">Reload</button>
+						<button type="button" id="saveAsrSettings">Save settings</button>
+					</div>
+				</form>
 			</div>
 			<div class="panel span-12">
 				<div class="label">Active Jobs</div>
@@ -381,9 +524,11 @@ function statusPageHtml() {
 	<script>
 		const statusUrl = '/v1/status';
 		const capabilitiesUrl = '/v1/capabilities';
+		const asrSettingsUrl = '/v1/asr/settings';
 		const jobEventsUrl = '/v1/status/events';
 		let currentStatus = {};
 		let currentCapabilities = {};
+		let currentAsrSettings = null;
 		let fallbackPollTimer = null;
 		let jobEvents = null;
 		const fields = {
@@ -398,6 +543,16 @@ function statusPageHtml() {
 			codexCliVersion: document.getElementById('codexCliVersion'),
 			codexBinary: document.getElementById('codexBinary'),
 			detectedFeatures: document.getElementById('detectedFeatures'),
+			asrDetails: document.getElementById('asrDetails'),
+			asrSettingsForm: document.getElementById('asrSettingsForm'),
+			asrGeneralSettings: document.getElementById('asrGeneralSettings'),
+			asrModelSettings: document.getElementById('asrModelSettings'),
+			asrSettingsJson: document.getElementById('asrSettingsJson'),
+			asrSettingsMessage: document.getElementById('asrSettingsMessage'),
+			reloadAsrSettings: document.getElementById('reloadAsrSettings'),
+			saveAsrSettings: document.getElementById('saveAsrSettings'),
+			applyAsrSettingsJson: document.getElementById('applyAsrSettingsJson'),
+			addAsrModel: document.getElementById('addAsrModel'),
 			activeJobs: document.getElementById('activeJobs'),
 			queuedJobs: document.getElementById('queuedJobs'),
 			recentActivity: document.getElementById('recentActivity'),
@@ -648,6 +803,27 @@ function statusPageHtml() {
 			return rows.map(([label, value]) => '<tr><th>' + escapeHtml(label) + '</th><td><code>' + escapeHtml(value) + '</code></td></tr>').join('');
 		}
 
+		function renderAsrDetails(asr) {
+			asr = asr || {};
+			const runtime = asr.runtime || {};
+			const python = runtime.python || {};
+			const gpu = runtime.gpu || {};
+			const selected = asr.selected || {};
+			const rows = [
+				['Ready', asr.ready ? 'Yes' : 'No'],
+				['Auto Model', asr.auto_model],
+				['Selected Device', selected.device ? selected.device + ' / ' + selected.compute_type : ''],
+				['Selected Model Path', selected.model_path],
+				['Python', python.available ? python.command + ' ' + (python.version || '') : 'Not found'],
+				['Venv', runtime.venv_python],
+				['faster-whisper', runtime.faster_whisper_installed ? 'Installed' : 'Missing'],
+				['ffmpeg', runtime.ffmpeg_available ? 'Available' : 'Missing'],
+				['ffprobe', runtime.ffprobe_available ? 'Available' : 'Missing'],
+				['GPU', gpu.available ? gpu.name + ' (' + gpu.free_mb + ' MB free / ' + gpu.total_mb + ' MB)' : 'Unavailable'],
+			];
+			fields.asrDetails.innerHTML = rows.map(([label, value]) => '<tr><th>' + escapeHtml(label) + '</th><td><code>' + escapeHtml(value) + '</code></td></tr>').join('');
+		}
+
 		function featureState(value) {
 			return value ? 'enabled' : 'disabled';
 		}
@@ -678,13 +854,171 @@ function statusPageHtml() {
 				featurePill('Image attachments', features.image_attachments),
 				featurePill('Codex app server', features.app_server),
 				featurePill('Local image generation', features.images),
+				featurePill('Local Whisper ASR', currentCapabilities.asr && currentCapabilities.asr.enabled),
+				featurePill('Local Whisper ready', currentCapabilities.asr && currentCapabilities.asr.ready),
 				featurePill('Media analysis route', mediaAnalysis.enabled),
 				featurePill('ffmpeg frame extraction', mediaAnalysis.ffmpeg_available),
 				featurePill('OpenAI video route', video.enabled),
 				featurePill('Video API configured', video.configured),
 			].join('');
+			renderAsrDetails(currentCapabilities.asr || {});
 			currentStatus.capabilities = currentCapabilities;
 			fields.rawStatus.textContent = JSON.stringify(currentStatus, null, 2);
+		}
+
+		function checkedAttr(value) {
+			return value ? ' checked' : '';
+		}
+
+		function optionAttr(value, selected) {
+			return String(value) === String(selected) ? ' selected' : '';
+		}
+
+		function numberValue(value, fallback) {
+			const parsed = Number(value);
+			return Number.isFinite(parsed) ? parsed : fallback;
+		}
+
+		function renderAsrSettingsJson(settings) {
+			fields.asrSettingsJson.value = JSON.stringify(settings || {}, null, 2);
+		}
+
+		function renderAsrSettingsForm(settings) {
+			currentAsrSettings = settings || {};
+			fields.asrGeneralSettings.innerHTML = [
+				'<label class="checkbox-row"><input type="checkbox" id="asrAllowPackageInstall"' + checkedAttr(currentAsrSettings.allow_package_install !== false) + '><span>Install Python packages automatically</span></label>',
+				'<label class="checkbox-row"><input type="checkbox" id="asrAllowModelDownloads"' + checkedAttr(currentAsrSettings.allow_model_downloads === true) + '><span>Allow Whisper model downloads</span></label>',
+				'<label class="checkbox-row"><input type="checkbox" id="asrVadFilter"' + checkedAttr(currentAsrSettings.vad_filter === true) + '><span>Use VAD filter</span></label>',
+				'<label class="checkbox-row"><input type="checkbox" id="asrConditionPrevious"' + checkedAttr(currentAsrSettings.condition_on_previous_text !== false) + '><span>Condition on previous text</span></label>',
+				'<label class="field"><span>Python path</span><input id="asrPythonPath" value="' + escapeHtml(currentAsrSettings.python_path || '') + '" placeholder="Auto-detect Python 3.10"></label>',
+				'<label class="field"><span>Venv path</span><input id="asrVenvPath" value="' + escapeHtml(currentAsrSettings.venv_path || '') + '"></label>',
+				'<label class="field"><span>CPU threads</span><input id="asrCpuThreads" type="number" min="1" max="64" value="' + escapeHtml(currentAsrSettings.cpu_threads || 4) + '"></label>',
+				'<label class="field"><span>Workers</span><input id="asrNumWorkers" type="number" min="1" max="8" value="' + escapeHtml(currentAsrSettings.num_workers || 1) + '"></label>',
+				'<label class="field"><span>Beam size</span><input id="asrBeamSize" type="number" min="1" max="20" value="' + escapeHtml(currentAsrSettings.beam_size || 5) + '"></label>',
+				'<label class="field"><span>Best of</span><input id="asrBestOf" type="number" min="1" max="20" value="' + escapeHtml(currentAsrSettings.best_of || 5) + '"></label>',
+			].join('');
+
+			const models = Array.isArray(currentAsrSettings.models) ? currentAsrSettings.models : [];
+			fields.asrModelSettings.innerHTML = models.map((model, index) => (
+				'<div class="model-settings-card" data-model-index="' + index + '">' +
+					'<div class="model-heading"><span>' + escapeHtml(model.label || model.id || 'Model') + '</span><label><input type="checkbox" data-field="enabled"' + checkedAttr(model.enabled !== false) + '> Enabled</label></div>' +
+					'<label class="field"><span>Model id</span><input data-field="id" value="' + escapeHtml(model.id || '') + '"></label>' +
+					'<label class="field"><span>Label</span><input data-field="label" value="' + escapeHtml(model.label || '') + '"></label>' +
+					'<label class="field"><span>CPU repo id</span><input data-field="repo_id" value="' + escapeHtml(model.repo_id || '') + '"></label>' +
+					'<label class="field"><span>GPU repo id</span><input data-field="gpu_repo_id" value="' + escapeHtml(model.gpu_repo_id || '') + '"></label>' +
+					'<label class="field"><span>Local model path</span><input data-field="local_path" value="' + escapeHtml(model.local_path || '') + '"></label>' +
+					'<label class="field"><span>Minimum VRAM MB</span><input data-field="min_vram_mb" type="number" min="0" step="256" value="' + escapeHtml(model.min_vram_mb || 0) + '"></label>' +
+					'<label class="field"><span>Preferred device</span><select data-field="preferred_device">' +
+						'<option value="auto"' + optionAttr('auto', model.preferred_device || 'auto') + '>Auto</option>' +
+						'<option value="cpu"' + optionAttr('cpu', model.preferred_device || 'auto') + '>CPU</option>' +
+						'<option value="cuda"' + optionAttr('cuda', model.preferred_device || 'auto') + '>CUDA</option>' +
+					'</select></label>' +
+				'</div>'
+			)).join('');
+			renderAsrSettingsJson(currentAsrSettings);
+		}
+
+		function serializeAsrSettingsForm() {
+			const modelCards = Array.from(fields.asrModelSettings.querySelectorAll('.model-settings-card'));
+			return {
+				allow_package_install: !!document.getElementById('asrAllowPackageInstall').checked,
+				allow_model_downloads: !!document.getElementById('asrAllowModelDownloads').checked,
+				python_path: document.getElementById('asrPythonPath').value.trim(),
+				venv_path: document.getElementById('asrVenvPath').value.trim(),
+				cpu_threads: numberValue(document.getElementById('asrCpuThreads').value, 4),
+				num_workers: numberValue(document.getElementById('asrNumWorkers').value, 1),
+				beam_size: numberValue(document.getElementById('asrBeamSize').value, 5),
+				best_of: numberValue(document.getElementById('asrBestOf').value, 5),
+				vad_filter: !!document.getElementById('asrVadFilter').checked,
+				condition_on_previous_text: !!document.getElementById('asrConditionPrevious').checked,
+				models: modelCards.map((card) => ({
+					id: (card.querySelector('[data-field="id"]') || {}).value || '',
+					label: (card.querySelector('[data-field="label"]') || {}).value || '',
+					repo_id: (card.querySelector('[data-field="repo_id"]') || {}).value || '',
+					gpu_repo_id: (card.querySelector('[data-field="gpu_repo_id"]') || {}).value || '',
+					local_path: (card.querySelector('[data-field="local_path"]') || {}).value || '',
+					min_vram_mb: numberValue((card.querySelector('[data-field="min_vram_mb"]') || {}).value, 0),
+					enabled: !!(card.querySelector('[data-field="enabled"]') || {}).checked,
+					preferred_device: (card.querySelector('[data-field="preferred_device"]') || {}).value || 'auto',
+				})),
+			};
+		}
+
+		async function loadAsrSettings() {
+			try {
+				const response = await fetch(asrSettingsUrl, { cache: 'no-store' });
+				const payload = await response.json();
+				if (!response.ok || payload.success === false) {
+					throw new Error(payload.message || 'Settings unavailable');
+				}
+				renderAsrSettingsForm(payload.settings || {});
+				fields.asrSettingsMessage.textContent = 'Settings loaded';
+				if (payload.capabilities) {
+					renderAsrDetails(payload.capabilities);
+				}
+			} catch (error) {
+				fields.asrSettingsMessage.textContent = error.message || 'Settings load failed';
+			}
+		}
+
+		async function saveAsrSettings() {
+			const settings = serializeAsrSettingsForm();
+			renderAsrSettingsJson(settings);
+			fields.asrSettingsMessage.textContent = 'Saving';
+			try {
+				const response = await fetch(asrSettingsUrl, {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ settings }),
+				});
+				const payload = await response.json();
+				if (!response.ok || payload.success === false) {
+					throw new Error(payload.message || 'Save failed');
+				}
+				renderAsrSettingsForm(payload.settings || settings);
+				fields.asrSettingsMessage.textContent = 'Saved';
+				if (payload.capabilities) {
+					renderAsrDetails(payload.capabilities);
+				}
+				refresh();
+			} catch (error) {
+				fields.asrSettingsMessage.textContent = error.message || 'Save failed';
+			}
+		}
+
+		function markAsrSettingsDirty() {
+			try {
+				renderAsrSettingsJson(serializeAsrSettingsForm());
+				fields.asrSettingsMessage.textContent = 'Unsaved changes';
+			} catch (error) {
+				fields.asrSettingsMessage.textContent = 'Settings need review';
+			}
+		}
+
+		function applyAsrSettingsJson() {
+			try {
+				const settings = JSON.parse(fields.asrSettingsJson.value || '{}');
+				renderAsrSettingsForm(settings);
+				fields.asrSettingsMessage.textContent = 'JSON applied - save to persist';
+			} catch (error) {
+				fields.asrSettingsMessage.textContent = 'Invalid JSON';
+			}
+		}
+
+		function addAsrModel() {
+			const settings = serializeAsrSettingsForm();
+			settings.models.push({
+				id: 'custom-whisper-model',
+				label: 'Custom Whisper Model',
+				repo_id: '',
+				gpu_repo_id: '',
+				local_path: '',
+				min_vram_mb: 0,
+				enabled: true,
+				preferred_device: 'auto',
+			});
+			renderAsrSettingsForm(settings);
+			fields.asrSettingsMessage.textContent = 'Model added - edit and save';
 		}
 
 		function captureSessionOutputScrolls() {
@@ -811,6 +1145,7 @@ function statusPageHtml() {
 			fields.version.textContent = text(bridge.version);
 			fields.pairedSites.innerHTML = paired.length ? paired.map((origin) => '<code>' + escapeHtml(origin) + '</code>').join(' ') : '<span class="muted">None</span>';
 			fields.codexDetails.innerHTML = renderDetails(details);
+			renderAsrDetails(payload.asr || currentCapabilities.asr || {});
 			if (!Object.keys(currentCapabilities).length) {
 				fields.codexCliVersion.textContent = text(details.version);
 				fields.codexBinary.textContent = text(details.codex_binary);
@@ -889,6 +1224,27 @@ function statusPageHtml() {
 		}
 
 		setInterval(tickElapsedCells, 1000);
+		fields.asrSettingsForm.addEventListener('submit', (event) => {
+			event.preventDefault();
+			saveAsrSettings();
+		});
+		fields.asrSettingsForm.addEventListener('input', (event) => {
+			if (event.target === fields.asrSettingsJson) {
+				fields.asrSettingsMessage.textContent = 'JSON edited - apply or reload';
+				return;
+			}
+			markAsrSettingsDirty();
+		});
+		fields.asrSettingsForm.addEventListener('change', (event) => {
+			if (event.target !== fields.asrSettingsJson) {
+				markAsrSettingsDirty();
+			}
+		});
+		fields.reloadAsrSettings.addEventListener('click', loadAsrSettings);
+		fields.saveAsrSettings.addEventListener('click', saveAsrSettings);
+		fields.applyAsrSettingsJson.addEventListener('click', applyAsrSettingsJson);
+		fields.addAsrModel.addEventListener('click', addAsrModel);
+		loadAsrSettings();
 		refresh().then(connectJobEvents).catch(() => {
 			startFallbackPolling();
 		});

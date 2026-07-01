@@ -192,6 +192,7 @@ function capabilitiesPayload(context) {
 			version: packageInfo.version,
 		},
 		codex: codexCapabilities.codex || {},
+		asr: codexCapabilities.asr || {},
 		features: codexCapabilities.bridge_features || {},
 		video: context.video.capabilities ? context.video.capabilities() : { enabled: false },
 		media_analysis: context.mediaAnalysis.capabilities ? context.mediaAnalysis.capabilities() : { enabled: false },
@@ -209,6 +210,7 @@ function statusPayload(context, options = {}) {
 	return {
 		...status,
 		bridge,
+		asr: context.codex.asrStatus ? context.codex.asrStatus() : {},
 		jobs: context.jobManager.snapshot(),
 	};
 }
@@ -252,6 +254,12 @@ async function route(req, res, context) {
 
 	if (req.method === 'GET' && url.pathname === '/v1/capabilities') {
 		sendJson(res, 200, capabilitiesPayload(context), origin || pairedOriginForCors(req, bridgeSecurity));
+		return;
+	}
+
+	if (req.method === 'GET' && url.pathname === '/v1/asr/settings') {
+		const payload = context.codex.asrSettings ? context.codex.asrSettings() : { success: false, message: 'ASR settings are unavailable.' };
+		sendJson(res, payload.success === false ? 500 : 200, payload, origin || pairedOriginForCors(req, bridgeSecurity));
 		return;
 	}
 
@@ -341,6 +349,19 @@ async function route(req, res, context) {
 		return;
 	}
 
+	if (url.pathname === '/v1/asr/settings') {
+		if (!context.codex.saveAsrSettings || !context.codex.asrSettings) {
+			sendErrorJson(req, res, 500, { success: false, message: 'ASR settings are unavailable.' }, origin);
+			return;
+		}
+		const settings = context.codex.saveAsrSettings(body.settings || body || {});
+		const payload = context.codex.asrSettings();
+		context.statusEvents.broadcast('status', statusPayload(context));
+		context.statusEvents.broadcast('capabilities', capabilitiesPayload(context));
+		sendJson(res, 200, { success: true, settings, capabilities: payload.capabilities }, origin);
+		return;
+	}
+
 	const pairedOrigin = requirePairing(req, res, bridgeSecurity);
 	if (!pairedOrigin) {
 		return;
@@ -371,6 +392,19 @@ async function route(req, res, context) {
 		}, (session) => codexAdapter.images(body.payload || {}, session));
 		if (!result.success) {
 			sendErrorJson(req, res, 500, result, pairedOrigin, { requestId: body.request_id, route: '/v1/images' });
+			return;
+		}
+		sendJson(res, 200, result, pairedOrigin);
+		return;
+	}
+	if (url.pathname === '/v1/transcribe') {
+		const result = await jobManager.run({
+			requestId: body.request_id,
+			type: 'transcribe',
+			model: modelFromPayload(body.payload, 'codex-local:audio'),
+		}, (session) => codexAdapter.transcribe(body.payload || {}, session));
+		if (!result.success) {
+			sendErrorJson(req, res, errorStatusForResult(result), result, pairedOrigin, { requestId: body.request_id, route: '/v1/transcribe' });
 			return;
 		}
 		sendJson(res, 200, result, pairedOrigin);

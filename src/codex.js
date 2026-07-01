@@ -4,6 +4,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { spawn, spawnSync } = require('child_process');
+const asr = require('./asr');
 
 const codexBinary = process.env.ALORBACH_CODEX_BINARY || 'codex';
 const codexHome = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
@@ -852,6 +853,124 @@ async function images(payload, session = {}) {
 	};
 }
 
+function audioExtensionForFormat(format) {
+	const normalized = String(format || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+	if (['mp3', 'wav', 'm4a', 'mp4', 'ogg', 'opus', 'flac', 'webm'].includes(normalized)) {
+		return normalized === 'opus' ? 'ogg' : normalized;
+	}
+	return 'audio';
+}
+
+function secondsFromTimestamp(value) {
+	if (typeof value === 'number' && Number.isFinite(value)) {
+		return value;
+	}
+	const text = String(value || '').trim();
+	if (!text) {
+		return null;
+	}
+	if (/^\d+(?:\.\d+)?$/.test(text)) {
+		return Number(text);
+	}
+	const match = text.match(/^(?:(\d+):)?(\d+):(\d+(?:\.\d+)?)$/);
+	if (!match) {
+		return null;
+	}
+	const hours = match[1] ? Number(match[1]) : 0;
+	const minutes = Number(match[2]);
+	const seconds = Number(match[3]);
+	return (hours * 3600) + (minutes * 60) + seconds;
+}
+
+function parseLegacyTimedLines(text) {
+	const words = [];
+	for (const line of String(text || '').split(/\r?\n/)) {
+		const match = line.trim().match(/^([^=]+)=([^=]+)=([\s\S]+)$/);
+		if (!match) {
+			continue;
+		}
+		const start = secondsFromTimestamp(match[1]);
+		const end = secondsFromTimestamp(match[2]);
+		const word = String(match[3] || '').trim();
+		if (start === null || end === null || !word) {
+			continue;
+		}
+		words.push({ word, start, end });
+	}
+	return words;
+}
+
+function wordsFromJsonValue(value) {
+	if (!value || typeof value !== 'object') {
+		return [];
+	}
+	const source = Array.isArray(value)
+		? value
+		: (Array.isArray(value.words) ? value.words : (Array.isArray(value.word_timestamps) ? value.word_timestamps : (Array.isArray(value.word_timings) ? value.word_timings : [])));
+	const words = [];
+	for (const item of source) {
+		if (!item || typeof item !== 'object') {
+			continue;
+		}
+		const start = secondsFromTimestamp(item.start ?? item.start_time);
+		const end = secondsFromTimestamp(item.end ?? item.end_time);
+		const word = String(item.word ?? item.text ?? '').trim();
+		if (start === null || end === null || !word) {
+			continue;
+		}
+		words.push({ word, start, end });
+	}
+	return words;
+}
+
+function parseTimedWords(text) {
+	const legacy = parseLegacyTimedLines(text);
+	if (legacy.length) {
+		return legacy;
+	}
+	const trimmed = String(text || '').trim().replace(/^```(?:json|text)?\s*/i, '').replace(/```$/i, '').trim();
+	if (!trimmed) {
+		return [];
+	}
+	try {
+		const parsed = JSON.parse(trimmed);
+		const words = wordsFromJsonValue(parsed);
+		if (words.length) {
+			return words;
+		}
+	} catch (error) {}
+	const jsonLines = [];
+	for (const line of trimmed.split(/\r?\n/)) {
+		try {
+			const words = wordsFromJsonValue(JSON.parse(line));
+			if (words.length === 1) {
+				jsonLines.push(words[0]);
+			}
+		} catch (error) {}
+	}
+	return jsonLines;
+}
+
+function transcriptionPrompt(payload, audioPath) {
+	const prompt = String(payload.prompt || '').trim();
+	const format = String(payload.audio_format || '').trim() || 'unknown';
+	const duration = Number(payload.duration_seconds || 0);
+	return [
+		'Transcribe the attached audio file into exact per-word lyrics timing.',
+		`Audio file: ${audioPath}`,
+		`Audio format: ${format}`,
+		duration > 0 ? `Approximate duration: ${duration} seconds` : '',
+		'Return only one JSON object with this shape: {"words":[{"start":1.25,"end":1.75,"word":"Forbidden"}]}.',
+		'Every sung word must have numeric start and end seconds. Do not group phrases. Do not omit repeated words.',
+		'Do not include prose, markdown, summaries, metadata, or plain lyrics outside the JSON object.',
+		prompt ? `Additional transcription instructions: ${prompt}` : '',
+	].filter(Boolean).join('\n');
+}
+
+async function transcribe(payload, session = {}) {
+	return asr.transcribe(payload, session);
+}
+
 function models() {
 	const cachePath = path.join(codexHome, 'models_cache.json');
 	const text = ['auto'];
@@ -870,6 +989,7 @@ function models() {
 		models: {
 			text: text.map((id) => `codex-local:${id}`),
 			image: ['codex-local:image'],
+			audio: asr.modelIds(),
 		},
 	};
 }
@@ -884,6 +1004,7 @@ function capabilities() {
 		bridge_features: {
 			chat: true,
 			images: true,
+			audio_transcription: true,
 			media_analysis: true,
 			structured_exec_json: /--json/.test(helpText),
 			output_schema: /--output-schema/.test(helpText),
@@ -897,6 +1018,7 @@ function capabilities() {
 			exec_help_available: !help.error && help.status === 0,
 			app_server_available: !appServer.error && appServer.status === 0,
 		},
+		asr: asr.capabilities(),
 	};
 }
 
@@ -913,7 +1035,12 @@ module.exports = {
 	messagesToPrompt,
 	models,
 	parseCodexJsonEvents,
+	parseTimedWords,
 	runCodexAsync,
 	runCodexExec,
+	transcribe,
+	asrStatus: asr.capabilities,
+	asrSettings: asr.publicSettings,
+	saveAsrSettings: asr.saveSettings,
 	resolveCodexBinary,
 };

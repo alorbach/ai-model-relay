@@ -199,6 +199,10 @@ function createMockSecurity() {
 		assert.ok(page.body.includes('heartbeat'));
 		assert.ok(page.body.includes('Codex CLI Version'));
 		assert.ok(page.body.includes('Detected Features'));
+		assert.ok(page.body.includes('Local Whisper Settings'));
+		assert.ok(page.body.includes('id="asrSettingsForm"'));
+		assert.ok(page.body.includes('id="addAsrModel"'));
+		assert.ok(page.body.includes('id="applyAsrSettingsJson"'));
 		assert.ok(page.body.includes('Structured exec JSON'));
 		assert.ok(page.body.includes('OpenAI video route'));
 		assert.ok(page.body.includes('new EventSource(jobEventsUrl)'));
