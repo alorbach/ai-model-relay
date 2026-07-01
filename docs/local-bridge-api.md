@@ -77,6 +77,8 @@ Example response:
 
 `jobs` reports in-memory local bridge activity. It never includes prompt text or message content. `active` contains currently running jobs, while queued and recent entries may also be present for tray/status diagnostics.
 
+`asr` contains a Local Whisper summary. The default status response is intentionally lightweight and does not run Python, ffmpeg, GPU, or CUDA probes; runtime fields may report `runtime_checked: false` until `/v1/asr/settings?refresh=1` is called or a transcription job runs.
+
 ## `GET /v1/status/events`
 
 Streams local status-page updates as server-sent events. This route does not require pairing because the bridge still accepts only localhost socket clients. It emits:
@@ -115,7 +117,7 @@ for await (const chunk of response.body.pipeThrough(new TextDecoderStream())) {
 
 ## `GET /v1/capabilities`
 
-Returns capability metadata for the bridge, local Codex executable, optional video provider, and media analysis support. This route does not require pairing.
+Returns capability metadata for the bridge, local Codex executable, Local Whisper ASR, optional video provider, and media analysis support. This route does not require pairing. Local Whisper capability data is lightweight by default so the status page can load quickly.
 
 Example response:
 
@@ -132,12 +134,19 @@ Example response:
   "features": {
     "chat": true,
     "images": true,
+    "audio_transcription": true,
     "media_analysis": true,
     "structured_exec_json": true,
     "output_schema": true,
     "image_attachments": true,
     "image_reference_attachments": true,
     "app_server": true
+  },
+  "asr": {
+    "enabled": true,
+    "ready": null,
+    "runtime_checked": false,
+    "models": ["codex-local:audio", "codex-local:audio:whisper-large-v3"]
   },
   "video": {
     "enabled": false,
@@ -152,6 +161,56 @@ Example response:
   }
 }
 ```
+
+## `GET /v1/asr/settings`
+
+Returns Local Whisper settings and cached or lightweight runtime metadata. This route does not require pairing because the bridge only accepts localhost clients.
+
+Default requests avoid expensive runtime probes:
+
+```text
+GET /v1/asr/settings
+```
+
+Use `refresh=1` when the user explicitly wants to check Python, the virtual environment, ffmpeg/ffprobe, GPU memory, and CUDA runtime packages:
+
+```text
+GET /v1/asr/settings?refresh=1
+```
+
+Response:
+
+```json
+{
+  "success": true,
+  "settings": {
+    "allow_package_install": true,
+    "allow_model_downloads": false,
+    "python_path": "",
+    "venv_path": "<user-home>\\.alorbach-codex-bridge\\asr-venv",
+    "cpu_threads": 4,
+    "models": [
+      {
+        "id": "whisper-large-v3",
+        "label": "Local Whisper Large v3",
+        "repo_id": "ctranslate2-4you/whisper-large-v3-ct2-float32",
+        "gpu_repo_id": "ctranslate2-4you/whisper-large-v3-ct2-float16",
+        "min_vram_mb": 8192,
+        "enabled": true,
+        "preferred_device": "auto"
+      }
+    ]
+  },
+  "capabilities": {
+    "enabled": true,
+    "ready": null,
+    "runtime_checked": false,
+    "models": ["codex-local:audio", "codex-local:audio:whisper-large-v3"]
+  }
+}
+```
+
+`POST /v1/asr/settings` saves the same settings object. Saving invalidates the in-memory runtime probe cache; the status page can then call `GET /v1/asr/settings?refresh=1` to recheck the environment.
 
 ## `POST /v1/pair`
 
@@ -207,12 +266,20 @@ Response:
     ],
     "image": [
       "codex-local:image"
+    ],
+    "audio": [
+      "codex-local:audio",
+      "codex-local:audio:whisper-large-v3",
+      "codex-local:audio:whisper-medium",
+      "codex-local:audio:whisper-small"
     ]
   }
 }
 ```
 
 If `CODEX_HOME/models_cache.json` exists, additional text model IDs from that cache are returned as `codex-local:<id>`.
+
+Audio model IDs are configured by Local Whisper settings. `codex-local:audio` auto-selects the best enabled cached model, preferring CUDA when VRAM and CUDA runtime checks allow it. If CUDA fails at execution time, the bridge retries on CPU/int8 when a CPU model path is available.
 
 ## `POST /v1/chat`
 
@@ -325,6 +392,50 @@ The bridge returns exactly one detected generated image. If Codex completes with
 
 When the installed Codex CLI supports `codex exec --json`, image and chat jobs use the structured event stream for cleaner progress and error details. If an older CLI rejects `--json`, the bridge reruns the job without structured events and preserves the legacy result shape.
 
+## `POST /v1/transcribe`
+
+Runs a local Whisper transcription request through the private faster-whisper runtime. This route requires pairing and the signed WordPress job envelope.
+
+Request:
+
+```json
+{
+  "job_token": "<wordpress-job-token>",
+  "request_hash": "<wordpress-request-hash>",
+  "request_id": "<wordpress-request-id>",
+  "payload": {
+    "model": "codex-local:audio:whisper-large-v3",
+    "audio_base64": "<base64-audio>",
+    "audio_format": "mp3",
+    "duration_seconds": 123,
+    "language": "en"
+  }
+}
+```
+
+Response:
+
+```json
+{
+  "success": true,
+  "response": {
+    "text": "Forbidden heaven",
+    "words": [
+      { "word": "Forbidden", "start": 1.25, "end": 1.75 }
+    ],
+    "model": "codex-local:audio:whisper-large-v3",
+    "local_codex": true,
+    "provider_details": {
+      "asr_provider": "faster-whisper",
+      "device": "cuda",
+      "compute_type": "float16"
+    }
+  }
+}
+```
+
+The bridge writes the submitted audio to a temporary local file, runs `src/asr-runner.py` in the configured ASR virtual environment, and requires explicit per-word `start` and `end` seconds. Missing timestamps are returned as an output-detection failure. The JSON body is still bounded by the bridge request size limit.
+
 ## `POST /v1/videos`
 
 Runs an optional OpenAI Videos API job. This route is disabled unless `ALORBACH_CODEX_ENABLE_VIDEO=1` and `ALORBACH_OPENAI_API_KEY` or `OPENAI_API_KEY` are configured. It is API-backed and not part of the user's local Codex allowance.
@@ -372,7 +483,7 @@ Request:
 }
 ```
 
-For `media_url` analysis, `ffmpeg` must be available on PATH. Audio transcription is not performed locally; pass a transcript when audio content matters.
+For `media_url` analysis, `ffmpeg` must be available on PATH. This route analyzes provided visual frames and optional transcript text; use `POST /v1/transcribe` first when audio content needs local transcription.
 
 ## Error Shape
 

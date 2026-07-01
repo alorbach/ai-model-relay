@@ -65,4 +65,22 @@ const asr = require('../src/asr');
 
 	const unknown = asr.selectModel('codex-local:audio:not-real', config, { gpu: { available: false } });
 	assert.ok(unknown.error);
+
+	asr.invalidateProbeCache();
+	const lightCapabilities = asr.capabilities();
+	assert.strictEqual(lightCapabilities.runtime_checked, false);
+	assert.strictEqual(lightCapabilities.runtime.checked, false);
+	assert.strictEqual(lightCapabilities.ready, null);
+
+	const lightModels = asr.models();
+	assert.ok(lightModels.models.includes('codex-local:audio'));
+
+	const refreshedCapabilities = asr.capabilities({ refresh: true });
+	assert.strictEqual(refreshedCapabilities.runtime_checked, true);
+	assert.strictEqual(refreshedCapabilities.runtime.checked, true);
+	assert.ok(Object.prototype.hasOwnProperty.call(refreshedCapabilities.runtime, 'ffmpeg_available'));
+
+	const cachedCapabilities = asr.capabilities();
+	assert.strictEqual(cachedCapabilities.runtime_checked, true);
+	assert.strictEqual(cachedCapabilities.runtime_cached, true);
 })();

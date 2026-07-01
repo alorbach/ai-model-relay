@@ -469,6 +469,7 @@ function statusPageHtml() {
 					<div class="settings-actions">
 						<span class="muted" id="asrSettingsMessage">Loading settings</span>
 						<button type="button" id="reloadAsrSettings">Reload</button>
+						<button type="button" id="refreshAsrRuntime">Refresh runtime</button>
 						<button type="button" id="saveAsrSettings">Save settings</button>
 					</div>
 				</form>
@@ -550,6 +551,7 @@ function statusPageHtml() {
 			asrSettingsJson: document.getElementById('asrSettingsJson'),
 			asrSettingsMessage: document.getElementById('asrSettingsMessage'),
 			reloadAsrSettings: document.getElementById('reloadAsrSettings'),
+			refreshAsrRuntime: document.getElementById('refreshAsrRuntime'),
 			saveAsrSettings: document.getElementById('saveAsrSettings'),
 			applyAsrSettingsJson: document.getElementById('applyAsrSettingsJson'),
 			addAsrModel: document.getElementById('addAsrModel'),
@@ -809,26 +811,35 @@ function statusPageHtml() {
 			const python = runtime.python || {};
 			const gpu = runtime.gpu || {};
 			const selected = asr.selected || {};
+			const checked = runtime.checked !== false && asr.runtime_checked !== false;
+			const availability = (value, yes, no) => value === null || value === undefined ? 'Not checked' : (value ? yes : no);
 			const rows = [
-				['Ready', asr.ready ? 'Yes' : 'No'],
+				['Runtime Check', checked ? (runtime.cached ? 'Cached' : 'Checked') : 'Not checked'],
+				['Ready', availability(asr.ready, 'Yes', 'No')],
 				['Auto Model', asr.auto_model],
 				['Selected Device', selected.device ? selected.device + ' / ' + selected.compute_type : ''],
 				['Selected Model Path', selected.model_path],
-				['Python', python.available ? python.command + ' ' + (python.version || '') : 'Not found'],
+				['Python', checked ? (python.available ? python.command + ' ' + (python.version || '') : 'Not found') : 'Not checked'],
 				['Venv', runtime.venv_python],
-				['faster-whisper', runtime.faster_whisper_installed ? 'Installed' : 'Missing'],
-				['ffmpeg', runtime.ffmpeg_available ? 'Available' : 'Missing'],
-				['ffprobe', runtime.ffprobe_available ? 'Available' : 'Missing'],
-				['GPU', gpu.available ? gpu.name + ' (' + gpu.free_mb + ' MB free / ' + gpu.total_mb + ' MB)' : 'Unavailable'],
+				['faster-whisper', availability(runtime.faster_whisper_installed, 'Installed', 'Missing')],
+				['ffmpeg', availability(runtime.ffmpeg_available, 'Available', 'Missing')],
+				['ffprobe', availability(runtime.ffprobe_available, 'Available', 'Missing')],
+				['GPU', gpu.available === null || gpu.available === undefined ? 'Not checked' : (gpu.available ? gpu.name + ' (' + gpu.free_mb + ' MB free / ' + gpu.total_mb + ' MB)' : 'Unavailable')],
 			];
 			fields.asrDetails.innerHTML = rows.map(([label, value]) => '<tr><th>' + escapeHtml(label) + '</th><td><code>' + escapeHtml(value) + '</code></td></tr>').join('');
 		}
 
 		function featureState(value) {
+			if (value === null || value === undefined) {
+				return 'disabled';
+			}
 			return value ? 'enabled' : 'disabled';
 		}
 
 		function featureLabel(value) {
+			if (value === null || value === undefined) {
+				return 'Not checked';
+			}
 			return value ? 'Yes' : 'No';
 		}
 
@@ -944,15 +955,17 @@ function statusPageHtml() {
 			};
 		}
 
-		async function loadAsrSettings() {
+		async function loadAsrSettings(options = {}) {
+			const refreshRuntime = !!options.refreshRuntime;
+			fields.asrSettingsMessage.textContent = refreshRuntime ? 'Checking runtime' : 'Loading settings';
 			try {
-				const response = await fetch(asrSettingsUrl, { cache: 'no-store' });
+				const response = await fetch(asrSettingsUrl + (refreshRuntime ? '?refresh=1' : ''), { cache: 'no-store' });
 				const payload = await response.json();
 				if (!response.ok || payload.success === false) {
 					throw new Error(payload.message || 'Settings unavailable');
 				}
 				renderAsrSettingsForm(payload.settings || {});
-				fields.asrSettingsMessage.textContent = 'Settings loaded';
+				fields.asrSettingsMessage.textContent = refreshRuntime ? 'Runtime checked' : 'Settings loaded';
 				if (payload.capabilities) {
 					renderAsrDetails(payload.capabilities);
 				}
@@ -1241,12 +1254,14 @@ function statusPageHtml() {
 			}
 		});
 		fields.reloadAsrSettings.addEventListener('click', loadAsrSettings);
+		fields.refreshAsrRuntime.addEventListener('click', () => loadAsrSettings({ refreshRuntime: true }));
 		fields.saveAsrSettings.addEventListener('click', saveAsrSettings);
 		fields.applyAsrSettingsJson.addEventListener('click', applyAsrSettingsJson);
 		fields.addAsrModel.addEventListener('click', addAsrModel);
-		loadAsrSettings();
 		refresh().then(connectJobEvents).catch(() => {
 			startFallbackPolling();
+		}).finally(() => {
+			setTimeout(() => loadAsrSettings(), 0);
 		});
 	</script>
 </body>

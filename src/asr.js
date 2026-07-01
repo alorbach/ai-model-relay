@@ -9,9 +9,11 @@ const security = require('./security');
 const MODEL_PREFIX = 'codex-local:audio';
 const RUNNER_PATH = path.join(__dirname, 'asr-runner.py');
 const DEFAULT_TIMEOUT_MS = Number(process.env.ALORBACH_ASR_TRANSCRIBE_TIMEOUT_MS || 1800000);
+const DEFAULT_PROBE_TTL_MS = Number(process.env.ALORBACH_ASR_PROBE_TTL_MS || 30000);
 const DEFAULT_PYTHON310 = path.join(os.homedir(), 'AppData', 'Local', 'Programs', 'Python', 'Python310', 'python.exe');
 const DEFAULT_VENV_PATH = path.join(security.stateDir, 'asr-venv');
 const MAX_AUDIO_BASE64_LENGTH = 67108864;
+let probeCache = null;
 
 const DEFAULT_MODELS = [
 	{
@@ -147,6 +149,7 @@ function saveSettings(nextSettings) {
 	const state = readState();
 	state.asr = normalizeSettings(nextSettings);
 	writeState(state);
+	invalidateProbeCache();
 	return state.asr;
 }
 
@@ -359,6 +362,64 @@ function probe(config = settings()) {
 		gpu: gpuInfo(),
 		cuda_runtime: venvExists ? cudaRuntimeInfo(venvPython) : { available: false, reason: 'venv_missing', dirs: [], missing: [] },
 	};
+}
+
+function probeCacheKey(config) {
+	return JSON.stringify({
+		python_path: config.python_path || '',
+		venv_path: config.venv_path || '',
+		cuda_paths: process.env.ALORBACH_ASR_CUDA_PATHS || '',
+	});
+}
+
+function invalidateProbeCache() {
+	probeCache = null;
+}
+
+function lightRuntime(config = settings()) {
+	const venvPython = venvPythonPath(config);
+	return {
+		checked: false,
+		cached: false,
+		python: { available: null, command: config.python_path || '', argsPrefix: [], source: '', version: '' },
+		venv_path: config.venv_path,
+		venv_python: venvPython,
+		venv_exists: fs.existsSync(venvPython),
+		faster_whisper_installed: null,
+		ffmpeg_available: null,
+		ffprobe_available: null,
+		gpu: { available: null, checked: false },
+		cuda_runtime: { available: null, checked: false, reason: 'not_checked', dirs: [], missing: [] },
+	};
+}
+
+function cachedProbe(config = settings(), options = {}) {
+	const now = Date.now();
+	const ttlMs = Math.max(0, Number(options.ttlMs ?? DEFAULT_PROBE_TTL_MS) || 0);
+	const key = probeCacheKey(config);
+	if (!options.refresh && probeCache && probeCache.key === key && now < probeCache.expiresAt) {
+		return { ...probeCache.value, checked: true, cached: true, cache_expires_at: probeCache.expiresAt };
+	}
+	const value = { ...probe(config), checked: true, cached: false, checked_at: new Date(now).toISOString() };
+	probeCache = {
+		key,
+		value,
+		expiresAt: now + ttlMs,
+	};
+	return { ...value, cache_expires_at: probeCache.expiresAt };
+}
+
+function runtimeForOptions(config, options = {}) {
+	if (options.hardware) {
+		return options.hardware;
+	}
+	if (options.refresh) {
+		return cachedProbe(config, { refresh: true, ttlMs: options.ttlMs });
+	}
+	if (probeCache && probeCache.key === probeCacheKey(config) && Date.now() < probeCache.expiresAt) {
+		return { ...probeCache.value, checked: true, cached: true, cache_expires_at: probeCache.expiresAt };
+	}
+	return lightRuntime(config);
 }
 
 function hfCacheRoots() {
@@ -716,9 +777,9 @@ async function transcribe(payload, session = {}) {
 	};
 }
 
-function models() {
+function models(options = {}) {
 	const config = settings();
-	const hardware = probe(config);
+	const hardware = runtimeForOptions(config, options);
 	const details = {};
 	for (const entry of enabledModels(config)) {
 		const selected = selectModel(fullModelId(entry.id), config, hardware);
@@ -746,14 +807,20 @@ function models() {
 	};
 }
 
-function capabilities() {
+function capabilities(options = {}) {
 	const config = settings();
-	const hardware = probe(config);
+	const hardware = runtimeForOptions(config, options);
 	const auto = selectModel(MODEL_PREFIX, config, hardware);
-	const modelPayload = models();
+	const modelPayload = models({ ...options, hardware });
+	const runtimeChecked = hardware.checked !== false;
+	const runtimeReady = runtimeChecked
+		? hardware.venv_exists && hardware.faster_whisper_installed
+		: null;
 	return {
 		enabled: true,
-		ready: hardware.venv_exists && hardware.faster_whisper_installed && !!auto.model_path,
+		ready: runtimeReady === null ? null : runtimeReady && !!auto.model_path,
+		runtime_checked: runtimeChecked,
+		runtime_cached: !!hardware.cached,
 		auto_model: auto.model_id || MODEL_PREFIX,
 		selected_device: auto.error ? null : auto.device,
 		selected_compute_type: auto.error ? null : auto.compute_type,
@@ -765,11 +832,11 @@ function capabilities() {
 	};
 }
 
-function publicSettings() {
+function publicSettings(options = {}) {
 	return {
 		success: true,
 		settings: settings(),
-		capabilities: capabilities(),
+		capabilities: capabilities(options),
 	};
 }
 
@@ -787,6 +854,9 @@ module.exports = {
 	models,
 	normalizeSettings,
 	probe,
+	cachedProbe,
+	invalidateProbeCache,
+	lightRuntime,
 	publicSettings,
 	resolveModelPath,
 	saveSettings,

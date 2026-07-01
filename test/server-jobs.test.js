@@ -138,9 +138,27 @@ function createMockSecurity() {
 (async () => {
 	const pending = [];
 	const stateUpdates = [];
+	const asrSettingsCalls = [];
 	const codex = {
 		checkStatus: () => ({ success: true, message: 'ready', details: {} }),
 		models: () => ({ success: true, models: { text: ['codex-local:auto'], image: ['codex-local:image'] } }),
+		capabilities: () => ({ success: true, bridge_features: { chat: true, images: true, audio_transcription: true }, codex: {}, asr: { enabled: true, ready: null, runtime_checked: false, runtime: { checked: false }, models: ['codex-local:audio'] } }),
+		asrStatus: () => ({ enabled: true, ready: null, runtime_checked: false, runtime: { checked: false }, models: ['codex-local:audio'] }),
+		asrSettings: (options = {}) => {
+			asrSettingsCalls.push(options);
+			return {
+				success: true,
+				settings: { allow_model_downloads: false, models: [] },
+				capabilities: {
+					enabled: true,
+					ready: options.refresh ? true : null,
+					runtime_checked: !!options.refresh,
+					runtime: { checked: !!options.refresh },
+					models: ['codex-local:audio'],
+				},
+			};
+		},
+		saveAsrSettings: (settings) => settings,
 		chat: (payload, session = {}) => new Promise((resolve) => {
 			if (session.appendSessionOutput) {
 				session.appendSessionOutput('stderr', `live output for ${payload.model || 'unknown'}`);
@@ -203,6 +221,8 @@ function createMockSecurity() {
 		assert.ok(page.body.includes('id="asrSettingsForm"'));
 		assert.ok(page.body.includes('id="addAsrModel"'));
 		assert.ok(page.body.includes('id="applyAsrSettingsJson"'));
+		assert.ok(page.body.includes('id="refreshAsrRuntime"'));
+		assert.ok(page.body.includes('?refresh=1'));
 		assert.ok(page.body.includes('Structured exec JSON'));
 		assert.ok(page.body.includes('OpenAI video route'));
 		assert.ok(page.body.includes('new EventSource(jobEventsUrl)'));
@@ -228,12 +248,25 @@ function createMockSecurity() {
 		assert.strictEqual(status.body.jobs.running_count, 2);
 		assert.strictEqual(status.body.jobs.queued_count, 1);
 		assert.strictEqual(status.body.jobs.max_concurrent, 2);
+		assert.strictEqual(status.body.asr.runtime_checked, false);
 		assert.deepStrictEqual(status.body.jobs.active.map((job) => job.request_id), ['request-1', 'request-2']);
 		assert.ok(status.body.jobs.active[0].session_output.includes('live output for codex-local:auto'));
 		const serializedState = JSON.stringify(stateUpdates);
 		assert.ok(serializedState.includes('request-1'));
 		assert.ok(serializedState.includes('codex-local:gpt-5.4'));
 		assert.ok(!serializedState.includes('secret prompt'));
+
+		const capabilities = await requestJson(port, 'GET', '/v1/capabilities');
+		assert.strictEqual(capabilities.statusCode, 200);
+		assert.strictEqual(capabilities.body.asr.runtime_checked, false);
+
+		const asrSettings = await requestJson(port, 'GET', '/v1/asr/settings');
+		assert.strictEqual(asrSettings.statusCode, 200);
+		assert.strictEqual(asrSettings.body.capabilities.runtime_checked, false);
+		const asrRuntimeRefresh = await requestJson(port, 'GET', '/v1/asr/settings?refresh=1');
+		assert.strictEqual(asrRuntimeRefresh.statusCode, 200);
+		assert.strictEqual(asrRuntimeRefresh.body.capabilities.runtime_checked, true);
+		assert.strictEqual(asrSettingsCalls.some((options) => options.refresh === true), true);
 
 		const streamPayload = await new Promise((resolve, reject) => {
 			let done = false;

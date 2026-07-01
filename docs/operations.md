@@ -55,6 +55,8 @@ Check local Codex readiness:
 npm run smoke
 ```
 
+Check Local Whisper runtime readiness from the status page by opening `/status` and pressing `Refresh runtime` in the Local Whisper Settings panel. The normal status page load uses cached or lightweight ASR metadata so it does not run Python, ffmpeg, GPU, or CUDA checks until this explicit refresh or a transcription job.
+
 Generate icons:
 
 ```powershell
@@ -138,6 +140,32 @@ $env:ALORBACH_CODEX_BINARY = '<path-to-codex.exe>'
 npm start
 ```
 
+## Local Whisper ASR
+
+Local Whisper transcription is optional and private to the user's machine. It uses Python 3.10, a bridge-owned virtual environment, faster-whisper, ffmpeg/ffprobe, and cached Hugging Face model snapshots or explicitly enabled model downloads.
+
+Default behavior:
+
+- Python is auto-detected, preferring `%LOCALAPPDATA%\Programs\Python\Python310\python.exe`.
+- The ASR virtual environment is `%USERPROFILE%\.alorbach-codex-bridge\asr-venv` unless `ALORBACH_ASR_VENV` is set.
+- Package installation is allowed by default for the private ASR venv.
+- Model downloads are disabled by default; use cached model snapshots or set a local model path unless downloads are explicitly enabled in `/status`.
+- CUDA is selected only when the enabled model prefers it, enough free VRAM is detected, and CUDA runtime packages are usable. A CUDA load failure falls back to CPU/int8 when possible.
+
+Useful environment overrides:
+
+```powershell
+$env:ALORBACH_ASR_PYTHON = 'C:\Users\AL\AppData\Local\Programs\Python\Python310\python.exe'
+$env:ALORBACH_ASR_VENV = 'C:\Users\AL\.alorbach-codex-bridge\asr-venv'
+$env:ALORBACH_ASR_CPU_THREADS = '4'
+$env:ALORBACH_ASR_TRANSCRIBE_TIMEOUT_MS = '1800000'
+$env:ALORBACH_ASR_PROBE_TTL_MS = '30000'
+$env:ALORBACH_ASR_CUDA_PATHS = '<extra-cuda-bin-paths>'
+npm start
+```
+
+If Local Whisper setup is slow, check the job output in `/status`. The large downloads are usually Python wheels such as `ctranslate2`, `onnxruntime`, `av`, and CUDA runtime packages, or the selected Whisper model when model downloads are enabled.
+
 ## Common Failures
 
 ### Bridge not reachable
@@ -165,3 +193,19 @@ Only one image job runs at a time because image result detection uses the shared
 ### WordPress retry says duplicate request
 
 The browser likely created a Gateway job and failed before calling `/fail`. The Gateway duplicate lock expires with the local job TTL, currently 900 seconds.
+
+### Local Whisper shows not checked
+
+This is expected on initial `/status` load. Press `Refresh runtime` in Local Whisper Settings to run the full runtime probe. The default page load avoids those checks so bridge and job diagnostics render immediately.
+
+### Local Whisper says Python or faster-whisper is missing
+
+Install Python 3.10 for the same Windows account or set `ALORBACH_ASR_PYTHON`. If automatic package installation is disabled, create the ASR venv yourself and install `faster-whisper` before running transcription jobs.
+
+### Local Whisper model is missing
+
+Either enable model downloads in the Local Whisper Settings panel or configure `local_path` for an existing faster-whisper/CTranslate2 model snapshot. The default model list includes Large v3, Medium, and Small.
+
+### CUDA runtime is missing or unusable
+
+Use `Refresh runtime` to see the exact CUDA reason. The bridge can install `nvidia-cublas-cu12` and `nvidia-cudnn-cu12` into the ASR venv when package installation is enabled. If CUDA still fails during transcription, the job retries on CPU/int8 when a CPU model is available.

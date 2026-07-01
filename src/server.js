@@ -258,7 +258,7 @@ async function route(req, res, context) {
 	}
 
 	if (req.method === 'GET' && url.pathname === '/v1/asr/settings') {
-		const payload = context.codex.asrSettings ? context.codex.asrSettings() : { success: false, message: 'ASR settings are unavailable.' };
+		const payload = context.codex.asrSettings ? context.codex.asrSettings({ refresh: url.searchParams.get('refresh') === '1' }) : { success: false, message: 'ASR settings are unavailable.' };
 		sendJson(res, payload.success === false ? 500 : 200, payload, origin || pairedOriginForCors(req, bridgeSecurity));
 		return;
 	}
