@@ -7,6 +7,7 @@ const { JobManager, clampMaxConcurrent } = require('./job-manager');
 const mediaAnalysis = require('./media-analysis');
 const security = require('./security');
 const { statusPageHtml } = require('./status-page');
+const { resetTempDebugLogs } = require('./temp-debug-logs');
 const video = require('./video');
 const packageInfo = require('../package.json');
 const { appendLog, safeError, safeProcessSend } = require('./diagnostics');
@@ -508,6 +509,7 @@ function createServer(options = {}) {
 
 function startServer(options = {}) {
 	const requestedPort = Number(options.port || process.env.ALORBACH_CODEX_BRIDGE_PORT || 8765);
+	resetTempDebugLogs();
 	const server = createServer(options);
 	return new Promise((resolve, reject) => {
 		server.once('error', reject);

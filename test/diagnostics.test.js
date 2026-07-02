@@ -1,9 +1,12 @@
 'use strict';
 
 const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
 const { EventEmitter } = require('events');
 const { createBoundedCollector, safeProcessSend } = require('../src/diagnostics');
 const { createStatusEvents } = require('../src/server');
+const { beginLocalModelDebugLog, debugRoot, resetTempDebugLogs } = require('../src/temp-debug-logs');
 
 class FakeResponse extends EventEmitter {
 	constructor() {
@@ -46,6 +49,29 @@ class FakeResponse extends EventEmitter {
 	assert.ok(value.includes('[truncated'));
 	assert.ok(stats.truncated_chars > 0);
 	assert.ok(stats.retained_chars <= 1024);
+
+	resetTempDebugLogs();
+	const stalePath = path.join(debugRoot, 'stale.txt');
+	fs.writeFileSync(stalePath, 'old');
+	assert.ok(fs.existsSync(stalePath));
+	resetTempDebugLogs();
+	assert.ok(!fs.existsSync(stalePath));
+	const debugLog = beginLocalModelDebugLog({
+		kind: 'chat',
+		model: 'codex-local:auto',
+		provider: 'codex-cli',
+		requestId: 'request-1',
+		route: '/v1/chat',
+	});
+	assert.ok(debugLog.dir.startsWith(debugRoot));
+	debugLog.writePrompt('full prompt');
+	debugLog.writeOutput('full output');
+	debugLog.writeStdout('stdout');
+	debugLog.writeStderr('stderr');
+	debugLog.finish({ status: 0 });
+	assert.strictEqual(fs.readFileSync(path.join(debugLog.dir, 'prompt.txt'), 'utf8'), 'full prompt');
+	assert.strictEqual(fs.readFileSync(path.join(debugLog.dir, 'output.txt'), 'utf8'), 'full output');
+	assert.ok(fs.readFileSync(path.join(debugLog.dir, 'metadata.json'), 'utf8').includes('request-1'));
 
 	const originalSend = process.send;
 	const ipcError = new Error('Channel closed');

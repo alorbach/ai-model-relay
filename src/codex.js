@@ -6,6 +6,7 @@ const path = require('path');
 const { spawn, spawnSync } = require('child_process');
 const asr = require('./asr');
 const { appendLog, createBoundedCollector, safeError } = require('./diagnostics');
+const { beginLocalModelDebugLog } = require('./temp-debug-logs');
 
 const codexBinary = process.env.ALORBACH_CODEX_BINARY || 'codex';
 const codexHome = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
@@ -694,6 +695,23 @@ async function chat(payload, session = {}) {
 	const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'alorbach-codex-chat-'));
 	const outputFile = path.join(tempDir, 'last-message.txt');
 	const { attachments, prompt } = buildChatPrompt(messages, payload.max_tokens, tempDir);
+	const debugLog = beginLocalModelDebugLog({
+		kind: 'chat',
+		model: `codex-local:${model}`,
+		provider: 'codex-cli',
+		requestId: session.requestId,
+		route: '/v1/chat',
+	});
+	if (debugLog) {
+		debugLog.writePrompt(prompt);
+		debugLog.writeJson('request', {
+			model: `codex-local:${model}`,
+			max_tokens: payload.max_tokens || null,
+			attachment_count: attachments.length,
+			temp_dir: tempDir,
+			output_file: outputFile,
+		});
+	}
 	const args = [
 		'exec',
 		'--skip-git-repo-check',
@@ -720,11 +738,23 @@ async function chat(payload, session = {}) {
 	if (!responseText && run.structured && run.structured.finalMessages.length) {
 		responseText = run.structured.finalMessages[run.structured.finalMessages.length - 1].trim();
 	}
+	if (debugLog) {
+		debugLog.writeOutput(responseText || stdout);
+		debugLog.writeStdout(run.stdout || '');
+		debugLog.writeStderr(run.stderr || '');
+		debugLog.writeJson('structured', run.structured || {});
+		debugLog.finish({
+			status: run.status,
+			signal: run.signal || '',
+			error: run.error && (run.error.message || String(run.error)) || '',
+			response_chars: String(responseText || stdout || '').length,
+		});
+	}
 	if (run.error) {
-		return { success: false, message: 'Codex CLI could not be executed for chat.', details: { error: run.error.message || String(run.error), stdout, stderr, status: run.status, signal: run.signal, structured_events: run.structured && run.structured.summary, event_errors: run.structured && run.structured.errors } };
+		return { success: false, message: 'Codex CLI could not be executed for chat.', details: { error: run.error.message || String(run.error), stdout, stderr, status: run.status, signal: run.signal, structured_events: run.structured && run.structured.summary, event_errors: run.structured && run.structured.errors, debug_log_dir: debugLog && debugLog.dir || '' } };
 	}
 	if (run.status !== 0) {
-		return { success: false, message: 'Codex CLI chat request failed.', details: { stdout, stderr, response_text: responseText, structured_events: run.structured && run.structured.summary, event_errors: run.structured && run.structured.errors } };
+		return { success: false, message: 'Codex CLI chat request failed.', details: { stdout, stderr, response_text: responseText, structured_events: run.structured && run.structured.summary, event_errors: run.structured && run.structured.errors, debug_log_dir: debugLog && debugLog.dir || '' } };
 	}
 	return {
 		success: true,
@@ -743,6 +773,7 @@ async function chat(payload, session = {}) {
 			provider_details: {
 				structured_events: !!run.used_json,
 				json_fallback_reason: run.json_fallback_reason || undefined,
+				debug_log_dir: debugLog && debugLog.dir || undefined,
 			},
 		},
 	};
@@ -823,6 +854,25 @@ async function images(payload, session = {}) {
 	const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'alorbach-codex-image-'));
 	const outputFile = path.join(tempDir, 'last-message.txt');
 	const attachments = collectImageAttachments(payload, tempDir);
+	const promptText = imagePrompt(payload, attachments);
+	const debugLog = beginLocalModelDebugLog({
+		kind: 'image',
+		model: 'codex-local:image',
+		provider: 'codex-cli',
+		requestId: session.requestId,
+		route: '/v1/images',
+	});
+	if (debugLog) {
+		debugLog.writePrompt(promptText);
+		debugLog.writeJson('request', {
+			model: 'codex-local:image',
+			size: payload.size || '',
+			quality: payload.quality || '',
+			attachment_count: attachments.length,
+			temp_dir: tempDir,
+			output_file: outputFile,
+		});
+	}
 	const args = [
 		'exec',
 		'--skip-git-repo-check',
@@ -836,23 +886,39 @@ async function images(payload, session = {}) {
 		args.push('--image', attachment.path);
 	}
 	args.push('-');
-	const run = await runCodexExec(args, { cwd: tempDir, timeout: Number(process.env.ALORBACH_CODEX_IMAGE_TIMEOUT_MS || 1800000), onOutput: session.appendSessionOutput, input: imagePrompt(payload, attachments) });
+	const run = await runCodexExec(args, { cwd: tempDir, timeout: Number(process.env.ALORBACH_CODEX_IMAGE_TIMEOUT_MS || 1800000), onOutput: session.appendSessionOutput, input: promptText });
 	const after = listGeneratedImages(generatedImagesDir);
 	const newImages = detectNewImage(before, after);
 	const stdout = (run.stdout || '').trim();
 	const stderr = (run.stderr || '').trim();
+	if (debugLog) {
+		debugLog.writeOutput(newImages.length ? `Generated image: ${newImages[0].path}` : stdout);
+		debugLog.writeStdout(run.stdout || '');
+		debugLog.writeStderr(run.stderr || '');
+		debugLog.writeJson('structured', run.structured || {});
+		debugLog.writeJson('generated_images', newImages);
+		debugLog.finish({
+			status: run.status,
+			signal: run.signal || '',
+			error: run.error && (run.error.message || String(run.error)) || '',
+			generated_image: newImages[0] && newImages[0].path || '',
+		});
+	}
 	if (run.error) {
-		return { success: false, message: 'Codex CLI could not be executed for image generation.', details: { error: run.error.message || String(run.error), stdout, stderr, status: run.status, signal: run.signal, structured_events: run.structured && run.structured.summary, event_errors: run.structured && run.structured.errors } };
+		return { success: false, message: 'Codex CLI could not be executed for image generation.', details: { error: run.error.message || String(run.error), stdout, stderr, status: run.status, signal: run.signal, structured_events: run.structured && run.structured.summary, event_errors: run.structured && run.structured.errors, debug_log_dir: debugLog && debugLog.dir || '' } };
 	}
 	if (run.status !== 0) {
 		const failure = codexImageFailureFromOutput(stdout, stderr, generatedImagesDir, run.structured);
 		if (failure.code === 'codex_rate_limited') {
+			failure.details = { ...(failure.details || {}), debug_log_dir: debugLog && debugLog.dir || '' };
 			return failure;
 		}
-		return { success: false, code: 'codex_cli_image_failed', category: 'codex_cli', message: 'Codex CLI image generation failed.', details: { stdout, stderr, structured_events: run.structured && run.structured.summary, event_errors: run.structured && run.structured.errors } };
+		return { success: false, code: 'codex_cli_image_failed', category: 'codex_cli', message: 'Codex CLI image generation failed.', details: { stdout, stderr, structured_events: run.structured && run.structured.summary, event_errors: run.structured && run.structured.errors, debug_log_dir: debugLog && debugLog.dir || '' } };
 	}
 	if (!newImages.length) {
-		return codexImageFailureFromOutput(stdout, stderr, generatedImagesDir, run.structured);
+		const failure = codexImageFailureFromOutput(stdout, stderr, generatedImagesDir, run.structured);
+		failure.details = { ...(failure.details || {}), debug_log_dir: debugLog && debugLog.dir || '' };
+		return failure;
 	}
 	const bytes = fs.readFileSync(newImages[0].path);
 	return {
@@ -867,6 +933,7 @@ async function images(payload, session = {}) {
 				json_fallback_reason: run.json_fallback_reason || undefined,
 				reference_attachment_count: attachments.length,
 				refs_forwarded_to_codex: attachments.length > 0,
+				debug_log_dir: debugLog && debugLog.dir || undefined,
 			},
 		},
 	};

@@ -1,6 +1,9 @@
 'use strict';
 
 const assert = require('assert');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const { JobManager, collectSessionOutput, normalizeDiagnosticText, truncateOutput } = require('../src/job-manager');
 
 function tick() {
@@ -50,7 +53,8 @@ function deferredRunner(label, started, resolvers, result = { success: true }) {
 		assert.strictEqual(manager.snapshot().active[0].session_output, 'STDOUT:\nlive output line');
 		finishLive();
 		await live;
-		assert.ok(!Object.prototype.hasOwnProperty.call(manager.snapshot().recent[0], 'session_output'));
+		assert.strictEqual(manager.snapshot().recent[0].status, 'completed');
+		assert.strictEqual(manager.snapshot().recent[0].session_output, 'STDOUT:\nlive output line');
 
 		const failed = await manager.run({ requestId: 'request-fail', type: 'chat' }, () => ({ success: false, message: 'failed', details: { stderr: 'session stderr' } }));
 		assert.strictEqual(failed.success, false);
@@ -58,6 +62,25 @@ function deferredRunner(label, started, resolvers, result = { success: true }) {
 		assert.strictEqual(manager.snapshot().recent[0].session_output, 'STDERR:\nsession stderr');
 		const next = await manager.run({ requestId: 'request-next', type: 'chat' }, () => ({ success: true }));
 		assert.strictEqual(next.success, true);
+	}
+
+	{
+		const debugDir = fs.mkdtempSync(path.join(os.tmpdir(), 'job-manager-debug-'));
+		fs.writeFileSync(path.join(debugDir, 'prompt.txt'), 'full prompt');
+		fs.writeFileSync(path.join(debugDir, 'output.txt'), 'full ai response');
+		const manager = new JobManager({ maxConcurrent: 1 });
+		const result = await manager.run({ requestId: 'request-debug', type: 'chat' }, () => ({
+			success: true,
+			response: {
+				provider_details: {
+					debug_log_dir: debugDir,
+				},
+			},
+		}));
+		assert.strictEqual(result.success, true);
+		assert.strictEqual(manager.snapshot().recent[0].debug_logs[0].prompt, 'full prompt');
+		assert.strictEqual(manager.snapshot().recent[0].debug_logs[0].output, 'full ai response');
+		fs.rmSync(debugDir, { recursive: true, force: true });
 	}
 
 	{

@@ -6,13 +6,18 @@ const path = require('path');
 const { spawn, spawnSync } = require('child_process');
 const { appendLog, createBoundedCollector, safeError } = require('./diagnostics');
 const security = require('./security');
+const { beginLocalModelDebugLog } = require('./temp-debug-logs');
 
 const MODEL_PREFIX = 'codex-local:audio';
 const RUNNER_PATH = path.join(__dirname, 'asr-runner.py');
+const QWEN_RUNNER_PATH = path.join(__dirname, 'asr-qwen-runner.py');
 const DEFAULT_TIMEOUT_MS = Number(process.env.ALORBACH_ASR_TRANSCRIBE_TIMEOUT_MS || 1800000);
 const DEFAULT_PROBE_TTL_MS = Number(process.env.ALORBACH_ASR_PROBE_TTL_MS || 30000);
 const DEFAULT_PYTHON310 = path.join(os.homedir(), 'AppData', 'Local', 'Programs', 'Python', 'Python310', 'python.exe');
+const DEFAULT_PYTHON312 = path.join(os.homedir(), 'AppData', 'Local', 'Programs', 'Python', 'Python312', 'python.exe');
 const DEFAULT_VENV_PATH = path.join(security.stateDir, 'asr-venv');
+const DEFAULT_QWEN_VENV_PATH = path.join(security.stateDir, 'qwen-asr-venv');
+const DEFAULT_QWEN_TORCH_INDEX_URL = process.env.ALORBACH_QWEN_TORCH_INDEX_URL || 'https://download.pytorch.org/whl/cu128';
 const MAX_AUDIO_BASE64_LENGTH = 67108864;
 let probeCache = null;
 
@@ -20,6 +25,7 @@ const DEFAULT_MODELS = [
 	{
 		id: 'whisper-large-v3',
 		label: 'Local Whisper Large v3',
+		provider: 'faster-whisper',
 		repo_id: 'ctranslate2-4you/whisper-large-v3-ct2-float32',
 		gpu_repo_id: 'ctranslate2-4you/whisper-large-v3-ct2-float16',
 		min_vram_mb: 8192,
@@ -29,6 +35,7 @@ const DEFAULT_MODELS = [
 	{
 		id: 'whisper-medium',
 		label: 'Local Whisper Medium',
+		provider: 'faster-whisper',
 		repo_id: 'Systran/faster-whisper-medium',
 		min_vram_mb: 4096,
 		enabled: true,
@@ -37,10 +44,31 @@ const DEFAULT_MODELS = [
 	{
 		id: 'whisper-small',
 		label: 'Local Whisper Small',
+		provider: 'faster-whisper',
 		repo_id: 'Systran/faster-whisper-small',
 		min_vram_mb: 2048,
 		enabled: true,
 		preferred_device: 'auto',
+	},
+	{
+		id: 'qwen3-asr-1.7b',
+		label: 'Local Qwen3 ASR 1.7B',
+		provider: 'qwen-asr',
+		repo_id: 'Qwen/Qwen3-ASR-1.7B',
+		aligner_repo_id: 'Qwen/Qwen3-ForcedAligner-0.6B',
+		min_vram_mb: 10000,
+		enabled: true,
+		preferred_device: 'cuda',
+	},
+	{
+		id: 'qwen3-asr-0.6b',
+		label: 'Local Qwen3 ASR 0.6B',
+		provider: 'qwen-asr',
+		repo_id: 'Qwen/Qwen3-ASR-0.6B',
+		aligner_repo_id: 'Qwen/Qwen3-ForcedAligner-0.6B',
+		min_vram_mb: 6000,
+		enabled: true,
+		preferred_device: 'cuda',
 	},
 ];
 
@@ -80,12 +108,18 @@ function modelSlug(id) {
 function normalizeModelEntry(entry, fallback = {}) {
 	const source = entry && typeof entry === 'object' ? entry : {};
 	const id = modelSlug(source.id || fallback.id);
+	const provider = ['faster-whisper', 'qwen-asr', 'qwen-aligner'].includes(String(source.provider || fallback.provider || 'faster-whisper'))
+		? String(source.provider || fallback.provider || 'faster-whisper')
+		: 'faster-whisper';
 	return {
 		id,
 		label: String(source.label || fallback.label || id).trim() || id,
+		provider,
 		repo_id: String(source.repo_id || fallback.repo_id || '').trim(),
 		gpu_repo_id: String(source.gpu_repo_id || fallback.gpu_repo_id || '').trim(),
+		aligner_repo_id: String(source.aligner_repo_id || fallback.aligner_repo_id || '').trim(),
 		local_path: String(source.local_path || fallback.local_path || '').trim(),
+		aligner_local_path: String(source.aligner_local_path || fallback.aligner_local_path || '').trim(),
 		min_vram_mb: Math.max(0, Number(source.min_vram_mb ?? fallback.min_vram_mb ?? 0) || 0),
 		enabled: source.enabled !== false,
 		preferred_device: ['auto', 'cpu', 'cuda'].includes(String(source.preferred_device || fallback.preferred_device || 'auto')) ? String(source.preferred_device || fallback.preferred_device || 'auto') : 'auto',
@@ -96,8 +130,14 @@ function defaultSettings() {
 	return {
 		allow_package_install: true,
 		allow_model_downloads: false,
+		allow_qwen_cpu_offload: process.env.ALORBACH_QWEN_ALLOW_CPU_OFFLOAD !== '0',
+		default_model: modelSlug(process.env.ALORBACH_ASR_DEFAULT_MODEL || ''),
 		python_path: process.env.ALORBACH_ASR_PYTHON || '',
 		venv_path: process.env.ALORBACH_ASR_VENV || DEFAULT_VENV_PATH,
+		qwen_python_path: process.env.ALORBACH_QWEN_ASR_PYTHON || '',
+		qwen_venv_path: process.env.ALORBACH_QWEN_ASR_VENV || DEFAULT_QWEN_VENV_PATH,
+		qwen_chunk_seconds: Math.max(5, Number(process.env.ALORBACH_QWEN_CHUNK_SECONDS || 30) || 30),
+		qwen_max_word_duration_seconds: Math.max(1, Number(process.env.ALORBACH_QWEN_MAX_WORD_DURATION_SECONDS || 12) || 12),
 		cpu_threads: Math.max(1, Number(process.env.ALORBACH_ASR_CPU_THREADS || 4) || 4),
 		num_workers: 1,
 		beam_size: 5,
@@ -115,8 +155,14 @@ function normalizeSettings(raw) {
 	const merged = {
 		allow_package_install: source.allow_package_install !== false,
 		allow_model_downloads: source.allow_model_downloads === true,
+		allow_qwen_cpu_offload: source.allow_qwen_cpu_offload !== false,
+		default_model: modelSlug(source.default_model || defaults.default_model || ''),
 		python_path: String(source.python_path || defaults.python_path || '').trim(),
 		venv_path: String(source.venv_path || defaults.venv_path || '').trim() || defaults.venv_path,
+		qwen_python_path: String(source.qwen_python_path || defaults.qwen_python_path || '').trim(),
+		qwen_venv_path: String(source.qwen_venv_path || defaults.qwen_venv_path || '').trim() || defaults.qwen_venv_path,
+		qwen_chunk_seconds: Math.max(5, Number(source.qwen_chunk_seconds || defaults.qwen_chunk_seconds) || defaults.qwen_chunk_seconds),
+		qwen_max_word_duration_seconds: Math.max(1, Number(source.qwen_max_word_duration_seconds || defaults.qwen_max_word_duration_seconds) || defaults.qwen_max_word_duration_seconds),
 		cpu_threads: Math.max(1, Number(source.cpu_threads || defaults.cpu_threads) || defaults.cpu_threads),
 		num_workers: Math.max(1, Number(source.num_workers || defaults.num_workers) || defaults.num_workers),
 		beam_size: Math.max(1, Number(source.beam_size || defaults.beam_size) || defaults.beam_size),
@@ -162,6 +208,10 @@ function audioExtensionForFormat(format) {
 	return 'audio';
 }
 
+function referenceTextFromPayload(payload = {}) {
+	return String(payload.reference_text || payload.referenceText || payload.transcript || payload.lyrics || '').trim();
+}
+
 function runSync(command, args = [], options = {}) {
 	return spawnSync(command, args, {
 		encoding: 'utf8',
@@ -193,8 +243,22 @@ function pythonCandidates(config = settings()) {
 	return candidates;
 }
 
-function discoverPython(config = settings()) {
-	for (const candidate of pythonCandidates(config)) {
+function qwenPythonCandidates(config = settings()) {
+	const candidates = [];
+	if (config.qwen_python_path) {
+		candidates.push({ command: config.qwen_python_path, argsPrefix: [], source: 'qwen settings' });
+	}
+	if (process.env.ALORBACH_QWEN_ASR_PYTHON && process.env.ALORBACH_QWEN_ASR_PYTHON !== config.qwen_python_path) {
+		candidates.push({ command: process.env.ALORBACH_QWEN_ASR_PYTHON, argsPrefix: [], source: 'qwen environment' });
+	}
+	candidates.push({ command: DEFAULT_PYTHON312, argsPrefix: [], source: 'python312' });
+	candidates.push({ command: 'py.exe', argsPrefix: ['-3.12'], source: 'py -3.12' });
+	candidates.push({ command: 'python.exe', argsPrefix: [], source: 'python' });
+	return candidates;
+}
+
+function discoverPythonFromCandidates(candidates) {
+	for (const candidate of candidates) {
 		if (candidate.command.indexOf(path.sep) !== -1 && !fs.existsSync(candidate.command)) {
 			continue;
 		}
@@ -210,10 +274,24 @@ function discoverPython(config = settings()) {
 	return { available: false, command: '', argsPrefix: [], source: '', version: '' };
 }
 
+function discoverPython(config = settings()) {
+	return discoverPythonFromCandidates(pythonCandidates(config));
+}
+
+function discoverQwenPython(config = settings()) {
+	return discoverPythonFromCandidates(qwenPythonCandidates(config));
+}
+
 function venvPythonPath(config = settings()) {
 	return process.platform === 'win32'
 		? path.join(config.venv_path, 'Scripts', 'python.exe')
 		: path.join(config.venv_path, 'bin', 'python');
+}
+
+function qwenVenvPythonPath(config = settings()) {
+	return process.platform === 'win32'
+		? path.join(config.qwen_venv_path, 'Scripts', 'python.exe')
+		: path.join(config.qwen_venv_path, 'bin', 'python');
 }
 
 function hasPythonModule(pythonPath, moduleName) {
@@ -222,6 +300,50 @@ function hasPythonModule(pythonPath, moduleName) {
 	}
 	const result = runSync(pythonPath, ['-c', `import importlib.util as u; raise SystemExit(0 if u.find_spec("${moduleName}") else 1)`]);
 	return !result.error && result.status === 0;
+}
+
+function torchCudaInfo(pythonPath) {
+	if (!pythonPath || !fs.existsSync(pythonPath)) {
+		return { available: false, reason: 'venv_missing', version: '', cuda_version: '', device_count: 0 };
+	}
+	const script = [
+		'import json',
+		'try:',
+		' import torch',
+		' print(json.dumps({',
+		'  "version": getattr(torch, "__version__", ""),',
+		'  "cuda_version": getattr(getattr(torch, "version", None), "cuda", None),',
+		'  "cuda_available": bool(torch.cuda.is_available()),',
+		'  "device_count": int(torch.cuda.device_count()),',
+		' }))',
+		'except Exception as exc:',
+		' print(json.dumps({"error": str(exc)}))',
+		' raise SystemExit(1)',
+	].join('\n');
+	const result = runSync(pythonPath, ['-c', script]);
+	let parsed = {};
+	try {
+		parsed = JSON.parse(String(result.stdout || '{}'));
+	} catch (error) {}
+	const cudaVersion = parsed.cuda_version ? String(parsed.cuda_version) : '';
+	const deviceCount = Number(parsed.device_count || 0) || 0;
+	const cudaAvailable = parsed.cuda_available === true;
+	let reason = '';
+	if (result.error || result.status !== 0) {
+		reason = parsed.error || result.error && result.error.message || 'torch probe failed';
+	} else if (!cudaVersion) {
+		reason = 'torch is not compiled with CUDA enabled';
+	} else if (!cudaAvailable || deviceCount < 1) {
+		reason = 'torch CUDA is not available';
+	}
+	return {
+		available: !reason,
+		reason,
+		version: parsed.version ? String(parsed.version) : '',
+		cuda_version: cudaVersion,
+		device_count: deviceCount,
+		error: parsed.error || result.error && result.error.message || '',
+	};
 }
 
 function pythonSitePackageDirs(pythonPath) {
@@ -349,15 +471,26 @@ function gpuInfo() {
 
 function probe(config = settings()) {
 	const python = discoverPython(config);
+	const qwenPython = discoverQwenPython(config);
 	const venvPython = venvPythonPath(config);
+	const qwenVenvPython = qwenVenvPythonPath(config);
 	const runtimeInstalled = hasPythonModule(venvPython, 'faster_whisper');
+	const qwenRuntimeInstalled = hasPythonModule(qwenVenvPython, 'qwen_asr');
+	const qwenTorchCuda = torchCudaInfo(qwenVenvPython);
 	const venvExists = fs.existsSync(venvPython);
+	const qwenVenvExists = fs.existsSync(qwenVenvPython);
 	return {
 		python,
+		qwen_python: qwenPython,
 		venv_path: config.venv_path,
 		venv_python: venvPython,
 		venv_exists: venvExists,
+		qwen_venv_path: config.qwen_venv_path,
+		qwen_venv_python: qwenVenvPython,
+		qwen_venv_exists: qwenVenvExists,
 		faster_whisper_installed: runtimeInstalled,
+		qwen_asr_installed: qwenRuntimeInstalled,
+		qwen_torch_cuda: qwenTorchCuda,
 		ffmpeg_available: commandAvailable('ffmpeg.exe'),
 		ffprobe_available: commandAvailable('ffprobe.exe'),
 		gpu: gpuInfo(),
@@ -369,6 +502,8 @@ function probeCacheKey(config) {
 	return JSON.stringify({
 		python_path: config.python_path || '',
 		venv_path: config.venv_path || '',
+		qwen_python_path: config.qwen_python_path || '',
+		qwen_venv_path: config.qwen_venv_path || '',
 		cuda_paths: process.env.ALORBACH_ASR_CUDA_PATHS || '',
 	});
 }
@@ -383,10 +518,16 @@ function lightRuntime(config = settings()) {
 		checked: false,
 		cached: false,
 		python: { available: null, command: config.python_path || '', argsPrefix: [], source: '', version: '' },
+		qwen_python: { available: null, command: config.qwen_python_path || '', argsPrefix: [], source: '', version: '' },
 		venv_path: config.venv_path,
 		venv_python: venvPython,
 		venv_exists: fs.existsSync(venvPython),
+		qwen_venv_path: config.qwen_venv_path,
+		qwen_venv_python: qwenVenvPythonPath(config),
+		qwen_venv_exists: fs.existsSync(qwenVenvPythonPath(config)),
 		faster_whisper_installed: null,
+		qwen_asr_installed: null,
+		qwen_torch_cuda: { available: null, reason: '', version: '', cuda_version: '', device_count: 0 },
 		ffmpeg_available: null,
 		ffprobe_available: null,
 		gpu: { available: null, checked: false },
@@ -463,12 +604,64 @@ function newestSnapshot(repoId) {
 	return '';
 }
 
+function pathHasFiles(rootPath, requiredFiles = []) {
+	if (!rootPath || !fs.existsSync(rootPath)) {
+		return false;
+	}
+	for (const file of requiredFiles) {
+		if (!fs.existsSync(path.join(rootPath, file))) {
+			return false;
+		}
+	}
+	return true;
+}
+
+function qwenRequiredFiles() {
+	return [
+		'config.json',
+		'generation_config.json',
+		'preprocessor_config.json',
+		'tokenizer_config.json',
+		'vocab.json',
+		'merges.txt',
+	];
+}
+
+function resolveModelPathInfo(model, repoId, allowDownload, requiredFiles = []) {
+	if (model.local_path && fs.existsSync(model.local_path)) {
+		if (!requiredFiles.length || pathHasFiles(model.local_path, requiredFiles)) {
+			return { path: model.local_path, incomplete_path: '', missing_files: [] };
+		}
+		return {
+			path: allowDownload ? (repoId || model.id) : '',
+			incomplete_path: model.local_path,
+			missing_files: requiredFiles.filter((file) => !fs.existsSync(path.join(model.local_path, file))),
+		};
+	}
+	const cached = repoId ? newestSnapshot(repoId) : '';
+	if (cached) {
+		if (!requiredFiles.length || pathHasFiles(cached, requiredFiles)) {
+			return { path: cached, incomplete_path: '', missing_files: [] };
+		}
+		return {
+			path: allowDownload ? (repoId || model.id) : '',
+			incomplete_path: cached,
+			missing_files: requiredFiles.filter((file) => !fs.existsSync(path.join(cached, file))),
+		};
+	}
+	return { path: allowDownload ? (repoId || model.id) : '', incomplete_path: '', missing_files: [] };
+}
+
 function enabledModels(config = settings()) {
 	return config.models.filter((entry) => entry && entry.id && entry.enabled !== false);
 }
 
+function transcriptionModels(config = settings()) {
+	return enabledModels(config).filter((entry) => entry.provider !== 'qwen-aligner');
+}
+
 function modelIds(config = settings()) {
-	return [MODEL_PREFIX, ...enabledModels(config).map((entry) => fullModelId(entry.id))];
+	return [MODEL_PREFIX, ...transcriptionModels(config).map((entry) => fullModelId(entry.id))];
 }
 
 function selectModel(requestedModel = MODEL_PREFIX, config = settings(), hardware = probe(config)) {
@@ -477,21 +670,51 @@ function selectModel(requestedModel = MODEL_PREFIX, config = settings(), hardwar
 	if (requestedSlug) {
 		const explicit = models.find((entry) => entry.id === requestedSlug);
 		if (!explicit) {
-			return { error: `Unknown or disabled Local Whisper model: ${requestedModel}` };
+			return { error: `Unknown or disabled Local ASR model: ${requestedModel}` };
 		}
 		return decorateSelection(explicit, config, hardware);
 	}
+	const defaultSlug = modelSlug(config.default_model);
+	if (defaultSlug) {
+		const defaultModel = models.find((entry) => entry.id === defaultSlug);
+		if (!defaultModel) {
+			return { error: `Unknown or disabled default Local ASR model: ${fullModelId(defaultSlug)}` };
+		}
+		if (defaultModel.provider === 'qwen-aligner') {
+			return { error: `Default Local ASR model cannot be alignment-only: ${fullModelId(defaultSlug)}` };
+		}
+		return decorateSelection(defaultModel, config, hardware);
+	}
 	const sorted = models.slice().sort((a, b) => Number(b.min_vram_mb || 0) - Number(a.min_vram_mb || 0));
+	let offloadCandidate = null;
 	for (const model of sorted) {
+		if (model.provider === 'qwen-aligner') {
+			continue;
+		}
 		const selected = decorateSelection(model, config, hardware);
-		if (selected.model_path || config.allow_model_downloads) {
+		if (selected.ready && selected.cpu_offload) {
+			offloadCandidate = offloadCandidate || selected;
+			continue;
+		}
+		if (selected.ready || (selected.provider === 'faster-whisper' && (selected.model_path || config.allow_model_downloads))) {
 			return selected;
 		}
 	}
-	return sorted[0] ? decorateSelection(sorted[0], config, hardware) : { error: 'No Local Whisper models are enabled.' };
+	if (offloadCandidate) {
+		return offloadCandidate;
+	}
+	const firstWhisper = sorted.find((model) => (model.provider || 'faster-whisper') === 'faster-whisper');
+	return firstWhisper ? decorateSelection(firstWhisper, config, hardware) : (sorted[0] ? decorateSelection(sorted[0], config, hardware) : { error: 'No Local ASR models are enabled.' });
 }
 
 function decorateSelection(model, config, hardware) {
+	const provider = model.provider || 'faster-whisper';
+	if (provider === 'qwen-asr') {
+		return decorateQwenSelection(model, config, hardware);
+	}
+	if (provider === 'qwen-aligner') {
+		return decorateQwenAlignerSelection(model, config, hardware);
+	}
 	const gpu = hardware.gpu || {};
 	const cudaRuntime = hardware.cuda_runtime || {};
 	const cudaUsable = gpu.available && cudaRuntime.available !== false;
@@ -509,7 +732,81 @@ function decorateSelection(model, config, hardware) {
 		repo_id: repoId || model.repo_id,
 		model_path: modelPath,
 		allow_download: config.allow_model_downloads && !cachedModelPath,
+		ready: !!modelPath,
 		cuda_blocked_reason: wouldUseCuda && !cudaUsable ? (cudaRuntime.reason || 'CUDA runtime unavailable') : '',
+	};
+}
+
+function qwenGpuState(model, config, hardware) {
+	const gpu = hardware.gpu || {};
+	const hasEnoughVram = gpu.available && Number(gpu.free_mb || 0) >= Number(model.min_vram_mb || 0);
+	if (!gpu.available) {
+		return { blocked_reason: 'NVIDIA GPU unavailable', cpu_offload: false, has_enough_vram: false };
+	}
+	if (!hasEnoughVram) {
+		if (config.allow_qwen_cpu_offload) {
+			return { blocked_reason: '', cpu_offload: true, has_enough_vram: false };
+		}
+		return { blocked_reason: `insufficient free VRAM (${Number(gpu.free_mb || 0) || 0} MB free, ${Number(model.min_vram_mb || 0) || 0} MB required)`, cpu_offload: false, has_enough_vram: false };
+	}
+	return { blocked_reason: '', cpu_offload: false, has_enough_vram: true };
+}
+
+function decorateQwenSelection(model, config, hardware) {
+	const gpuState = qwenGpuState(model, config, hardware);
+	const modelPathInfo = resolveModelPathInfo(model, model.repo_id, config.allow_model_downloads, qwenRequiredFiles());
+	const alignerEntry = {
+		local_path: model.aligner_local_path,
+		id: model.aligner_repo_id || 'Qwen/Qwen3-ForcedAligner-0.6B',
+	};
+	const alignerPathInfo = resolveModelPathInfo(alignerEntry, model.aligner_repo_id, config.allow_model_downloads, qwenRequiredFiles());
+	const modelPath = modelPathInfo.path;
+	const alignerPath = alignerPathInfo.path;
+	return {
+		...model,
+		provider: 'qwen-asr',
+		model_id: fullModelId(model.id),
+		device: gpuState.cpu_offload ? 'cuda+cpu' : 'cuda',
+		device_map: gpuState.cpu_offload ? 'auto' : 'cuda:0',
+		cpu_offload: gpuState.cpu_offload,
+		gpu_free_mb: Number((hardware.gpu || {}).free_mb || 0) || 0,
+		compute_type: 'bfloat16',
+		repo_id: model.repo_id,
+		model_path: modelPath,
+		aligner_repo_id: model.aligner_repo_id,
+		aligner_model_path: alignerPath,
+		allow_download: config.allow_model_downloads && (modelPath === (model.repo_id || model.id) || alignerPath === (model.aligner_repo_id || '')),
+		ready: !gpuState.blocked_reason && !!modelPath && !!alignerPath,
+		cuda_blocked_reason: gpuState.blocked_reason,
+		incomplete_model_path: modelPathInfo.incomplete_path,
+		incomplete_model_missing_files: modelPathInfo.missing_files,
+		incomplete_aligner_path: alignerPathInfo.incomplete_path,
+		incomplete_aligner_missing_files: alignerPathInfo.missing_files,
+	};
+}
+
+function decorateQwenAlignerSelection(model, config, hardware) {
+	const gpuState = qwenGpuState(model, config, hardware);
+	const modelPathInfo = resolveModelPathInfo(model, model.repo_id, config.allow_model_downloads, qwenRequiredFiles());
+	const modelPath = modelPathInfo.path;
+	return {
+		...model,
+		provider: 'qwen-aligner',
+		model_id: fullModelId(model.id),
+		device: gpuState.cpu_offload ? 'cuda+cpu' : 'cuda',
+		device_map: gpuState.cpu_offload ? 'auto' : 'cuda:0',
+		cpu_offload: gpuState.cpu_offload,
+		gpu_free_mb: Number((hardware.gpu || {}).free_mb || 0) || 0,
+		compute_type: 'bfloat16',
+		repo_id: model.repo_id,
+		model_path: modelPath,
+		aligner_repo_id: model.repo_id,
+		aligner_model_path: modelPath,
+		allow_download: config.allow_model_downloads && modelPath === (model.repo_id || model.id),
+		ready: !gpuState.blocked_reason && !!modelPath,
+		cuda_blocked_reason: gpuState.blocked_reason,
+		incomplete_model_path: modelPathInfo.incomplete_path,
+		incomplete_model_missing_files: modelPathInfo.missing_files,
 	};
 }
 
@@ -536,7 +833,7 @@ function requestCouldUseCuda(requestedModel, config, hardware) {
 function cpuFallbackSelection(selected, config, hardware) {
 	const entry = enabledModels(config).find((model) => model.id === selected.id);
 	if (!entry) {
-		return { error: `Unknown or disabled Local Whisper model: ${selected.model_id}` };
+		return { error: `Unknown or disabled Local ASR model: ${selected.model_id}` };
 	}
 	return decorateSelection({ ...entry, preferred_device: 'cpu' }, config, {
 		...hardware,
@@ -661,6 +958,80 @@ async function ensureRuntime(config = settings(), session = {}) {
 	return { success: true, python: venvPython };
 }
 
+async function ensureQwenTorchCuda(config = settings(), pythonPath, session = {}) {
+	const emit = typeof session.appendSessionOutput === 'function' ? session.appendSessionOutput : () => {};
+	let info = torchCudaInfo(pythonPath);
+	if (info.available) {
+		return { success: true, installed: false, torch_cuda: info };
+	}
+	if (!config.allow_package_install) {
+		return {
+			success: false,
+			category: 'configuration',
+			code: 'qwen_asr_torch_cuda_missing',
+			message: `Local Qwen ASR requires a CUDA-enabled PyTorch build, but the current torch install is not usable: ${info.reason || 'torch CUDA unavailable'}.`,
+			details: { torch_cuda: info },
+		};
+	}
+	emit('stdout', `Installing CUDA-enabled PyTorch for Local Qwen ASR from ${DEFAULT_QWEN_TORCH_INDEX_URL} (${info.reason || 'torch CUDA unavailable'}).\n`);
+	const installed = await runAsync(pythonPath, ['-m', 'pip', 'install', '--progress-bar', 'off', '--force-reinstall', '--no-deps', '--index-url', DEFAULT_QWEN_TORCH_INDEX_URL, 'torch'], { timeout: 1800000, onOutput: emit });
+	if (installed.error || installed.status !== 0) {
+		return {
+			success: false,
+			category: 'configuration',
+			code: 'qwen_asr_torch_cuda_install_failed',
+			message: 'CUDA-enabled PyTorch could not be installed for Local Qwen ASR.',
+			details: installed,
+		};
+	}
+	info = torchCudaInfo(pythonPath);
+	if (!info.available) {
+		return {
+			success: false,
+			category: 'configuration',
+			code: 'qwen_asr_torch_cuda_unavailable',
+			message: `CUDA-enabled PyTorch is installed but still not usable for Local Qwen ASR: ${info.reason || 'torch CUDA unavailable'}.`,
+			details: { torch_cuda: info },
+		};
+	}
+	return { success: true, installed: true, torch_cuda: info };
+}
+
+async function ensureQwenRuntime(config = settings(), session = {}) {
+	const emit = typeof session.appendSessionOutput === 'function' ? session.appendSessionOutput : () => {};
+	const venvPython = qwenVenvPythonPath(config);
+	if (!fs.existsSync(venvPython)) {
+		const python = discoverQwenPython(config);
+		if (!python.available) {
+			return { success: false, category: 'configuration', code: 'qwen_asr_python_missing', message: 'Python 3.12+ was not found for Local Qwen ASR setup.', details: { probe: probe(config) } };
+		}
+		if (!config.allow_package_install) {
+			return { success: false, category: 'configuration', code: 'qwen_asr_venv_missing', message: 'Local Qwen ASR Python environment is missing and package installation is disabled.', details: { probe: probe(config) } };
+		}
+		emit('stdout', `Creating Local Qwen ASR Python environment at ${config.qwen_venv_path}\n`);
+		fs.mkdirSync(path.dirname(config.qwen_venv_path), { recursive: true });
+		const created = await runAsync(python.command, [...python.argsPrefix, '-m', 'venv', config.qwen_venv_path], { timeout: 600000, onOutput: emit });
+		if (created.error || created.status !== 0) {
+			return { success: false, category: 'configuration', code: 'qwen_asr_venv_failed', message: 'Local Qwen ASR Python environment could not be created.', details: created };
+		}
+	}
+	if (!hasPythonModule(venvPython, 'qwen_asr')) {
+		if (!config.allow_package_install) {
+			return { success: false, category: 'configuration', code: 'qwen_asr_runtime_missing', message: 'qwen-asr is not installed and package installation is disabled.', details: { probe: probe(config) } };
+		}
+		emit('stdout', 'Installing qwen-asr in the Local Qwen ASR Python environment.\n');
+		const installed = await runAsync(venvPython, ['-m', 'pip', 'install', '--progress-bar', 'off', 'qwen-asr'], { timeout: 1800000, onOutput: emit });
+		if (installed.error || installed.status !== 0) {
+			return { success: false, category: 'configuration', code: 'qwen_asr_runtime_install_failed', message: 'qwen-asr could not be installed.', details: installed };
+		}
+	}
+	const torchCuda = await ensureQwenTorchCuda(config, venvPython, session);
+	if (!torchCuda.success) {
+		return torchCuda;
+	}
+	return { success: true, python: venvPython };
+}
+
 async function ensureCudaRuntime(config = settings(), pythonPath, session = {}) {
 	const emit = typeof session.appendSessionOutput === 'function' ? session.appendSessionOutput : () => {};
 	let info = cudaRuntimeInfo(pythonPath);
@@ -688,7 +1059,7 @@ async function transcribe(payload, session = {}) {
 	const requestedModel = payload.model || MODEL_PREFIX;
 	const requestedSlug = modelSlug(requestedModel);
 	if (requestedSlug && !enabledModels(config).some((model) => model.id === requestedSlug)) {
-		return { success: false, category: 'validation', code: 'asr_model_unavailable', message: `Unknown or disabled Local Whisper model: ${requestedModel}` };
+		return { success: false, category: 'validation', code: 'asr_model_unavailable', message: `Unknown or disabled Local ASR model: ${requestedModel}` };
 	}
 	let audioBytes;
 	try {
@@ -699,21 +1070,31 @@ async function transcribe(payload, session = {}) {
 	if (!audioBytes.length) {
 		return { success: false, category: 'validation', message: 'Audio payload is empty.' };
 	}
+	let hardware = probe(config);
+	let selected = selectModel(requestedModel, config, hardware);
+	if (selected.error) {
+		return { success: false, category: 'validation', code: 'asr_model_unavailable', message: selected.error };
+	}
+	if (selected.provider === 'qwen-asr') {
+		return transcribeQwen(payload, audioBytes, selected, config, hardware, session);
+	}
+	if (selected.provider === 'qwen-aligner') {
+		return alignQwen(payload, audioBytes, selected, config, hardware, session);
+	}
 	const runtime = await ensureRuntime(config, session);
 	if (!runtime.success) {
 		return runtime;
 	}
-	let hardware = probe(config);
 	if (requestCouldUseCuda(requestedModel, config, hardware) && !(hardware.cuda_runtime || {}).available) {
 		const cudaRuntime = await ensureCudaRuntime(config, runtime.python, session);
 		if (!cudaRuntime.success && typeof session.appendSessionOutput === 'function') {
 			session.appendSessionOutput('stderr', `${cudaRuntime.message || 'CUDA runtime unavailable; falling back to CPU.'}\n`);
 		}
 		hardware = probe(config);
-	}
-	let selected = selectModel(requestedModel, config, hardware);
-	if (selected.error) {
-		return { success: false, category: 'validation', code: 'asr_model_unavailable', message: selected.error };
+		selected = selectModel(requestedModel, config, hardware);
+		if (selected.error) {
+			return { success: false, category: 'validation', code: 'asr_model_unavailable', message: selected.error };
+		}
 	}
 	if (!selected.model_path) {
 		return { success: false, category: 'configuration', code: 'asr_model_missing', message: `Local Whisper model ${selected.model_id} is not cached or configured. Enable model downloads or set a local model path in the bridge status page.`, details: { selected, hardware } };
@@ -721,6 +1102,7 @@ async function transcribe(payload, session = {}) {
 	const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'alorbach-whisper-transcribe-'));
 	const audioPath = path.join(tempDir, `audio.${audioExtensionForFormat(payload.audio_format)}`);
 	fs.writeFileSync(audioPath, audioBytes);
+	const debugLogDirs = [];
 	async function runSelected(modelSelection) {
 		const request = {
 			audio_path: audioPath,
@@ -736,16 +1118,44 @@ async function transcribe(payload, session = {}) {
 			vad_filter: config.vad_filter,
 			condition_on_previous_text: config.condition_on_previous_text,
 		};
+		const debugLog = beginLocalModelDebugLog({
+			kind: 'asr-whisper',
+			model: modelSelection.model_id,
+			provider: 'faster-whisper',
+			requestId: session.requestId,
+			route: '/v1/transcribe',
+		});
+		if (debugLog) {
+			debugLogDirs.push(debugLog.dir);
+			debugLog.writePrompt(JSON.stringify(request, null, 2));
+			debugLog.writeJson('request', {
+				...request,
+				audio_bytes: audioBytes.length,
+			});
+		}
 		if (typeof session.appendSessionOutput === 'function') {
 			session.appendSessionOutput('stdout', `Local Whisper ${modelSelection.model_id} on ${modelSelection.device}/${modelSelection.compute_type}\n`);
 		}
-		return runAsync(runtime.python, [RUNNER_PATH], {
+		const run = await runAsync(runtime.python, [RUNNER_PATH], {
 			cwd: tempDir,
 			timeout: DEFAULT_TIMEOUT_MS,
 			input: JSON.stringify(request),
 			env: modelSelection.device === 'cuda' ? envWithPrependedPath((hardware.cuda_runtime || {}).dirs || []) : undefined,
 			onOutput: session.appendSessionOutput,
 		});
+		if (debugLog) {
+			debugLog.writeOutput(run.stdout || '');
+			debugLog.writeStdout(run.stdout || '');
+			debugLog.writeStderr(run.stderr || '');
+			debugLog.finish({
+				status: run.status,
+				signal: run.signal || '',
+				error: run.error && (run.error.message || String(run.error)) || '',
+				device: modelSelection.device,
+				compute_type: modelSelection.compute_type,
+			});
+		}
+		return run;
 	}
 	let run = await runSelected(selected);
 	if ((run.error || run.status !== 0) && selected.device === 'cuda' && isCudaRuntimeFailure(run)) {
@@ -759,13 +1169,13 @@ async function transcribe(payload, session = {}) {
 		}
 	}
 	if (run.error || run.status !== 0) {
-		return { success: false, category: 'asr_runtime', code: 'asr_transcribe_failed', message: 'Local Whisper transcription failed.', details: { stdout: run.stdout, stderr: run.stderr, status: run.status, signal: run.signal, error: run.error && run.error.message, selected } };
+		return { success: false, category: 'asr_runtime', code: 'asr_transcribe_failed', message: 'Local Whisper transcription failed.', details: { stdout: run.stdout, stderr: run.stderr, status: run.status, signal: run.signal, error: run.error && run.error.message, selected, debug_log_dirs: debugLogDirs } };
 	}
 	let parsed;
 	try {
 		parsed = JSON.parse(String(run.stdout || '').trim());
 	} catch (error) {
-		return { success: false, category: 'output_detection', code: 'asr_invalid_output', message: 'Local Whisper did not return valid JSON.', details: { stdout: run.stdout, stderr: run.stderr } };
+		return { success: false, category: 'output_detection', code: 'asr_invalid_output', message: 'Local Whisper did not return valid JSON.', details: { stdout: run.stdout, stderr: run.stderr, debug_log_dirs: debugLogDirs } };
 	}
 	const words = Array.isArray(parsed.words) ? parsed.words.filter((item) => item && item.word && Number.isFinite(Number(item.start)) && Number.isFinite(Number(item.end))).map((item) => ({
 		word: String(item.word).trim(),
@@ -773,7 +1183,7 @@ async function transcribe(payload, session = {}) {
 		end: Number(item.end),
 	})) : [];
 	if (!words.length) {
-		return { success: false, category: 'output_detection', code: 'asr_transcription_missing_timestamps', message: 'Local Whisper transcription did not return explicit per-word start and end timing.', details: { stdout: run.stdout, stderr: run.stderr } };
+		return { success: false, category: 'output_detection', code: 'asr_transcription_missing_timestamps', message: 'Local Whisper transcription did not return explicit per-word start and end timing.', details: { stdout: run.stdout, stderr: run.stderr, debug_log_dirs: debugLogDirs } };
 	}
 	return {
 		success: true,
@@ -790,6 +1200,284 @@ async function transcribe(payload, session = {}) {
 				device: selected.device,
 				compute_type: selected.compute_type,
 				model_path: selected.model_path,
+				debug_log_dir: debugLogDirs[debugLogDirs.length - 1] || undefined,
+				debug_log_dirs: debugLogDirs,
+			},
+		},
+	};
+}
+
+async function transcribeQwen(payload, audioBytes, selected, config, hardware, session = {}) {
+	if (selected.cuda_blocked_reason) {
+		return {
+			success: false,
+			category: 'configuration',
+			code: 'qwen_asr_cuda_required',
+			message: `Local Qwen ASR requires CUDA with enough free VRAM: ${selected.cuda_blocked_reason}.`,
+			details: { selected, hardware },
+		};
+	}
+	if (selected.incomplete_model_path && !selected.allow_download) {
+		return {
+			success: false,
+			category: 'configuration',
+			code: 'qwen_asr_model_incomplete',
+			message: `Local Qwen ASR model cache is incomplete at ${selected.incomplete_model_path}. Missing files: ${(selected.incomplete_model_missing_files || []).join(', ') || 'required processor files'}. Enable model downloads or clear/redownload the Hugging Face cache snapshot.`,
+			details: { selected, hardware },
+		};
+	}
+	if (selected.incomplete_aligner_path && !selected.allow_download) {
+		return {
+			success: false,
+			category: 'configuration',
+			code: 'qwen_asr_aligner_incomplete',
+			message: `Local Qwen ASR aligner cache is incomplete at ${selected.incomplete_aligner_path}. Missing files: ${(selected.incomplete_aligner_missing_files || []).join(', ') || 'required processor files'}. Enable model downloads or clear/redownload the Hugging Face cache snapshot.`,
+			details: { selected, hardware },
+		};
+	}
+	if (!selected.model_path) {
+		return {
+			success: false,
+			category: 'configuration',
+			code: 'qwen_asr_model_missing',
+			message: `Local Qwen ASR model ${selected.model_id} is not cached or configured. Enable model downloads or set a local model path in the bridge status page.`,
+			details: { selected, hardware },
+		};
+	}
+	if (!selected.aligner_model_path) {
+		return {
+			success: false,
+			category: 'configuration',
+			code: 'qwen_asr_aligner_missing',
+			message: `Local Qwen ASR aligner ${selected.aligner_repo_id} is not cached or configured. Enable model downloads or set an aligner local path in the bridge status page.`,
+			details: { selected, hardware },
+		};
+	}
+	const runtime = await ensureQwenRuntime(config, session);
+	if (!runtime.success) {
+		return runtime;
+	}
+	const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'alorbach-qwen-transcribe-'));
+	const audioPath = path.join(tempDir, `audio.${audioExtensionForFormat(payload.audio_format)}`);
+	fs.writeFileSync(audioPath, audioBytes);
+	const request = {
+		audio_path: audioPath,
+		model: selected.model_path,
+		aligner_model: selected.aligner_model_path,
+		allow_download: selected.allow_download,
+		language: payload.language || payload.locale || '',
+		compute_type: selected.compute_type,
+		device_map: selected.device_map,
+		gpu_free_mb: selected.gpu_free_mb,
+		cpu_offload: selected.cpu_offload,
+		chunk_seconds: config.qwen_chunk_seconds,
+		max_word_duration_seconds: config.qwen_max_word_duration_seconds,
+		mode: 'transcribe',
+	};
+	if (typeof session.appendSessionOutput === 'function') {
+		session.appendSessionOutput('stdout', `Local Qwen ASR ${selected.model_id} on ${selected.device}/${selected.compute_type} (chunk ${config.qwen_chunk_seconds}s)\n`);
+	}
+	const debugLog = beginLocalModelDebugLog({
+		kind: 'asr-qwen',
+		model: selected.model_id,
+		provider: 'qwen-asr',
+		requestId: session.requestId,
+		route: '/v1/transcribe',
+	});
+	if (debugLog) {
+		debugLog.writePrompt(JSON.stringify(request, null, 2));
+		debugLog.writeJson('request', {
+			...request,
+			audio_bytes: audioBytes.length,
+		});
+	}
+	const run = await runAsync(runtime.python, [QWEN_RUNNER_PATH], {
+		cwd: tempDir,
+		timeout: DEFAULT_TIMEOUT_MS,
+		input: JSON.stringify(request),
+		env: selected.allow_download ? undefined : {
+			HF_HUB_OFFLINE: '1',
+			TRANSFORMERS_OFFLINE: '1',
+		},
+		onOutput: session.appendSessionOutput,
+	});
+	if (debugLog) {
+		debugLog.writeOutput(run.stdout || '');
+		debugLog.writeStdout(run.stdout || '');
+		debugLog.writeStderr(run.stderr || '');
+		debugLog.finish({
+			status: run.status,
+			signal: run.signal || '',
+			error: run.error && (run.error.message || String(run.error)) || '',
+			device: selected.device,
+			compute_type: selected.compute_type,
+		});
+	}
+	if (run.error || run.status !== 0) {
+		return { success: false, category: 'asr_runtime', code: 'qwen_asr_transcribe_failed', message: 'Local Qwen ASR transcription failed.', details: { stdout: run.stdout, stderr: run.stderr, status: run.status, signal: run.signal, error: run.error && run.error.message, selected, debug_log_dir: debugLog && debugLog.dir || '' } };
+	}
+	let parsed;
+	try {
+		parsed = JSON.parse(String(run.stdout || '').trim());
+	} catch (error) {
+		return { success: false, category: 'output_detection', code: 'qwen_asr_invalid_output', message: 'Local Qwen ASR did not return valid JSON.', details: { stdout: run.stdout, stderr: run.stderr, debug_log_dir: debugLog && debugLog.dir || '' } };
+	}
+	const words = Array.isArray(parsed.words) ? parsed.words.filter((item) => item && item.word && Number.isFinite(Number(item.start)) && Number.isFinite(Number(item.end))).map((item) => ({
+		word: String(item.word).trim(),
+		start: Number(item.start),
+		end: Number(item.end),
+	})) : [];
+	if (!words.length) {
+		return { success: false, category: 'output_detection', code: 'asr_transcription_missing_timestamps', message: 'Local Qwen ASR transcription did not return explicit per-word start and end timing.', details: { stdout: run.stdout, stderr: run.stderr, debug_log_dir: debugLog && debugLog.dir || '' } };
+	}
+	return {
+		success: true,
+		response: {
+			text: String(parsed.text || '').trim() || words.map((item) => item.word).join(' '),
+			words,
+			model: selected.model_id,
+			duration_seconds: Number(payload.duration_seconds || parsed.duration || 0) || undefined,
+			local_codex: true,
+			provider_details: {
+				asr_provider: 'qwen-asr',
+				language: parsed.language || undefined,
+				device: selected.device,
+				compute_type: selected.compute_type,
+				device_map: selected.device_map,
+				cpu_offload: !!selected.cpu_offload,
+				chunk_seconds: parsed.chunk_seconds || config.qwen_chunk_seconds,
+				timestamp_warnings: Array.isArray(parsed.timestamp_warnings) ? parsed.timestamp_warnings : [],
+				model_path: selected.model_path,
+				aligner_model_path: selected.aligner_model_path,
+				debug_log_dir: debugLog && debugLog.dir || undefined,
+			},
+		},
+	};
+}
+
+async function alignQwen(payload, audioBytes, selected, config, hardware, session = {}) {
+	const referenceText = referenceTextFromPayload(payload);
+	if (!referenceText) {
+		return {
+			success: false,
+			category: 'validation',
+			code: 'qwen_aligner_reference_text_missing',
+			message: 'Local Qwen ForcedAligner requires reference_text, transcript, or lyrics in the transcription request.',
+			details: { selected },
+		};
+	}
+	if (selected.cuda_blocked_reason) {
+		return {
+			success: false,
+			category: 'configuration',
+			code: 'qwen_aligner_cuda_required',
+			message: `Local Qwen ForcedAligner requires CUDA with enough free VRAM: ${selected.cuda_blocked_reason}.`,
+			details: { selected, hardware },
+		};
+	}
+	if (!selected.model_path) {
+		return {
+			success: false,
+			category: 'configuration',
+			code: 'qwen_aligner_model_missing',
+			message: `Local Qwen ForcedAligner model ${selected.model_id} is not cached or configured. Enable model downloads or set a local model path in the bridge status page.`,
+			details: { selected, hardware },
+		};
+	}
+	const runtime = await ensureQwenRuntime(config, session);
+	if (!runtime.success) {
+		return runtime;
+	}
+	const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'alorbach-qwen-align-'));
+	const audioPath = path.join(tempDir, `audio.${audioExtensionForFormat(payload.audio_format)}`);
+	fs.writeFileSync(audioPath, audioBytes);
+	const request = {
+		audio_path: audioPath,
+		aligner_model: selected.model_path,
+		reference_text: referenceText,
+		allow_download: selected.allow_download,
+		language: payload.language || payload.locale || '',
+		compute_type: selected.compute_type,
+		device_map: selected.device_map,
+		gpu_free_mb: selected.gpu_free_mb,
+		cpu_offload: selected.cpu_offload,
+		mode: 'align',
+	};
+	if (typeof session.appendSessionOutput === 'function') {
+		session.appendSessionOutput('stdout', `Local Qwen ForcedAligner ${selected.model_id} on ${selected.device}/${selected.compute_type}\n`);
+	}
+	const debugLog = beginLocalModelDebugLog({
+		kind: 'asr-qwen-align',
+		model: selected.model_id,
+		provider: 'qwen-aligner',
+		requestId: session.requestId,
+		route: '/v1/transcribe',
+	});
+	if (debugLog) {
+		debugLog.writePrompt(JSON.stringify(request, null, 2));
+		debugLog.writeJson('request', {
+			...request,
+			audio_bytes: audioBytes.length,
+		});
+	}
+	const run = await runAsync(runtime.python, [QWEN_RUNNER_PATH], {
+		cwd: tempDir,
+		timeout: DEFAULT_TIMEOUT_MS,
+		input: JSON.stringify(request),
+		env: selected.allow_download ? undefined : {
+			HF_HUB_OFFLINE: '1',
+			TRANSFORMERS_OFFLINE: '1',
+		},
+		onOutput: session.appendSessionOutput,
+	});
+	if (debugLog) {
+		debugLog.writeOutput(run.stdout || '');
+		debugLog.writeStdout(run.stdout || '');
+		debugLog.writeStderr(run.stderr || '');
+		debugLog.finish({
+			status: run.status,
+			signal: run.signal || '',
+			error: run.error && (run.error.message || String(run.error)) || '',
+			device: selected.device,
+			compute_type: selected.compute_type,
+		});
+	}
+	if (run.error || run.status !== 0) {
+		return { success: false, category: 'asr_runtime', code: 'qwen_aligner_failed', message: 'Local Qwen ForcedAligner alignment failed.', details: { stdout: run.stdout, stderr: run.stderr, status: run.status, signal: run.signal, error: run.error && run.error.message, selected, debug_log_dir: debugLog && debugLog.dir || '' } };
+	}
+	let parsed;
+	try {
+		parsed = JSON.parse(String(run.stdout || '').trim());
+	} catch (error) {
+		return { success: false, category: 'output_detection', code: 'qwen_aligner_invalid_output', message: 'Local Qwen ForcedAligner did not return valid JSON.', details: { stdout: run.stdout, stderr: run.stderr, debug_log_dir: debugLog && debugLog.dir || '' } };
+	}
+	const words = Array.isArray(parsed.words) ? parsed.words.filter((item) => item && item.word && Number.isFinite(Number(item.start)) && Number.isFinite(Number(item.end))).map((item) => ({
+		word: String(item.word).trim(),
+		start: Number(item.start),
+		end: Number(item.end),
+	})) : [];
+	if (!words.length) {
+		return { success: false, category: 'output_detection', code: 'asr_transcription_missing_timestamps', message: 'Local Qwen ForcedAligner did not return explicit per-word start and end timing.', details: { stdout: run.stdout, stderr: run.stderr, debug_log_dir: debugLog && debugLog.dir || '' } };
+	}
+	return {
+		success: true,
+		response: {
+			text: String(parsed.text || '').trim() || referenceText,
+			words,
+			model: selected.model_id,
+			duration_seconds: Number(payload.duration_seconds || parsed.duration || 0) || undefined,
+			local_codex: true,
+			provider_details: {
+				asr_provider: 'qwen-aligner',
+				language: parsed.language || undefined,
+				device: selected.device,
+				compute_type: selected.compute_type,
+				device_map: selected.device_map,
+				cpu_offload: !!selected.cpu_offload,
+				model_path: selected.model_path,
+				aligner_model_path: selected.model_path,
+				reference_text_supplied: true,
+				debug_log_dir: debugLog && debugLog.dir || undefined,
 			},
 		},
 	};
@@ -805,22 +1493,31 @@ function models(options = {}) {
 			details[selected.model_id] = {
 				model_id: selected.model_id,
 				label: selected.label,
+				provider: selected.provider || 'faster-whisper',
 				device: selected.device,
 				compute_type: selected.compute_type,
 				model_path: selected.model_path,
+				aligner_model_path: selected.aligner_model_path || '',
 				min_vram_mb: selected.min_vram_mb,
 				preferred_device: selected.preferred_device,
 				repo_id: selected.repo_id,
-				ready: !!selected.model_path,
+				aligner_repo_id: selected.aligner_repo_id || '',
+				ready: !!selected.ready,
 				allow_download: !!selected.allow_download,
 				cuda_blocked_reason: selected.cuda_blocked_reason || '',
+				device_map: selected.device_map || '',
+				cpu_offload: !!selected.cpu_offload,
+				incomplete_model_path: selected.incomplete_model_path || '',
+				incomplete_model_missing_files: selected.incomplete_model_missing_files || [],
+				incomplete_aligner_path: selected.incomplete_aligner_path || '',
+				incomplete_aligner_missing_files: selected.incomplete_aligner_missing_files || [],
 			};
 		}
 	}
 	return {
 		success: true,
 		models: modelIds(config),
-		labels: Object.fromEntries(enabledModels(config).map((entry) => [fullModelId(entry.id), entry.label])),
+		labels: Object.fromEntries(transcriptionModels(config).map((entry) => [fullModelId(entry.id), entry.label])),
 		model_details: details,
 	};
 }
@@ -832,11 +1529,11 @@ function capabilities(options = {}) {
 	const modelPayload = models({ ...options, hardware });
 	const runtimeChecked = hardware.checked !== false;
 	const runtimeReady = runtimeChecked
-		? hardware.venv_exists && hardware.faster_whisper_installed
+		? (auto.provider === 'qwen-asr' ? hardware.qwen_venv_exists && hardware.qwen_asr_installed && (hardware.qwen_torch_cuda || {}).available : hardware.venv_exists && hardware.faster_whisper_installed)
 		: null;
 	return {
 		enabled: true,
-		ready: runtimeReady === null ? null : runtimeReady && !!auto.model_path,
+		ready: runtimeReady === null ? null : runtimeReady && !!auto.ready,
 		runtime_checked: runtimeChecked,
 		runtime_cached: !!hardware.cached,
 		auto_model: auto.model_id || MODEL_PREFIX,
@@ -864,8 +1561,12 @@ module.exports = {
 	capabilities,
 	defaultSettings,
 	discoverPython,
+	discoverQwenPython,
 	enabledModels,
+	transcriptionModels,
 	ensureRuntime,
+	ensureQwenRuntime,
+	ensureQwenTorchCuda,
 	fullModelId,
 	modelIds,
 	modelSlug,
@@ -883,5 +1584,7 @@ module.exports = {
 	transcribe,
 	cudaRuntimeDirs,
 	cudaRuntimeInfo,
+	torchCudaInfo,
+	qwenVenvPythonPath,
 	venvPythonPath,
 };

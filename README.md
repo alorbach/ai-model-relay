@@ -18,7 +18,7 @@ Windows tray companion for Alorbach AI Subscription Gateway. It exposes a secure
 - Stores a per-origin bearer token in the user's bridge state directory.
 - Executes signed Gateway chat jobs through local `codex exec`.
 - Executes signed Gateway image jobs and returns normalized base64 image data.
-- Executes signed Gateway audio transcription jobs through a private local faster-whisper runtime with per-word timestamps.
+- Executes signed Gateway audio transcription jobs through private local ASR runtimes with per-word timestamps.
 - Reports local bridge multimodal capabilities, including structured Codex event support and optional video/media features.
 - Optionally executes signed OpenAI Videos API jobs when explicitly configured with an API key and enable flag.
 - Optionally analyzes bounded media frames or HTTPS media URLs through local Codex vision prompts.
@@ -42,7 +42,7 @@ Double-click the tray icon or use `Open status page` to open the local status pa
 - Codex CLI installed and logged in for the same Windows account that runs the tray app.
 - Node.js 20+ for development builds.
 - Alorbach AI Subscription Gateway with User-owned Local Codex enabled for production WordPress usage.
-- Optional Local Whisper transcription: Python 3.10, ffmpeg/ffprobe on PATH, and cached faster-whisper models or explicit permission to download models.
+- Optional Local ASR transcription/alignment: Python 3.10 for faster-whisper, Python 3.12 for Qwen3 ASR and Qwen3 ForcedAligner, ffmpeg/ffprobe on PATH, and cached Hugging Face models or explicit permission to download models.
 
 Before pairing, log in to Codex in the same Windows account:
 
@@ -61,7 +61,7 @@ codex login
 7. Choose a Local Codex model such as `codex-local:auto` or `codex-local:image`.
 8. Enter the pairing code shown in the tray app when WordPress prompts for it.
 
-For local audio transcription, open the bridge status page after installation and review `Local Whisper Settings`. By default, the bridge can create a private Python virtual environment under `%USERPROFILE%\.alorbach-codex-bridge\asr-venv` and install `faster-whisper`, but model downloads stay disabled until explicitly enabled or a local model path is configured.
+For local audio transcription, open the bridge status page after installation and review `Local ASR Settings`. By default, the bridge can create private Python virtual environments under `%USERPROFILE%\.alorbach-codex-bridge\asr-venv` for faster-whisper and `%USERPROFILE%\.alorbach-codex-bridge\qwen-asr-venv` for Qwen3 ASR/ForcedAligner. Package installation is controlled by the ASR setting, and model downloads stay disabled until explicitly enabled or local model paths are configured.
 
 ## Documentation
 
@@ -132,13 +132,13 @@ Routes:
 - `GET /v1/status/events`: local job-state event stream used by the status page.
 - `GET /v1/status/stream`: paired live status stream for browser/API clients.
 - `GET /v1/capabilities`: bridge, Codex, video, and media-analysis capability metadata.
-- `GET /v1/asr/settings`: Local Whisper settings and cached runtime metadata. Add `?refresh=1` to run a full Python/GPU/ffmpeg probe.
+- `GET /v1/asr/settings`: Local ASR settings and cached runtime metadata. Add `?refresh=1` to run a full Python/GPU/ffmpeg probe.
 - `POST /v1/pair`: exchange tray pairing code for an origin token.
 - `POST /v1/unpair`: remove the pairing for the request origin.
 - `GET /v1/models`: list paired local model IDs.
 - `POST /v1/chat`: run a signed chat job.
 - `POST /v1/images`: run a signed image job.
-- `POST /v1/transcribe`: run a signed local Whisper transcription job.
+- `POST /v1/transcribe`: run a signed local ASR transcription job.
 - `POST /v1/videos`: optionally run a signed OpenAI Videos API job.
 - `POST /v1/media/analyze`: analyze bounded media frames or an HTTPS media URL.
 
@@ -187,6 +187,8 @@ In production, these values come from WordPress Gateway. The bridge checks that 
 
 The `/status` page auto-refreshes and shows active, queued, and recent job activity with bounded live Codex session output for running jobs. Failed bridge requests include a `debug_help` object with the request id when available, links to `/status` and `/v1/status`, and safe troubleshooting checks. Recent failed jobs keep bounded Codex session output such as stderr/stdout/last response text when available.
 
+Each local model invocation also writes full temporary debug files under `%TEMP%\alorbach-codex-local-bridge-debug`. The bridge deletes that directory on startup. Each invocation folder contains `prompt.txt`, `output.txt`, `stdout.txt`, `stderr.txt`, and `metadata.json`; these files are intentionally full-fidelity and can include prompt text, transcripts, lyrics, and local temp paths.
+
 Paired browser/API clients can subscribe to `GET /v1/status/stream` with their normal `Origin` and `X-Alorbach-Bridge-Token` headers. Browsers set `Origin` automatically; non-browser clients must send the paired origin explicitly. The stream emits `status`, `capabilities`, `jobs`, and `heartbeat` server-sent events. Use `fetch()` streaming for browser clients because native `EventSource` cannot send the required bearer header:
 
 ```js
@@ -208,6 +210,7 @@ for await (const chunk of response.body.pipeThrough(new TextDecoderStream())) {
 - Browser origins must be paired before model and execution routes are accepted.
 - Pairing tokens are per origin and stored in `%USERPROFILE%\.alorbach-codex-bridge\state.json`.
 - The tray diagnostics omit bearer token values.
+- Temporary local-model debug logs are full-fidelity and are deleted on bridge startup.
 - Requests have a 12 MiB JSON body limit.
 - Codex runs in ephemeral temp directories for bridge jobs.
 - Production accounting and duplicate protection stay in WordPress Gateway, not in the local tray app.
@@ -222,9 +225,16 @@ for await (const chunk of response.body.pipeThrough(new TextDecoderStream())) {
 - `ALORBACH_CODEX_IMAGE_TIMEOUT_MS`: image timeout. Default: `1800000`.
 - `ALORBACH_ASR_PYTHON`: explicit Python executable for Local Whisper setup.
 - `ALORBACH_ASR_VENV`: Local Whisper virtual environment path. Default: `%USERPROFILE%\.alorbach-codex-bridge\asr-venv`.
+- `ALORBACH_QWEN_ASR_PYTHON`: explicit Python executable for Local Qwen ASR setup.
+- `ALORBACH_QWEN_ASR_VENV`: Local Qwen ASR virtual environment path. Default: `%USERPROFILE%\.alorbach-codex-bridge\qwen-asr-venv`.
+- `ALORBACH_QWEN_TORCH_INDEX_URL`: PyTorch CUDA wheel index used when repairing the Qwen ASR venv. Default: `https://download.pytorch.org/whl/cu128`.
+- `ALORBACH_QWEN_ALLOW_CPU_OFFLOAD`: set to `0` to disable mixed GPU/CPU Qwen loading for models that do not fit fully in VRAM.
+- `ALORBACH_QWEN_CHUNK_SECONDS`: local pre-chunk size for Qwen ASR timestamped transcription. Default: `30`.
+- `ALORBACH_QWEN_MAX_WORD_DURATION_SECONDS`: cap for implausibly stretched Qwen word timestamps. Default: `12`.
+- `ALORBACH_ASR_DEFAULT_MODEL`: optional default Local ASR model slug when a transcription request does not provide `payload.model`, for example `qwen3-asr-0.6b`.
 - `ALORBACH_ASR_CPU_THREADS`: CPU threads for faster-whisper. Default: `4`.
 - `ALORBACH_ASR_TRANSCRIBE_TIMEOUT_MS`: transcription timeout. Default: `1800000`.
-- `ALORBACH_ASR_PROBE_TTL_MS`: cached Local Whisper runtime probe lifetime. Default: `30000`.
+- `ALORBACH_ASR_PROBE_TTL_MS`: cached Local ASR runtime probe lifetime. Default: `30000`.
 - `ALORBACH_ASR_CUDA_PATHS`: additional CUDA DLL search paths, separated with the Windows path delimiter.
 - `ALORBACH_CODEX_ENABLE_VIDEO`: set to `1` to enable the optional OpenAI Videos API route.
 - `ALORBACH_OPENAI_API_KEY` or `OPENAI_API_KEY`: API key for optional video generation.

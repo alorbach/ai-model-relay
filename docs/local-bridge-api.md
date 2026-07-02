@@ -77,7 +77,9 @@ Example response:
 
 `jobs` reports in-memory local bridge activity. It never includes prompt text or message content. `active` contains currently running jobs, while queued and recent entries may also be present for tray/status diagnostics.
 
-`asr` contains a Local Whisper summary. The default status response is intentionally lightweight and does not run Python, ffmpeg, GPU, or CUDA probes; runtime fields may report `runtime_checked: false` until `/v1/asr/settings?refresh=1` is called or a transcription job runs.
+Full prompt/output debug files are written separately under `%TEMP%\alorbach-codex-local-bridge-debug` and are deleted on bridge startup. Successful provider metadata and some failure details may include `debug_log_dir` pointing to the invocation folder.
+
+`asr` contains a Local ASR summary. The default status response is intentionally lightweight and does not run Python, ffmpeg, GPU, or CUDA probes; runtime fields may report `runtime_checked: false` until `/v1/asr/settings?refresh=1` is called or a transcription job runs.
 
 ## `GET /v1/status/events`
 
@@ -117,7 +119,7 @@ for await (const chunk of response.body.pipeThrough(new TextDecoderStream())) {
 
 ## `GET /v1/capabilities`
 
-Returns capability metadata for the bridge, local Codex executable, Local Whisper ASR, optional video provider, and media analysis support. This route does not require pairing. Local Whisper capability data is lightweight by default so the status page can load quickly.
+Returns capability metadata for the bridge, local Codex executable, Local ASR providers, optional video provider, and media analysis support. This route does not require pairing. Local ASR capability data is lightweight by default so the status page can load quickly.
 
 Example response:
 
@@ -164,7 +166,7 @@ Example response:
 
 ## `GET /v1/asr/settings`
 
-Returns Local Whisper settings and cached or lightweight runtime metadata. This route does not require pairing because the bridge only accepts localhost clients.
+Returns Local ASR settings and cached or lightweight runtime metadata. This route does not require pairing because the bridge only accepts localhost clients.
 
 Default requests avoid expensive runtime probes:
 
@@ -186,18 +188,45 @@ Response:
   "settings": {
     "allow_package_install": true,
     "allow_model_downloads": false,
+    "allow_qwen_cpu_offload": true,
+    "default_model": "qwen3-asr-0.6b",
     "python_path": "",
     "venv_path": "<user-home>\\.alorbach-codex-bridge\\asr-venv",
+    "qwen_python_path": "",
+    "qwen_venv_path": "<user-home>\\.alorbach-codex-bridge\\qwen-asr-venv",
+    "qwen_chunk_seconds": 30,
+    "qwen_max_word_duration_seconds": 12,
     "cpu_threads": 4,
     "models": [
       {
         "id": "whisper-large-v3",
         "label": "Local Whisper Large v3",
+        "provider": "faster-whisper",
         "repo_id": "ctranslate2-4you/whisper-large-v3-ct2-float32",
         "gpu_repo_id": "ctranslate2-4you/whisper-large-v3-ct2-float16",
         "min_vram_mb": 8192,
         "enabled": true,
         "preferred_device": "auto"
+      },
+      {
+        "id": "qwen3-asr-1.7b",
+        "label": "Local Qwen3 ASR 1.7B",
+        "provider": "qwen-asr",
+        "repo_id": "Qwen/Qwen3-ASR-1.7B",
+        "aligner_repo_id": "Qwen/Qwen3-ForcedAligner-0.6B",
+        "min_vram_mb": 10000,
+        "enabled": true,
+        "preferred_device": "cuda"
+      },
+      {
+        "id": "qwen3-asr-0.6b",
+        "label": "Local Qwen3 ASR 0.6B",
+        "provider": "qwen-asr",
+        "repo_id": "Qwen/Qwen3-ASR-0.6B",
+        "aligner_repo_id": "Qwen/Qwen3-ForcedAligner-0.6B",
+        "min_vram_mb": 6000,
+        "enabled": true,
+        "preferred_device": "cuda"
       }
     ]
   },
@@ -205,10 +234,12 @@ Response:
     "enabled": true,
     "ready": null,
     "runtime_checked": false,
-    "models": ["codex-local:audio", "codex-local:audio:whisper-large-v3"]
+    "models": ["codex-local:audio", "codex-local:audio:whisper-large-v3", "codex-local:audio:qwen3-asr-1.7b", "codex-local:audio:qwen3-asr-0.6b"]
   }
 }
 ```
+
+When runtime probing is refreshed, `capabilities.runtime.qwen_torch_cuda` reports whether the Qwen venv has a CUDA-enabled PyTorch build. If `qwen-asr` installed CPU-only torch, the bridge can repair it when package installation is enabled.
 
 `POST /v1/asr/settings` saves the same settings object. Saving invalidates the in-memory runtime probe cache; the status page can then call `GET /v1/asr/settings?refresh=1` to recheck the environment.
 
@@ -271,7 +302,9 @@ Response:
       "codex-local:audio",
       "codex-local:audio:whisper-large-v3",
       "codex-local:audio:whisper-medium",
-      "codex-local:audio:whisper-small"
+      "codex-local:audio:whisper-small",
+      "codex-local:audio:qwen3-asr-1.7b",
+      "codex-local:audio:qwen3-asr-0.6b"
     ]
   }
 }
@@ -279,7 +312,7 @@ Response:
 
 If `CODEX_HOME/models_cache.json` exists, additional text model IDs from that cache are returned as `codex-local:<id>`.
 
-Audio model IDs are configured by Local Whisper settings. `codex-local:audio` auto-selects the best enabled cached model, preferring CUDA when VRAM and CUDA runtime checks allow it. If CUDA fails at execution time, the bridge retries on CPU/int8 when a CPU model path is available.
+Audio model IDs are configured by Local ASR settings. When a transcription request omits `payload.model` or uses `codex-local:audio`, the bridge first uses `settings.default_model` if it is set. Otherwise `codex-local:audio` auto-selects the best enabled ready local transcription model. Qwen3 ASR 1.7B is preferred when `Qwen/Qwen3-ASR-1.7B` and `Qwen/Qwen3-ForcedAligner-0.6B` are cached or explicitly downloadable and CUDA has enough free VRAM; `Qwen/Qwen3-ASR-0.6B` is the lower-VRAM Qwen ASR fallback. When `allow_qwen_cpu_offload` is enabled, explicit/default Qwen selections can use mixed GPU/CPU loading and report `device: "cuda+cpu"` with `device_map: "auto"`. The Qwen runner pre-chunks timestamped ASR locally using `qwen_chunk_seconds` and caps implausibly stretched single-word spans using `qwen_max_word_duration_seconds`, reporting any caps in provider metadata. The ForcedAligner is used only for Qwen timestamps and is not exposed as a normal audio model. If faster-whisper CUDA fails at execution time, the bridge retries on CPU/int8 when a CPU model path is available.
 
 ## `POST /v1/chat`
 
@@ -394,7 +427,7 @@ When the installed Codex CLI supports `codex exec --json`, image and chat jobs u
 
 ## `POST /v1/transcribe`
 
-Runs a local Whisper transcription request through the private faster-whisper runtime. This route requires pairing and the signed WordPress job envelope.
+Runs a local ASR transcription or reference-text alignment request through the private local ASR runtimes. This route requires pairing and the signed WordPress job envelope.
 
 Request:
 
@@ -434,7 +467,7 @@ Response:
 }
 ```
 
-The bridge writes the submitted audio to a temporary local file, runs `src/asr-runner.py` in the configured ASR virtual environment, and requires explicit per-word `start` and `end` seconds. Missing timestamps are returned as an output-detection failure. The JSON body is still bounded by the bridge request size limit.
+The bridge writes the submitted audio to a temporary local file, runs `src/asr-runner.py` for faster-whisper or `src/asr-qwen-runner.py` for Qwen providers, and requires explicit per-word `start` and `end` seconds. Missing timestamps are returned as an output-detection failure. The JSON body is still bounded by the bridge request size limit.
 
 ## `POST /v1/videos`
 

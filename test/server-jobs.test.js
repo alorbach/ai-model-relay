@@ -209,6 +209,16 @@ function createMockSecurity() {
 		assert.ok(page.body.includes('/v1/status'));
 		assert.ok(page.body.includes('/v1/capabilities'));
 		assert.ok(page.body.includes('/v1/status/events'));
+		assert.ok(page.body.includes('role="tablist"'));
+		assert.ok(page.body.includes('id="tab-overview"'));
+		assert.ok(page.body.includes('id="tab-live"'));
+		assert.ok(page.body.includes('id="tab-settings"'));
+		assert.ok(page.body.includes('id="tab-debug"'));
+		assert.ok(page.body.includes('id="panel-overview"'));
+		assert.ok(page.body.includes('id="panel-live"'));
+		assert.ok(page.body.includes('id="panel-settings"'));
+		assert.ok(page.body.includes('id="panel-debug"'));
+		assert.ok(page.body.includes('selectTab'));
 		assert.ok(page.body.includes('Queued Jobs'));
 		assert.ok(page.body.includes('Recent Activity'));
 		assert.ok(page.body.includes('connectionPill'));
@@ -217,7 +227,7 @@ function createMockSecurity() {
 		assert.ok(page.body.includes('heartbeat'));
 		assert.ok(page.body.includes('Codex CLI Version'));
 		assert.ok(page.body.includes('Detected Features'));
-		assert.ok(page.body.includes('Local Whisper Settings'));
+		assert.ok(page.body.includes('Local ASR Settings'));
 		assert.ok(page.body.includes('id="asrSettingsForm"'));
 		assert.ok(page.body.includes('id="addAsrModel"'));
 		assert.ok(page.body.includes('id="applyAsrSettingsJson"'));
@@ -232,6 +242,10 @@ function createMockSecurity() {
 		assert.ok(page.body.includes('white-space: pre-wrap'));
 		assert.ok(page.body.includes('overflow-x: hidden'));
 		assert.ok(page.body.includes('live-session-output'));
+		assert.ok(page.body.includes('<details class="session-output-block">'));
+		assert.ok(page.body.includes('Prompt'));
+		assert.ok(page.body.includes('AI Response'));
+		assert.ok(page.body.includes('debug_logs'));
 		assert.ok(page.body.includes('data-session-key'));
 		assert.ok(page.body.includes('captureSessionOutputScrolls'));
 		assert.ok(page.body.includes('restoreSessionOutputScrolls'));
@@ -333,6 +347,8 @@ function createMockSecurity() {
 		const [firstResult, thirdResult] = await Promise.all([first, third]);
 		assert.strictEqual(firstResult.statusCode, 200);
 		assert.strictEqual(thirdResult.statusCode, 200);
+		const completedStatus = await requestJson(port, 'GET', '/v1/status');
+		assert.ok(completedStatus.body.jobs.recent.some((job) => job.status === 'completed' && String(job.session_output || '').includes('live output for codex-local:auto')));
 
 		const failed = requestJson(port, 'POST', '/v1/chat', body('failed'));
 		await waitFor(() => pending.length === 4);

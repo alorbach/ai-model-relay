@@ -173,13 +173,35 @@ function statusPageHtml() {
 		.feature-pill.disabled .state { color: var(--bad); }
 		.session-output-block {
 			min-width: 0;
+			border: 1px solid var(--line);
+			border-radius: 8px;
+			background: #0e1520;
+			margin-bottom: 10px;
 		}
-		.session-output-header {
+		.session-output-summary {
 			display: flex;
 			align-items: center;
 			justify-content: space-between;
 			gap: 12px;
-			margin-bottom: 8px;
+			padding: 10px 12px;
+			cursor: pointer;
+			list-style: none;
+			user-select: none;
+		}
+		.session-output-summary::-webkit-details-marker {
+			display: none;
+		}
+		.session-output-summary::before {
+			content: ">";
+			flex: 0 0 auto;
+			color: var(--text);
+			transition: transform 0.15s ease;
+		}
+		.session-output-block[open] .session-output-summary::before {
+			transform: rotate(90deg);
+		}
+		.session-output-summary .label {
+			margin: 0 auto 0 0;
 		}
 		.copy-session-output {
 			appearance: none;
@@ -261,7 +283,9 @@ function statusPageHtml() {
 			word-break: break-word;
 		}
 		.session-output {
-			max-height: 260px;
+			border-width: 1px 0 0;
+			border-radius: 0 0 8px 8px;
+			max-height: none;
 		}
 		.live-session-output {
 			scroll-behavior: smooth;
@@ -386,10 +410,46 @@ function statusPageHtml() {
 			border-color: var(--info);
 			outline: none;
 		}
+		.tabs {
+			display: flex;
+			align-items: center;
+			gap: 8px;
+			margin-bottom: 12px;
+			border-bottom: 1px solid var(--line);
+			overflow-x: auto;
+		}
+		.tab-button {
+			appearance: none;
+			border: 1px solid transparent;
+			border-bottom: 0;
+			border-radius: 8px 8px 0 0;
+			background: transparent;
+			color: var(--muted);
+			cursor: pointer;
+			font: inherit;
+			font-weight: 650;
+			padding: 10px 13px;
+			white-space: nowrap;
+		}
+		.tab-button:hover,
+		.tab-button:focus-visible {
+			color: var(--text);
+			outline: none;
+		}
+		.tab-button[aria-selected="true"] {
+			background: var(--panel);
+			border-color: var(--line);
+			color: var(--text);
+		}
+		.tab-panel[hidden] {
+			display: none;
+		}
 		@media (max-width: 760px) {
 			main { width: min(100% - 20px, 1080px); margin-top: 12px; }
 			header { align-items: flex-start; flex-direction: column; }
 			.status-meta { justify-content: flex-start; }
+			.tabs { gap: 4px; }
+			.tab-button { padding: 9px 10px; }
 			.span-4,
 			.span-6 { grid-column: span 12; }
 			.feature-grid { grid-template-columns: 1fr; }
@@ -409,7 +469,13 @@ function statusPageHtml() {
 				<div class="updated" id="lastEvent">No live events yet</div>
 			</div>
 		</header>
-		<section class="grid">
+		<nav class="tabs" role="tablist" aria-label="Status page sections">
+			<button class="tab-button" type="button" role="tab" id="tab-overview" aria-controls="panel-overview" aria-selected="true">Overview</button>
+			<button class="tab-button" type="button" role="tab" id="tab-live" aria-controls="panel-live" aria-selected="false" tabindex="-1">Live</button>
+			<button class="tab-button" type="button" role="tab" id="tab-settings" aria-controls="panel-settings" aria-selected="false" tabindex="-1">Settings</button>
+			<button class="tab-button" type="button" role="tab" id="tab-debug" aria-controls="panel-debug" aria-selected="false" tabindex="-1">Debug</button>
+		</nav>
+		<section class="tab-panel grid" id="panel-overview" role="tabpanel" aria-labelledby="tab-overview">
 			<div class="panel span-4">
 				<div class="label">Bridge</div>
 				<div class="value"><span class="pill" id="bridgePill"><span class="dot"></span><span>Checking</span></span></div>
@@ -439,17 +505,38 @@ function statusPageHtml() {
 				<div class="value"><code id="codexBinary">-</code></div>
 			</div>
 			<div class="panel span-12">
-				<div class="label">Detected Features</div>
-				<div class="feature-grid" id="detectedFeatures"></div>
-			</div>
-			<div class="panel span-12">
-				<div class="label">Local Whisper Runtime</div>
+				<div class="label">Local ASR Runtime</div>
 				<table class="table">
 					<tbody id="asrDetails"><tr><td class="muted">Loading</td></tr></tbody>
 				</table>
 			</div>
+		</section>
+		<section class="tab-panel grid" id="panel-live" role="tabpanel" aria-labelledby="tab-live" hidden>
 			<div class="panel span-12">
-				<div class="label">Local Whisper Settings</div>
+				<div class="label">Active Jobs</div>
+				<table class="table">
+					<thead><tr><th>Request</th><th>Type</th><th>Model</th><th>Status</th><th>Elapsed</th></tr></thead>
+					<tbody id="activeJobs"><tr><td colspan="5" class="muted">No active jobs</td></tr></tbody>
+				</table>
+			</div>
+			<div class="panel span-12">
+				<div class="label">Queued Jobs</div>
+				<table class="table">
+					<thead><tr><th>Request</th><th>Type</th><th>Model</th><th>Status</th><th>Waited</th></tr></thead>
+					<tbody id="queuedJobs"><tr><td colspan="5" class="muted">No queued jobs</td></tr></tbody>
+				</table>
+			</div>
+			<div class="panel span-12">
+				<div class="label">Recent Activity</div>
+				<table class="table">
+					<thead><tr><th>Request</th><th>Type</th><th>Model</th><th>Status</th><th>Elapsed</th><th>Finished</th></tr></thead>
+					<tbody id="recentActivity"><tr><td colspan="6" class="muted">No recent activity</td></tr></tbody>
+				</table>
+			</div>
+		</section>
+		<section class="tab-panel grid" id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" hidden>
+			<div class="panel span-12">
+				<div class="label">Local ASR Settings</div>
 				<form class="settings-editor" id="asrSettingsForm">
 					<div class="settings-grid" id="asrGeneralSettings"></div>
 					<div>
@@ -474,26 +561,11 @@ function statusPageHtml() {
 					</div>
 				</form>
 			</div>
+		</section>
+		<section class="tab-panel grid" id="panel-debug" role="tabpanel" aria-labelledby="tab-debug" hidden>
 			<div class="panel span-12">
-				<div class="label">Active Jobs</div>
-				<table class="table">
-					<thead><tr><th>Request</th><th>Type</th><th>Model</th><th>Status</th><th>Elapsed</th></tr></thead>
-					<tbody id="activeJobs"><tr><td colspan="5" class="muted">No active jobs</td></tr></tbody>
-				</table>
-			</div>
-			<div class="panel span-12">
-				<div class="label">Queued Jobs</div>
-				<table class="table">
-					<thead><tr><th>Request</th><th>Type</th><th>Model</th><th>Status</th><th>Waited</th></tr></thead>
-					<tbody id="queuedJobs"><tr><td colspan="5" class="muted">No queued jobs</td></tr></tbody>
-				</table>
-			</div>
-			<div class="panel span-12">
-				<div class="label">Recent Activity</div>
-				<table class="table">
-					<thead><tr><th>Request</th><th>Type</th><th>Model</th><th>Status</th><th>Elapsed</th><th>Finished</th></tr></thead>
-					<tbody id="recentActivity"><tr><td colspan="6" class="muted">No recent activity</td></tr></tbody>
-				</table>
+				<div class="label">Detected Features</div>
+				<div class="feature-grid" id="detectedFeatures"></div>
 			</div>
 			<div class="panel span-12">
 				<div class="label">Paired Sites</div>
@@ -502,7 +574,7 @@ function statusPageHtml() {
 			<div class="panel span-12">
 				<div class="label">Debug Help</div>
 				<ul class="help-list">
-					<li>Check this page after a failed request; recent failed jobs and Codex session output appear above.</li>
+					<li>Check the Live tab after a request; recent jobs keep bounded Codex session output.</li>
 					<li>Use the tray menu Copy diagnostics action for a safe diagnostic payload without bearer tokens.</li>
 					<li>Run <code>codex login status</code> in the same Windows account as the tray app.</li>
 					<li>Confirm the browser origin is paired and the request includes the bridge token.</li>
@@ -533,6 +605,8 @@ function statusPageHtml() {
 		let fallbackPollTimer = null;
 		let jobEvents = null;
 		const fields = {
+			tabButtons: Array.from(document.querySelectorAll('[role="tab"]')),
+			tabPanels: Array.from(document.querySelectorAll('[role="tabpanel"]')),
 			updated: document.getElementById('updated'),
 			lastEvent: document.getElementById('lastEvent'),
 			connectionPill: document.getElementById('connectionPill'),
@@ -563,6 +637,48 @@ function statusPageHtml() {
 			rawStatus: document.getElementById('rawStatus'),
 			copyRawStatus: document.getElementById('copyRawStatus'),
 		};
+
+		function selectTab(tabId, options = {}) {
+			const nextButton = fields.tabButtons.find((button) => button.id === tabId) || fields.tabButtons[0];
+			if (!nextButton) {
+				return;
+			}
+			const nextPanelId = nextButton.getAttribute('aria-controls');
+			for (const button of fields.tabButtons) {
+				const selected = button === nextButton;
+				button.setAttribute('aria-selected', selected ? 'true' : 'false');
+				button.tabIndex = selected ? 0 : -1;
+			}
+			for (const panel of fields.tabPanels) {
+				panel.hidden = panel.id !== nextPanelId;
+			}
+			if (options.focus) {
+				nextButton.focus();
+			}
+		}
+
+		function initTabs() {
+			fields.tabButtons.forEach((button, index) => {
+				button.addEventListener('click', () => selectTab(button.id));
+				button.addEventListener('keydown', (event) => {
+					if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
+						return;
+					}
+					event.preventDefault();
+					let nextIndex = index;
+					if (event.key === 'Home') {
+						nextIndex = 0;
+					} else if (event.key === 'End') {
+						nextIndex = fields.tabButtons.length - 1;
+					} else {
+						const direction = event.key === 'ArrowRight' ? 1 : -1;
+						nextIndex = (index + direction + fields.tabButtons.length) % fields.tabButtons.length;
+					}
+					selectTab(fields.tabButtons[nextIndex].id, { focus: true });
+				});
+			});
+			selectTab('tab-overview');
+		}
 
 		function text(value, fallback = '-') {
 			const normalized = String(value ?? '').trim();
@@ -647,13 +763,44 @@ function statusPageHtml() {
 		function sessionOutputBlock(label, options = {}) {
 			const live = !!options.live;
 			const key = text(options.key, '');
-			return '<div class="session-output-block">' +
-				'<div class="session-output-header">' +
-					'<div class="label">' + escapeHtml(label) + '</div>' +
+			return '<details class="session-output-block">' +
+				'<summary class="session-output-summary">' +
+					'<span class="label">' + escapeHtml(label) + '</span>' +
 					'<button type="button" class="copy-session-output">Copy</button>' +
-				'</div>' +
+				'</summary>' +
 				'<pre class="session-output' + (live ? ' live-session-output' : '') + '" data-session-key="' + escapeHtml(key) + '"></pre>' +
-			'</div>';
+			'</details>';
+		}
+
+		function debugLogBlocks(job, key) {
+			const logs = Array.isArray(job.debug_logs) ? job.debug_logs : [];
+			const blocks = [];
+			logs.forEach((log, index) => {
+				const suffix = logs.length > 1 ? ' ' + (index + 1) : '';
+				if (log.prompt) {
+					blocks.push(sessionOutputBlock('Prompt' + suffix, { key: key + ':prompt:' + index }));
+				}
+				if (log.output) {
+					blocks.push(sessionOutputBlock('AI Response' + suffix, { key: key + ':output:' + index }));
+				}
+			});
+			return blocks.join('');
+		}
+
+		function updateDebugLogBlocks(row, job, key) {
+			const logs = Array.isArray(job.debug_logs) ? job.debug_logs : [];
+			const outputs = Array.from(row.querySelectorAll('.session-output'));
+			const byKey = (value) => outputs.find((output) => output.dataset.sessionKey === value);
+			logs.forEach((log, index) => {
+				const promptOutput = byKey(key + ':prompt:' + index);
+				if (promptOutput) {
+					updateSessionOutput(promptOutput, log.prompt || '');
+				}
+				const responseOutput = byKey(key + ':output:' + index);
+				if (responseOutput) {
+					updateSessionOutput(responseOutput, log.output || '');
+				}
+			});
 		}
 
 		function rowFor(tbody, key, kind) {
@@ -738,18 +885,38 @@ function statusPageHtml() {
 				tbody.appendChild(summaryRow);
 
 				let outputRow = rowFor(tbody, key, 'output');
-				if (job.session_output) {
-					if (!outputRow) {
-						outputRow = createSessionRow(key, 'output');
-						outputRow.innerHTML = '<td colspan="' + colspan + '">' + sessionOutputBlock(options.outputLabel, {
-							live: !!options.live,
-							key,
-						}) + '</td>';
+				const debugLogs = Array.isArray(job.debug_logs) ? job.debug_logs : [];
+				const hasDebugOutput = debugLogs.some((log) => log && (log.prompt || log.output));
+				const hasOutput = !!job.session_output || hasDebugOutput;
+				if (hasOutput) {
+					const signature = JSON.stringify({
+						session: !!job.session_output,
+						debug: debugLogs.map((log) => [!!(log && log.prompt), !!(log && log.output)]),
+					});
+					if (!outputRow || outputRow.dataset.outputSignature !== signature) {
+						if (!outputRow) {
+							outputRow = createSessionRow(key, 'output');
+						}
+						outputRow.dataset.outputSignature = signature;
+						let blocks = '';
+						if (job.session_output) {
+							blocks += sessionOutputBlock(options.outputLabel, {
+								live: !!options.live,
+								key,
+							});
+						}
+						blocks += debugLogBlocks(job, key);
+						outputRow.innerHTML = '<td colspan="' + colspan + '">' + blocks + '</td>';
 					}
 					tbody.appendChild(outputRow);
-					const output = outputRow.querySelector('.session-output');
-					if (output) {
-						updateSessionOutput(output, job.session_output);
+					if (job.session_output) {
+						const output = Array.from(outputRow.querySelectorAll('.session-output')).find((item) => item.dataset.sessionKey === key);
+						if (output) {
+							updateSessionOutput(output, job.session_output);
+						}
+					}
+					if (hasDebugOutput) {
+						updateDebugLogBlocks(outputRow, job, key);
 					}
 				} else if (outputRow) {
 					outputRow.remove();
@@ -813,15 +980,25 @@ function statusPageHtml() {
 			const selected = asr.selected || {};
 			const checked = runtime.checked !== false && asr.runtime_checked !== false;
 			const availability = (value, yes, no) => value === null || value === undefined ? 'Not checked' : (value ? yes : no);
+			const torchCuda = runtime.qwen_torch_cuda || {};
+			const torchCudaText = torchCuda.available === null || torchCuda.available === undefined
+				? 'Not checked'
+				: (torchCuda.available ? ((torchCuda.version || 'torch') + ' / CUDA ' + (torchCuda.cuda_version || '?') + ' / devices ' + (torchCuda.device_count || 0)) : (torchCuda.reason || 'Unavailable'));
 			const rows = [
 				['Runtime Check', checked ? (runtime.cached ? 'Cached' : 'Checked') : 'Not checked'],
 				['Ready', availability(asr.ready, 'Yes', 'No')],
 				['Auto Model', asr.auto_model],
 				['Selected Device', selected.device ? selected.device + ' / ' + selected.compute_type : ''],
+				['Selected Provider', selected.provider || ''],
 				['Selected Model Path', selected.model_path],
+				['Selected Aligner Path', selected.aligner_model_path || ''],
 				['Python', checked ? (python.available ? python.command + ' ' + (python.version || '') : 'Not found') : 'Not checked'],
 				['Venv', runtime.venv_python],
 				['faster-whisper', availability(runtime.faster_whisper_installed, 'Installed', 'Missing')],
+				['Qwen Python', checked && runtime.qwen_python ? (runtime.qwen_python.available ? runtime.qwen_python.command + ' ' + (runtime.qwen_python.version || '') : 'Not found') : 'Not checked'],
+				['Qwen Venv', runtime.qwen_venv_python],
+				['qwen-asr', availability(runtime.qwen_asr_installed, 'Installed', 'Missing')],
+				['Qwen torch CUDA', torchCudaText],
 				['ffmpeg', availability(runtime.ffmpeg_available, 'Available', 'Missing')],
 				['ffprobe', availability(runtime.ffprobe_available, 'Available', 'Missing')],
 				['GPU', gpu.available === null || gpu.available === undefined ? 'Not checked' : (gpu.available ? gpu.name + ' (' + gpu.free_mb + ' MB free / ' + gpu.total_mb + ' MB)' : 'Unavailable')],
@@ -865,8 +1042,8 @@ function statusPageHtml() {
 				featurePill('Image attachments', features.image_attachments),
 				featurePill('Codex app server', features.app_server),
 				featurePill('Local image generation', features.images),
-				featurePill('Local Whisper ASR', currentCapabilities.asr && currentCapabilities.asr.enabled),
-				featurePill('Local Whisper ready', currentCapabilities.asr && currentCapabilities.asr.ready),
+				featurePill('Local ASR', currentCapabilities.asr && currentCapabilities.asr.enabled),
+				featurePill('Local ASR ready', currentCapabilities.asr && currentCapabilities.asr.ready),
 				featurePill('Media analysis route', mediaAnalysis.enabled),
 				featurePill('ffmpeg frame extraction', mediaAnalysis.ffmpeg_available),
 				featurePill('OpenAI video route', video.enabled),
@@ -896,28 +1073,48 @@ function statusPageHtml() {
 
 		function renderAsrSettingsForm(settings) {
 			currentAsrSettings = settings || {};
+			const models = Array.isArray(currentAsrSettings.models) ? currentAsrSettings.models : [];
+			const defaultModel = currentAsrSettings.default_model || '';
+			const defaultModelOptions = [
+				'<option value=""' + optionAttr('', defaultModel) + '>Auto</option>',
+				...models.filter((model) => model && model.id && model.enabled !== false && model.provider !== 'qwen-aligner').map((model) => (
+					'<option value="' + escapeHtml(model.id || '') + '"' + optionAttr(model.id || '', defaultModel) + '>' + escapeHtml(model.label || model.id || 'Model') + '</option>'
+				)),
+			].join('');
 			fields.asrGeneralSettings.innerHTML = [
 				'<label class="checkbox-row"><input type="checkbox" id="asrAllowPackageInstall"' + checkedAttr(currentAsrSettings.allow_package_install !== false) + '><span>Install Python packages automatically</span></label>',
-				'<label class="checkbox-row"><input type="checkbox" id="asrAllowModelDownloads"' + checkedAttr(currentAsrSettings.allow_model_downloads === true) + '><span>Allow Whisper model downloads</span></label>',
+				'<label class="checkbox-row"><input type="checkbox" id="asrAllowModelDownloads"' + checkedAttr(currentAsrSettings.allow_model_downloads === true) + '><span>Allow ASR model downloads</span></label>',
+				'<label class="checkbox-row"><input type="checkbox" id="asrAllowQwenCpuOffload"' + checkedAttr(currentAsrSettings.allow_qwen_cpu_offload !== false) + '><span>Allow Qwen CPU offload</span></label>',
 				'<label class="checkbox-row"><input type="checkbox" id="asrVadFilter"' + checkedAttr(currentAsrSettings.vad_filter === true) + '><span>Use VAD filter</span></label>',
 				'<label class="checkbox-row"><input type="checkbox" id="asrConditionPrevious"' + checkedAttr(currentAsrSettings.condition_on_previous_text !== false) + '><span>Condition on previous text</span></label>',
-				'<label class="field"><span>Python path</span><input id="asrPythonPath" value="' + escapeHtml(currentAsrSettings.python_path || '') + '" placeholder="Auto-detect Python 3.10"></label>',
-				'<label class="field"><span>Venv path</span><input id="asrVenvPath" value="' + escapeHtml(currentAsrSettings.venv_path || '') + '"></label>',
+				'<label class="field"><span>Default model</span><select id="asrDefaultModel">' + defaultModelOptions + '</select></label>',
+				'<label class="field"><span>Whisper Python path</span><input id="asrPythonPath" value="' + escapeHtml(currentAsrSettings.python_path || '') + '" placeholder="Auto-detect Python 3.10"></label>',
+				'<label class="field"><span>Whisper venv path</span><input id="asrVenvPath" value="' + escapeHtml(currentAsrSettings.venv_path || '') + '"></label>',
+				'<label class="field"><span>Qwen Python path</span><input id="asrQwenPythonPath" value="' + escapeHtml(currentAsrSettings.qwen_python_path || '') + '" placeholder="Auto-detect Python 3.12"></label>',
+				'<label class="field"><span>Qwen venv path</span><input id="asrQwenVenvPath" value="' + escapeHtml(currentAsrSettings.qwen_venv_path || '') + '"></label>',
+				'<label class="field"><span>Qwen chunk seconds</span><input id="asrQwenChunkSeconds" type="number" min="5" max="180" value="' + escapeHtml(currentAsrSettings.qwen_chunk_seconds || 30) + '"></label>',
+				'<label class="field"><span>Qwen max word seconds</span><input id="asrQwenMaxWordDurationSeconds" type="number" min="1" max="60" value="' + escapeHtml(currentAsrSettings.qwen_max_word_duration_seconds || 12) + '"></label>',
 				'<label class="field"><span>CPU threads</span><input id="asrCpuThreads" type="number" min="1" max="64" value="' + escapeHtml(currentAsrSettings.cpu_threads || 4) + '"></label>',
 				'<label class="field"><span>Workers</span><input id="asrNumWorkers" type="number" min="1" max="8" value="' + escapeHtml(currentAsrSettings.num_workers || 1) + '"></label>',
 				'<label class="field"><span>Beam size</span><input id="asrBeamSize" type="number" min="1" max="20" value="' + escapeHtml(currentAsrSettings.beam_size || 5) + '"></label>',
 				'<label class="field"><span>Best of</span><input id="asrBestOf" type="number" min="1" max="20" value="' + escapeHtml(currentAsrSettings.best_of || 5) + '"></label>',
 			].join('');
 
-			const models = Array.isArray(currentAsrSettings.models) ? currentAsrSettings.models : [];
 			fields.asrModelSettings.innerHTML = models.map((model, index) => (
 				'<div class="model-settings-card" data-model-index="' + index + '">' +
 					'<div class="model-heading"><span>' + escapeHtml(model.label || model.id || 'Model') + '</span><label><input type="checkbox" data-field="enabled"' + checkedAttr(model.enabled !== false) + '> Enabled</label></div>' +
 					'<label class="field"><span>Model id</span><input data-field="id" value="' + escapeHtml(model.id || '') + '"></label>' +
 					'<label class="field"><span>Label</span><input data-field="label" value="' + escapeHtml(model.label || '') + '"></label>' +
+					'<label class="field"><span>Provider</span><select data-field="provider">' +
+						'<option value="faster-whisper"' + optionAttr('faster-whisper', model.provider || 'faster-whisper') + '>faster-whisper</option>' +
+						'<option value="qwen-asr"' + optionAttr('qwen-asr', model.provider || 'faster-whisper') + '>qwen-asr</option>' +
+						'<option value="qwen-aligner"' + optionAttr('qwen-aligner', model.provider || 'faster-whisper') + '>qwen-aligner</option>' +
+					'</select></label>' +
 					'<label class="field"><span>CPU repo id</span><input data-field="repo_id" value="' + escapeHtml(model.repo_id || '') + '"></label>' +
 					'<label class="field"><span>GPU repo id</span><input data-field="gpu_repo_id" value="' + escapeHtml(model.gpu_repo_id || '') + '"></label>' +
+					'<label class="field"><span>Aligner repo id</span><input data-field="aligner_repo_id" value="' + escapeHtml(model.aligner_repo_id || '') + '"></label>' +
 					'<label class="field"><span>Local model path</span><input data-field="local_path" value="' + escapeHtml(model.local_path || '') + '"></label>' +
+					'<label class="field"><span>Aligner local path</span><input data-field="aligner_local_path" value="' + escapeHtml(model.aligner_local_path || '') + '"></label>' +
 					'<label class="field"><span>Minimum VRAM MB</span><input data-field="min_vram_mb" type="number" min="0" step="256" value="' + escapeHtml(model.min_vram_mb || 0) + '"></label>' +
 					'<label class="field"><span>Preferred device</span><select data-field="preferred_device">' +
 						'<option value="auto"' + optionAttr('auto', model.preferred_device || 'auto') + '>Auto</option>' +
@@ -934,8 +1131,14 @@ function statusPageHtml() {
 			return {
 				allow_package_install: !!document.getElementById('asrAllowPackageInstall').checked,
 				allow_model_downloads: !!document.getElementById('asrAllowModelDownloads').checked,
+				allow_qwen_cpu_offload: !!document.getElementById('asrAllowQwenCpuOffload').checked,
+				default_model: document.getElementById('asrDefaultModel').value.trim(),
 				python_path: document.getElementById('asrPythonPath').value.trim(),
 				venv_path: document.getElementById('asrVenvPath').value.trim(),
+				qwen_python_path: document.getElementById('asrQwenPythonPath').value.trim(),
+				qwen_venv_path: document.getElementById('asrQwenVenvPath').value.trim(),
+				qwen_chunk_seconds: numberValue(document.getElementById('asrQwenChunkSeconds').value, 30),
+				qwen_max_word_duration_seconds: numberValue(document.getElementById('asrQwenMaxWordDurationSeconds').value, 12),
 				cpu_threads: numberValue(document.getElementById('asrCpuThreads').value, 4),
 				num_workers: numberValue(document.getElementById('asrNumWorkers').value, 1),
 				beam_size: numberValue(document.getElementById('asrBeamSize').value, 5),
@@ -945,9 +1148,12 @@ function statusPageHtml() {
 				models: modelCards.map((card) => ({
 					id: (card.querySelector('[data-field="id"]') || {}).value || '',
 					label: (card.querySelector('[data-field="label"]') || {}).value || '',
+					provider: (card.querySelector('[data-field="provider"]') || {}).value || 'faster-whisper',
 					repo_id: (card.querySelector('[data-field="repo_id"]') || {}).value || '',
 					gpu_repo_id: (card.querySelector('[data-field="gpu_repo_id"]') || {}).value || '',
+					aligner_repo_id: (card.querySelector('[data-field="aligner_repo_id"]') || {}).value || '',
 					local_path: (card.querySelector('[data-field="local_path"]') || {}).value || '',
+					aligner_local_path: (card.querySelector('[data-field="aligner_local_path"]') || {}).value || '',
 					min_vram_mb: numberValue((card.querySelector('[data-field="min_vram_mb"]') || {}).value, 0),
 					enabled: !!(card.querySelector('[data-field="enabled"]') || {}).checked,
 					preferred_device: (card.querySelector('[data-field="preferred_device"]') || {}).value || 'auto',
@@ -1023,9 +1229,12 @@ function statusPageHtml() {
 			settings.models.push({
 				id: 'custom-whisper-model',
 				label: 'Custom Whisper Model',
+				provider: 'faster-whisper',
 				repo_id: '',
 				gpu_repo_id: '',
+				aligner_repo_id: '',
 				local_path: '',
+				aligner_local_path: '',
 				min_vram_mb: 0,
 				enabled: true,
 				preferred_device: 'auto',
@@ -1106,6 +1315,8 @@ function statusPageHtml() {
 			if (!button) {
 				return;
 			}
+			event.preventDefault();
+			event.stopPropagation();
 			const block = button.closest('.session-output-block');
 			const output = button === fields.copyRawStatus ? fields.rawStatus : (block ? block.querySelector('.session-output') : null);
 			if (!output) {
@@ -1236,6 +1447,7 @@ function statusPageHtml() {
 			};
 		}
 
+		initTabs();
 		setInterval(tickElapsedCells, 1000);
 		fields.asrSettingsForm.addEventListener('submit', (event) => {
 			event.preventDefault();

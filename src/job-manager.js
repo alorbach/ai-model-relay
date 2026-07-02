@@ -1,5 +1,7 @@
 'use strict';
 
+const fs = require('fs');
+
 function clampMaxConcurrent(value) {
 	const parsed = Number.parseInt(String(value || ''), 10);
 	return Number.isFinite(parsed) && parsed > 0 ? parsed : 2;
@@ -44,6 +46,37 @@ function collectSessionOutput(failure) {
 		sections.push(`ERROR:\n${normalizeDiagnosticText(failure.error.message).trim()}`);
 	}
 	return truncateOutput(sections.join('\n\n'));
+}
+
+function readTextFile(filePath) {
+	try {
+		return fs.readFileSync(filePath, 'utf8');
+	} catch (error) {
+		return '';
+	}
+}
+
+function collectDebugLogDirs(result) {
+	const details = result && result.details && typeof result.details === 'object' ? result.details : {};
+	const response = result && result.response && typeof result.response === 'object' ? result.response : {};
+	const providerDetails = response.provider_details && typeof response.provider_details === 'object' ? response.provider_details : {};
+	const values = [
+		details.debug_log_dir,
+		providerDetails.debug_log_dir,
+		...(Array.isArray(details.debug_log_dirs) ? details.debug_log_dirs : []),
+		...(Array.isArray(providerDetails.debug_log_dirs) ? providerDetails.debug_log_dirs : []),
+	];
+	return Array.from(new Set(values.map((value) => String(value || '').trim()).filter(Boolean)));
+}
+
+function collectDebugLogs(result) {
+	return collectDebugLogDirs(result).map((dir) => ({
+		dir,
+		prompt: readTextFile(`${dir}/prompt.txt`),
+		output: readTextFile(`${dir}/output.txt`),
+		stdout: readTextFile(`${dir}/stdout.txt`),
+		stderr: readTextFile(`${dir}/stderr.txt`),
+	})).filter((entry) => entry.prompt || entry.output || entry.stdout || entry.stderr);
 }
 
 class JobManager {
@@ -119,6 +152,10 @@ class JobManager {
 
 		Promise.resolve()
 			.then(() => job.runner({
+				jobId: job.id,
+				requestId: job.requestId,
+				type: job.type,
+				model: job.model,
 				appendSessionOutput: (stream, chunk) => this.appendSessionOutput(job, stream, chunk),
 			}))
 			.then((result) => {
@@ -161,8 +198,6 @@ class JobManager {
 			if (finalOutput && !job.sessionOutput.includes(finalOutput)) {
 				job.sessionOutput = truncateOutput(job.sessionOutput ? `${job.sessionOutput}\n\n${finalOutput}` : finalOutput);
 			}
-		} else {
-			job.sessionOutput = '';
 		}
 		this.recent.unshift({
 			id: job.id,
@@ -174,6 +209,7 @@ class JobManager {
 			finishedAt: job.finishedAt,
 			errorMessage: job.errorMessage,
 			sessionOutput: job.sessionOutput,
+			debugLogs: collectDebugLogs(failure),
 		});
 		this.recent = this.recent.slice(0, 8);
 		this.emitChange();
@@ -200,6 +236,9 @@ class JobManager {
 		if (job.sessionOutput) {
 			compacted.session_output = job.sessionOutput;
 		}
+		if (Array.isArray(job.debugLogs) && job.debugLogs.length) {
+			compacted.debug_logs = job.debugLogs;
+		}
 		return compacted;
 	}
 
@@ -222,6 +261,7 @@ class JobManager {
 module.exports = {
 	JobManager,
 	clampMaxConcurrent,
+	collectDebugLogs,
 	collectSessionOutput,
 	normalizeDiagnosticText,
 	shortRequestId,
