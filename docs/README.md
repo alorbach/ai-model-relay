@@ -1,6 +1,6 @@
 # Documentation
 
-This folder is the project documentation for Codex Local Bridge.
+This folder is the project documentation for AI Model Relay, formerly Codex Local Bridge.
 
 - [Architecture](architecture.md) explains the tray app, local HTTP server, Codex CLI adapter, state files, and Gateway handoff.
 - [Local Bridge API](local-bridge-api.md) documents the raw localhost HTTP interface exposed by the tray app.

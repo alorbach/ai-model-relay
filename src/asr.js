@@ -8,7 +8,7 @@ const { appendLog, createBoundedCollector, safeError } = require('./diagnostics'
 const security = require('./security');
 const { beginLocalModelDebugLog } = require('./temp-debug-logs');
 
-const MODEL_PREFIX = 'codex-local:audio';
+const MODEL_PREFIX = 'local-asr';
 const RUNNER_PATH = path.join(__dirname, 'asr-runner.py');
 const QWEN_RUNNER_PATH = path.join(__dirname, 'asr-qwen-runner.py');
 const DEFAULT_TIMEOUT_MS = Number(process.env.ALORBACH_ASR_TRANSCRIBE_TIMEOUT_MS || 1800000);
@@ -94,7 +94,7 @@ function fullModelId(id) {
 	if (model.indexOf(`${MODEL_PREFIX}:`) === 0) {
 		return model;
 	}
-	return `${MODEL_PREFIX}:${model.replace(/^codex-local:/, '').replace(/^audio:/, '')}`;
+	return `${MODEL_PREFIX}:${model}`;
 }
 
 function modelSlug(id) {
@@ -102,7 +102,7 @@ function modelSlug(id) {
 	if (!model || model === MODEL_PREFIX) {
 		return '';
 	}
-	return model.replace(`${MODEL_PREFIX}:`, '').replace(/^codex-local:/, '').replace(/^audio:/, '');
+	return model.replace(`${MODEL_PREFIX}:`, '');
 }
 
 function normalizeModelEntry(entry, fallback = {}) {

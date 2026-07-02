@@ -4,8 +4,8 @@
 
 1. Install Codex CLI for the Windows user who will run the tray app.
 2. Run `codex login` in that same Windows account.
-3. Install or unzip the latest Codex Local Bridge release.
-4. Start `Codex Local Bridge`.
+3. Install or unzip the latest AI Model Relay release. Existing installer artifacts may still use the Codex Local Bridge name during the compatibility transition.
+4. Start `AI Model Relay`.
 5. Open the tray menu and confirm `Codex: Ready`.
 6. In WordPress, enable Local Codex and keep the bridge URL at `http://127.0.0.1:8765` unless a custom port is required.
 7. Pair the WordPress origin with the six digit tray code when prompted.
@@ -108,7 +108,7 @@ The release workflow:
 
 Use the tray menu:
 
-![Codex Local Bridge tray menu](images/tray-menu.png)
+![AI Model Relay tray menu](images/tray-menu.png)
 
 - double-clicking the tray icon opens `/status`;
 - `Open status page` opens `/status`;
@@ -125,7 +125,7 @@ Full-fidelity temporary model debug logs are written under `%TEMP%\alorbach-code
 
 Example status page with local filesystem paths redacted:
 
-![Codex Local Bridge status page with local paths redacted](images/status-page.png)
+![AI Model Relay status page with local paths redacted](images/status-page.png)
 
 Useful direct checks:
 
@@ -154,7 +154,7 @@ Default behavior:
 - The Qwen ASR virtual environment is `%USERPROFILE%\.alorbach-codex-bridge\qwen-asr-venv` unless `ALORBACH_QWEN_ASR_VENV` is set.
 - Package installation is allowed by default for the private ASR venvs.
 - Model downloads are disabled by default; use cached model snapshots or set a local model path unless downloads are explicitly enabled in `/status`.
-- Requests that omit `payload.model` use the `Default model` from Local ASR Settings when set; otherwise `codex-local:audio` auto-selects the best ready transcription model. A caller-supplied `payload.model` always overrides the default.
+- Requests that omit `payload.model` use the `Default model` from Local ASR Settings when set; otherwise `local-asr` auto-selects the best ready transcription model. A caller-supplied `payload.model` always overrides the default.
 - Qwen setup verifies that PyTorch was installed with CUDA support. If `qwen-asr` installs a CPU-only torch wheel, the bridge repairs the Qwen venv by installing `torch` from the PyTorch CUDA wheel index when package installation is enabled.
 - Whisper CUDA is selected only when the enabled model prefers it, enough free VRAM is detected, and CUDA runtime packages are usable. A CUDA load failure falls back to CPU/int8 when possible.
 - Qwen3 ASR requires CUDA, but can optionally use mixed GPU/CPU loading through Transformers `device_map="auto"` when a selected Qwen model does not fit fully in VRAM. The bridge still prefers a fully GPU-ready transcription model during automatic selection; use the 0.6B model for normal low-VRAM work and explicit/default 1.7B selection when CPU offload is acceptable.
@@ -241,3 +241,27 @@ Refresh Local ASR runtime in `/status` and check `Qwen torch CUDA`. When package
 ### CUDA runtime is missing or unusable
 
 Use `Refresh runtime` to see the exact CUDA reason. The bridge can install `nvidia-cublas-cu12` and `nvidia-cudnn-cu12` into the ASR venv when package installation is enabled. If CUDA still fails during transcription, the job retries on CPU/int8 when a CPU model is available.
+
+## Naming and Compatibility
+
+The product was originally released as **Codex Local Bridge** and has been renamed to **AI Model Relay**.
+
+### What the rename changed
+
+- The tray app title, window title, and About text now read **AI Model Relay**.
+- The product name and short name returned by `/v1/status` and `/v1/capabilities` are `AI Model Relay` and `Model Relay`. The field `legacy_name` in those responses still returns `Codex Local Bridge`.
+- Local ASR model IDs now use the `local-asr:*` prefix (e.g. `local-asr:whisper-large-v3`, `local-asr:qwen3-asr-0.6b`). The previous `codex-local:audio:*` prefix is no longer accepted.
+- Provider-neutral relay model IDs use the `model-relay:<backend>:<model>` form (e.g. `model-relay:local-asr:qwen3-asr-0.6b`, `model-relay:xai:grok-4.3`). These were introduced alongside the rename and have no legacy equivalent.
+
+### What remains unchanged
+
+- The default bridge URL and port: `http://127.0.0.1:8765`.
+- All `/v1` HTTP routes: `/v1/status`, `/v1/capabilities`, `/v1/chat`, `/v1/images`, `/v1/transcribe`, `/v1/videos`, `/v1/media/analyze`, `/v1/models`, `/v1/pair`, `/v1/unpair`, and `/v1/asr/settings`.
+- Text and image model IDs: `codex-local:auto`, `codex-local:image`, and any `codex-local:<id>` IDs from `models_cache.json`.
+- The user state directory: `%USERPROFILE%\.alorbach-codex-bridge`.
+- The bridge process name, tray binary name, and installer package ID used by existing WordPress plugins.
+- All signed job envelope fields (`job_token`, `request_hash`, `request_id`) and the pairing token header.
+
+### Installer artifacts
+
+Installer builds produced before the rename may still display the Codex Local Bridge name in Windows Add/Remove Programs and in the installer wizard. The underlying bridge URL, state directory, and API are identical.

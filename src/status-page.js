@@ -1,12 +1,14 @@
 'use strict';
 
+const { PRODUCT_NAME, LEGACY_PRODUCT_NAME } = require('./brand');
+
 function statusPageHtml() {
 	return `<!doctype html>
 <html lang="en">
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
-	<title>Codex Local Bridge Status</title>
+	<title>${PRODUCT_NAME} Status</title>
 	<style>
 		:root {
 			color-scheme: dark;
@@ -462,7 +464,10 @@ function statusPageHtml() {
 <body>
 	<main>
 		<header>
-			<h1>Codex Local Bridge</h1>
+			<div>
+				<h1>${PRODUCT_NAME}</h1>
+				<div class="updated">formerly ${LEGACY_PRODUCT_NAME}</div>
+			</div>
 			<div class="status-meta">
 				<span class="pill connection-pill warn" id="connectionPill"><span class="dot"></span><span>Connecting</span></span>
 				<div class="updated" id="updated">Loading</div>
@@ -568,6 +573,10 @@ function statusPageHtml() {
 				<div class="feature-grid" id="detectedFeatures"></div>
 			</div>
 			<div class="panel span-12">
+				<div class="label">Backend Drivers</div>
+				<div class="feature-grid" id="backendDrivers"></div>
+			</div>
+			<div class="panel span-12">
 				<div class="label">Paired Sites</div>
 				<div id="pairedSites" class="muted">None</div>
 			</div>
@@ -618,6 +627,7 @@ function statusPageHtml() {
 			codexCliVersion: document.getElementById('codexCliVersion'),
 			codexBinary: document.getElementById('codexBinary'),
 			detectedFeatures: document.getElementById('detectedFeatures'),
+			backendDrivers: document.getElementById('backendDrivers'),
 			asrDetails: document.getElementById('asrDetails'),
 			asrSettingsForm: document.getElementById('asrSettingsForm'),
 			asrGeneralSettings: document.getElementById('asrGeneralSettings'),
@@ -1028,6 +1038,24 @@ function statusPageHtml() {
 			'</div>';
 		}
 
+		function renderBackendDrivers(backends) {
+			const items = Array.isArray(backends) ? backends : [];
+			if (!items.length) {
+				fields.backendDrivers.innerHTML = '<div class="muted">No backend metadata reported</div>';
+				return;
+			}
+			fields.backendDrivers.innerHTML = items.map((backend) => {
+				const ready = backend.ready === true || (backend.configured === true && backend.enabled !== false);
+				const state = ready ? 'enabled' : 'disabled';
+				const label = backend.ready === true ? 'Ready' : (backend.configured === false ? 'Not configured' : (backend.enabled === false ? 'Disabled' : 'Available'));
+				const name = (backend.label || backend.id || 'Backend') + (backend.kind ? ' (' + backend.kind + ')' : '');
+				return '<div class="feature-pill ' + state + '">' +
+					'<span class="name">' + escapeHtml(name) + '</span>' +
+					'<span class="state">' + escapeHtml(label) + '</span>' +
+				'</div>';
+			}).join('');
+		}
+
 		function renderCapabilities(payload) {
 			currentCapabilities = payload || {};
 			const codex = currentCapabilities.codex || {};
@@ -1049,6 +1077,7 @@ function statusPageHtml() {
 				featurePill('OpenAI video route', video.enabled),
 				featurePill('Video API configured', video.configured),
 			].join('');
+			renderBackendDrivers(currentCapabilities.backends || []);
 			renderAsrDetails(currentCapabilities.asr || {});
 			currentStatus.capabilities = currentCapabilities;
 			fields.rawStatus.textContent = JSON.stringify(currentStatus, null, 2);
@@ -1374,6 +1403,7 @@ function statusPageHtml() {
 				fields.codexCliVersion.textContent = text(details.version);
 				fields.codexBinary.textContent = text(details.codex_binary);
 				fields.detectedFeatures.innerHTML = '<div class="muted">Loading detected features</div>';
+				fields.backendDrivers.innerHTML = '<div class="muted">Loading backend drivers</div>';
 			}
 			renderJobs(jobs);
 		}

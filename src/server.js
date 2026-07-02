@@ -9,6 +9,8 @@ const security = require('./security');
 const { statusPageHtml } = require('./status-page');
 const { resetTempDebugLogs } = require('./temp-debug-logs');
 const video = require('./video');
+const { PRODUCT_NAME, SHORT_NAME, LEGACY_PRODUCT_NAME } = require('./brand');
+const { createBackendRegistry } = require('./backend-registry');
 const packageInfo = require('../package.json');
 const { appendLog, safeError, safeProcessSend } = require('./diagnostics');
 
@@ -220,12 +222,24 @@ function capabilitiesPayload(context) {
 	const codexCapabilities = context.codex.capabilities ? context.codex.capabilities() : { success: true, bridge_features: {} };
 	return {
 		success: true,
+		product: {
+			name: PRODUCT_NAME,
+			short_name: SHORT_NAME,
+			legacy_name: LEGACY_PRODUCT_NAME,
+		},
 		bridge: {
 			version: packageInfo.version,
 		},
 		codex: codexCapabilities.codex || {},
 		asr: codexCapabilities.asr || {},
 		features: codexCapabilities.bridge_features || {},
+		backends: context.backends.capabilities(),
+		frontend_interfaces: {
+			legacy_v1: true,
+			relay_v1: true,
+			legacy_routes: ['/v1/status', '/v1/capabilities', '/v1/models', '/v1/chat', '/v1/images', '/v1/transcribe', '/v1/videos', '/v1/media/analyze'],
+			relay_routes: ['/v1/relay/status', '/v1/relay/capabilities', '/v1/relay/models', '/v1/relay/jobs/chat', '/v1/relay/jobs/images', '/v1/relay/jobs/transcribe', '/v1/relay/jobs/videos', '/v1/relay/jobs/media/analyze'],
+		},
 		video: context.video.capabilities ? context.video.capabilities() : { enabled: false },
 		media_analysis: context.mediaAnalysis.capabilities ? context.mediaAnalysis.capabilities() : { enabled: false },
 	};
@@ -235,6 +249,9 @@ function statusPayload(context, options = {}) {
 	const status = context.codex.checkStatus();
 	const bridge = {
 		version: packageInfo.version,
+		product_name: PRODUCT_NAME,
+		short_name: SHORT_NAME,
+		legacy_name: LEGACY_PRODUCT_NAME,
 	};
 	if (options.includePairedOrigins !== false) {
 		bridge.paired_origins = Object.keys(context.security.getPairings());
@@ -245,6 +262,19 @@ function statusPayload(context, options = {}) {
 		asr: context.codex.asrStatus ? context.codex.asrStatus() : {},
 		jobs: context.jobManager.snapshot(),
 	};
+}
+
+function modelsPayload(context) {
+	const modelPayload = context.codex.models();
+	const videoCapabilities = context.video.capabilities ? context.video.capabilities() : { enabled: false, models: [] };
+	if (modelPayload && modelPayload.models && videoCapabilities.enabled) {
+		modelPayload.models.video = (videoCapabilities.models || []).map((id) => `openai-video:${id}`);
+	}
+	modelPayload.models = modelPayload.models || {};
+	const backendModels = context.backends.models();
+	modelPayload.models.relay = backendModels.map((model) => model.id);
+	modelPayload.backends = backendModels;
+	return modelPayload;
 }
 
 function errorStatusForResult(result) {
@@ -263,7 +293,7 @@ async function route(req, res, context) {
 	const jobManager = context.jobManager;
 	const origin = exposeOrigin(req, bridgeSecurity);
 	if (!bridgeSecurity.isLocalAddress(req)) {
-		sendErrorJson(req, res, 403, { success: false, message: 'Local Codex bridge only accepts localhost requests.' });
+		sendErrorJson(req, res, 403, { success: false, message: 'AI Model Relay only accepts localhost requests.' });
 		return;
 	}
 
@@ -278,13 +308,13 @@ async function route(req, res, context) {
 		return;
 	}
 
-	if (req.method === 'GET' && url.pathname === '/v1/status') {
+	if (req.method === 'GET' && (url.pathname === '/v1/status' || url.pathname === '/v1/relay/status')) {
 		const status = statusPayload(context);
 		sendJson(res, status.success ? 200 : 503, status, origin || pairedOriginForCors(req, bridgeSecurity));
 		return;
 	}
 
-	if (req.method === 'GET' && url.pathname === '/v1/capabilities') {
+	if (req.method === 'GET' && (url.pathname === '/v1/capabilities' || url.pathname === '/v1/relay/capabilities')) {
 		sendJson(res, 200, capabilitiesPayload(context), origin || pairedOriginForCors(req, bridgeSecurity));
 		return;
 	}
@@ -324,17 +354,12 @@ async function route(req, res, context) {
 		return;
 	}
 
-	if (req.method === 'GET' && url.pathname === '/v1/models') {
+	if (req.method === 'GET' && (url.pathname === '/v1/models' || url.pathname === '/v1/relay/models')) {
 		const pairedOrigin = requirePairing(req, res, bridgeSecurity);
 		if (!pairedOrigin) {
 			return;
 		}
-		const modelPayload = codexAdapter.models();
-		const videoCapabilities = context.video.capabilities ? context.video.capabilities() : { enabled: false, models: [] };
-		if (modelPayload && modelPayload.models && videoCapabilities.enabled) {
-			modelPayload.models.video = (videoCapabilities.models || []).map((id) => `openai-video:${id}`);
-		}
-		sendJson(res, 200, modelPayload, pairedOrigin);
+		sendJson(res, 200, modelsPayload(context), pairedOrigin);
 		return;
 	}
 
@@ -401,66 +426,70 @@ async function route(req, res, context) {
 		return;
 	}
 
-	if (url.pathname === '/v1/chat') {
+	if (url.pathname === '/v1/chat' || url.pathname === '/v1/relay/jobs/chat') {
+		const isRelayRoute = url.pathname === '/v1/relay/jobs/chat';
 		const result = await jobManager.run({
 			requestId: body.request_id,
 			type: 'chat',
 			model: modelFromPayload(body.payload, 'codex-local:auto'),
-		}, (session) => codexAdapter.chat(body.payload || {}, session));
+		}, (session) => isRelayRoute ? context.backends.run('chat', body.payload || {}, session) : codexAdapter.chat(body.payload || {}, session));
 		if (!result.success) {
-			sendErrorJson(req, res, 500, result, pairedOrigin, { requestId: body.request_id, route: '/v1/chat' });
+			sendErrorJson(req, res, errorStatusForResult(result), result, pairedOrigin, { requestId: body.request_id, route: url.pathname });
 			return;
 		}
 		sendJson(res, 200, result, pairedOrigin);
 		return;
 	}
-	if (url.pathname === '/v1/images') {
+	if (url.pathname === '/v1/images' || url.pathname === '/v1/relay/jobs/images') {
+		const isRelayRoute = url.pathname === '/v1/relay/jobs/images';
 		const result = await jobManager.run({
 			requestId: body.request_id,
 			type: 'images',
 			model: modelFromPayload(body.payload, 'codex-local:image'),
-		}, (session) => codexAdapter.images(body.payload || {}, session));
+		}, (session) => isRelayRoute ? context.backends.run('images', body.payload || {}, session) : codexAdapter.images(body.payload || {}, session));
 		if (!result.success) {
-			sendErrorJson(req, res, 500, result, pairedOrigin, { requestId: body.request_id, route: '/v1/images' });
+			sendErrorJson(req, res, errorStatusForResult(result), result, pairedOrigin, { requestId: body.request_id, route: url.pathname });
 			return;
 		}
 		sendJson(res, 200, result, pairedOrigin);
 		return;
 	}
-	if (url.pathname === '/v1/transcribe') {
+	if (url.pathname === '/v1/transcribe' || url.pathname === '/v1/relay/jobs/transcribe') {
+		const isRelayRoute = url.pathname === '/v1/relay/jobs/transcribe';
 		const result = await jobManager.run({
 			requestId: body.request_id,
 			type: 'transcribe',
-			model: modelFromPayload(body.payload, 'codex-local:audio'),
-		}, (session) => codexAdapter.transcribe(body.payload || {}, session));
+			model: modelFromPayload(body.payload, 'local-asr'),
+		}, (session) => isRelayRoute ? context.backends.run('transcribe', body.payload || {}, session) : codexAdapter.transcribe(body.payload || {}, session));
 		if (!result.success) {
-			sendErrorJson(req, res, errorStatusForResult(result), result, pairedOrigin, { requestId: body.request_id, route: '/v1/transcribe' });
+			sendErrorJson(req, res, errorStatusForResult(result), result, pairedOrigin, { requestId: body.request_id, route: url.pathname });
 			return;
 		}
 		sendJson(res, 200, result, pairedOrigin);
 		return;
 	}
-	if (url.pathname === '/v1/videos') {
+	if (url.pathname === '/v1/videos' || url.pathname === '/v1/relay/jobs/videos') {
+		const isRelayRoute = url.pathname === '/v1/relay/jobs/videos';
 		const result = await jobManager.run({
 			requestId: body.request_id,
 			type: 'videos',
 			model: modelFromPayload(body.payload, 'sora-2'),
-		}, (session) => context.video.run(body.payload || {}, session));
+		}, (session) => isRelayRoute ? context.backends.run('videos', body.payload || {}, session) : context.video.run(body.payload || {}, session));
 		if (!result.success) {
-			sendErrorJson(req, res, errorStatusForResult(result), result, pairedOrigin, { requestId: body.request_id, route: '/v1/videos' });
+			sendErrorJson(req, res, errorStatusForResult(result), result, pairedOrigin, { requestId: body.request_id, route: url.pathname });
 			return;
 		}
 		sendJson(res, 200, result, pairedOrigin);
 		return;
 	}
-	if (url.pathname === '/v1/media/analyze') {
+	if (url.pathname === '/v1/media/analyze' || url.pathname === '/v1/relay/jobs/media/analyze') {
 		const result = await jobManager.run({
 			requestId: body.request_id,
 			type: 'media_analysis',
 			model: modelFromPayload(body.payload, 'codex-local:auto'),
 		}, (session) => context.mediaAnalysis.analyze(body.payload || {}, codexAdapter, session));
 		if (!result.success) {
-			sendErrorJson(req, res, errorStatusForResult(result), result, pairedOrigin, { requestId: body.request_id, route: '/v1/media/analyze' });
+			sendErrorJson(req, res, errorStatusForResult(result), result, pairedOrigin, { requestId: body.request_id, route: url.pathname });
 			return;
 		}
 		sendJson(res, 200, result, pairedOrigin);
@@ -487,6 +516,13 @@ function createServer(options = {}) {
 		jobManager: options.jobManager || createJobManager({ ...options, onJobState }),
 		statusEvents,
 	};
+	context.backends = options.backends || createBackendRegistry({
+		codex: context.codex,
+		video: context.video,
+		xai: options.xai,
+		cli: options.cli,
+		apiKeyChat: options.apiKeyChat,
+	});
 	const server = http.createServer((req, res) => {
 		route(req, res, context).catch((error) => {
 			appendLog('server', 'Unhandled route failure.', {
@@ -521,7 +557,7 @@ function startServer(options = {}) {
 	});
 }
 
-if (require.main === module) {
+	if (require.main === module) {
 	if (process.argv.includes('--check')) {
 		const status = codex.checkStatus();
 		process.stdout.write(JSON.stringify(status, null, 2) + '\n');
@@ -531,7 +567,7 @@ if (require.main === module) {
 	const port = portArg ? Number(portArg.replace('--port=', '')) : undefined;
 	startServer({ port }).then((result) => {
 		safeProcessSend({ type: 'ready', port: result.port, pairingCode }, { logName: 'server' });
-		process.stdout.write(`Codex Local Bridge listening on http://127.0.0.1:${result.port}\n`);
+		process.stdout.write(`${PRODUCT_NAME} listening on http://127.0.0.1:${result.port}\n`);
 		process.stdout.write(`Pairing code: ${pairingCode}\n`);
 	}).catch((error) => {
 		appendLog('server', 'Server failed to start.', { error: safeError(error) });

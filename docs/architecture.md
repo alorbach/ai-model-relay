@@ -1,6 +1,6 @@
 # Architecture
 
-Codex Local Bridge is a Windows tray companion for Alorbach AI Subscription Gateway. It lets a browser page on a paired WordPress origin execute chat and image jobs through the logged-in Windows user's local Codex CLI session while the WordPress Gateway keeps ownership of plans, quotas, job signatures, audit records, and optional service fees.
+AI Model Relay, formerly Codex Local Bridge, is a Windows tray companion for Alorbach AI Subscription Gateway. It lets a browser page on a paired WordPress origin execute AI jobs through local or API-backed backend drivers while the WordPress Gateway keeps ownership of plans, quotas, job signatures, audit records, and optional service fees.
 
 ## Components
 
@@ -24,9 +24,17 @@ Entry point: `src/server.js`
 
 The bridge listens on `127.0.0.1` and defaults to port `8765`. It exposes a small JSON API under `/v1`. It accepts requests only from localhost sockets and relies on browser CORS plus per-origin pairing tokens to limit which browser origins can use the bridge.
 
-The bridge does not call WordPress directly. It receives a WordPress-created job envelope from the browser, runs Codex locally, and returns the result to the browser. The browser then completes or fails the WordPress job with the original one-time token and request hash.
+The bridge does not call WordPress directly. It receives a WordPress-created job envelope from the browser, routes it to a backend driver, and returns the normalized result to the browser. The browser then completes or fails the WordPress job with the original one-time token and request hash.
 
-Execution requests are scheduled through an in-memory queue. The default limit is two parallel Codex jobs and can be changed with `ALORBACH_CODEX_MAX_CONCURRENT_JOBS`. Image generation jobs are limited to one running image job at a time because generated image detection currently watches the shared `CODEX_HOME/generated_images` directory; chat jobs may still run beside an image job up to the configured parallel limit.
+Execution requests are scheduled through an in-memory queue. The default limit is two parallel jobs and can be changed with `ALORBACH_CODEX_MAX_CONCURRENT_JOBS`. Image generation jobs are limited to one running image job at a time when they use Codex image detection, because generated image detection currently watches the shared `CODEX_HOME/generated_images` directory; chat jobs may still run beside an image job up to the configured parallel limit.
+
+### Backend registry
+
+Entry point: `src/backend-registry.js`
+
+Backend drivers expose a common contract: `id`, `label`, `kind`, `capabilities()`, `models()`, `checkStatus()`, and execution methods for supported job types. Current drivers wrap the existing Codex CLI, local ASR, and OpenAI video modules, and add Grok/xAI API, generic CLI-process, and generic API-key chat driver families.
+
+The registry preserves existing routes and model IDs while adding provider-neutral `model-relay:*` IDs and `/v1/relay/*` frontend aliases. Driver-specific credentials are reported only as configured/not configured and are not emitted in status, capabilities, jobs, SSE, or debug-help payloads.
 
 ### Codex CLI adapter
 
@@ -44,15 +52,21 @@ Runtime configuration:
 
 Chat jobs run `codex exec` in an ephemeral temp directory and write the final assistant message to a temp output file. The bridge sends generated Codex instructions through stdin instead of a command-line prompt argument so large WordPress transcripts do not hit Windows process argument length limits. Data URL image attachments in chat content are decoded into temp files and passed with `codex exec --image`, so base64 image payloads do not count as prompt text. Image jobs run `codex exec`, watch `CODEX_HOME/generated_images`, and return the newest generated image as base64.
 
+### Provider-neutral frontend interfaces
+
+Legacy `/v1/chat`, `/v1/images`, `/v1/transcribe`, `/v1/videos`, and `/v1/media/analyze` routes remain backwards compatible. New aliases under `/v1/relay/jobs/*` accept the same signed envelope and may route by `payload.provider`, `payload.backend`, or provider-qualified model IDs such as `model-relay:xai:grok-4.3`.
+
 ### Security state
 
 Entry point: `src/security.js`
 
-Pairing state is stored under:
+Pairing state remains compatible with the legacy directory by default:
 
 ```text
 %USERPROFILE%\.alorbach-codex-bridge\state.json
 ```
+
+If `%USERPROFILE%\.ai-model-relay` already exists, or `AI_MODEL_RELAY_STATE_DIR` / `ALORBACH_MODEL_RELAY_STATE_DIR` is set, the relay uses that directory instead. This keeps existing installs working while allowing a staged migration to the new product name.
 
 The state file contains per-origin bearer tokens and pairing timestamps. The tray diagnostics intentionally omit token values.
 
@@ -78,7 +92,7 @@ The Gateway plugin is the production source of truth for job creation and comple
 5. Browser asks WordPress to create a one-time local Codex job at `/wp-json/alorbach/v1/local-codex/jobs`.
 6. WordPress returns `job_id`, `job_token`, `request_hash`, `request_id`, and the normalized payload.
 7. Browser sends the job envelope to `/v1/chat` or `/v1/images` with the pairing token.
-8. Bridge executes Codex locally and returns a normalized result.
+8. Bridge executes the selected backend driver and returns a normalized result.
 9. Browser posts the result to `/wp-json/alorbach/v1/local-codex/jobs/{job_id}/complete`.
 10. WordPress validates the one-time token and hash, records ledger/audit data, and returns the final response to the UI.
 

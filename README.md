@@ -1,6 +1,8 @@
-# Codex Local Bridge
+# AI Model Relay
 
-Windows tray companion for Alorbach AI Subscription Gateway. It exposes a secure localhost bridge to the user's own Codex CLI login so browser-mediated WordPress chat and image generation can run through the user's local Codex/ChatGPT allowance while WordPress still owns plans, quotas, audit records, and optional Gateway fees.
+Formerly **Codex Local Bridge**. All `/v1` API routes, `codex-local:auto`/`codex-local:image` model IDs, the default bridge URL, and the state-folder path are unchanged. Local ASR model IDs have moved from `codex-local:audio:*` to `local-asr:*`. See [Naming and Compatibility](docs/operations.md#naming-and-compatibility) in the operations guide for the full change list.
+
+Windows tray companion for Alorbach AI Subscription Gateway. It exposes a secure localhost relay that routes browser-mediated jobs to backend drivers such as Codex CLI, local ASR, Grok/xAI API, configurable CLI tools, API-key chat providers, and optional OpenAI video generation while WordPress still owns plans, quotas, audit records, and optional Gateway fees.
 
 ## Status
 
@@ -19,6 +21,7 @@ Windows tray companion for Alorbach AI Subscription Gateway. It exposes a secure
 - Executes signed Gateway chat jobs through local `codex exec`.
 - Executes signed Gateway image jobs and returns normalized base64 image data.
 - Executes signed Gateway audio transcription jobs through private local ASR runtimes with per-word timestamps.
+- Routes provider-neutral relay jobs through backend drivers for Codex CLI, local ASR, Grok/xAI, configurable CLI processes, API-key chat providers, and OpenAI video.
 - Reports local bridge multimodal capabilities, including structured Codex event support and optional video/media features.
 - Optionally executes signed OpenAI Videos API jobs when explicitly configured with an API key and enable flag.
 - Optionally analyzes bounded media frames or HTTPS media URLs through local Codex vision prompts.
@@ -129,18 +132,22 @@ Routes:
 
 - `GET /status`: minimal visual bridge status page.
 - `GET /v1/status`: local bridge and Codex readiness.
+- `GET /v1/relay/status`: provider-neutral alias for status.
 - `GET /v1/status/events`: local job-state event stream used by the status page.
 - `GET /v1/status/stream`: paired live status stream for browser/API clients.
 - `GET /v1/capabilities`: bridge, Codex, video, and media-analysis capability metadata.
+- `GET /v1/relay/capabilities`: provider-neutral capabilities, including backend driver metadata.
 - `GET /v1/asr/settings`: Local ASR settings and cached runtime metadata. Add `?refresh=1` to run a full Python/GPU/ffmpeg probe.
 - `POST /v1/pair`: exchange tray pairing code for an origin token.
 - `POST /v1/unpair`: remove the pairing for the request origin.
 - `GET /v1/models`: list paired local model IDs.
+- `GET /v1/relay/models`: list provider-neutral `model-relay:*` model IDs in addition to legacy IDs.
 - `POST /v1/chat`: run a signed chat job.
 - `POST /v1/images`: run a signed image job.
 - `POST /v1/transcribe`: run a signed local ASR transcription job.
 - `POST /v1/videos`: optionally run a signed OpenAI Videos API job.
 - `POST /v1/media/analyze`: analyze bounded media frames or an HTTPS media URL.
+- `POST /v1/relay/jobs/chat`, `/images`, `/transcribe`, `/videos`, and `/media/analyze`: provider-neutral job aliases using the same signed envelope and response shapes.
 
 Paired routes require:
 
@@ -161,7 +168,9 @@ Execution routes require a JSON envelope containing:
 }
 ```
 
-In production, these values come from WordPress Gateway. The bridge checks that they are present, executes Codex, and returns the result to the browser. WordPress validates the one-time token and request hash when the browser completes the job.
+In production, these values come from WordPress Gateway. The relay checks that they are present, executes the selected backend driver, and returns the result to the browser. WordPress validates the one-time token and request hash when the browser completes the job.
+
+Legacy requests can keep using `codex-local:auto` and `codex-local:image`. New provider-neutral requests may use IDs such as `model-relay:codex:auto`, `model-relay:xai:grok-4.3`, and `model-relay:local-asr:qwen3-asr-0.6b`, or set `payload.provider` / `payload.backend`. Local ASR models now use `local-asr:*` IDs (e.g. `local-asr:whisper-large-v3`, `local-asr:qwen3-asr-0.6b`).
 
 `GET /v1/status` also includes current local job activity:
 
@@ -217,7 +226,8 @@ for await (const chunk of response.body.pipeThrough(new TextDecoderStream())) {
 
 ## Runtime Configuration
 
-- `ALORBACH_CODEX_BRIDGE_PORT`: bridge port. Default: `8765`.
+- `ALORBACH_CODEX_BRIDGE_PORT`: relay port. Default: `8765`.
+- `AI_MODEL_RELAY_STATE_DIR` or `ALORBACH_MODEL_RELAY_STATE_DIR`: explicit relay state directory. If unset, the app uses `%USERPROFILE%\.ai-model-relay` only when it already exists; otherwise it keeps the legacy `%USERPROFILE%\.alorbach-codex-bridge` directory for compatibility.
 - `ALORBACH_CODEX_BINARY`: explicit path to `codex.exe` or another Codex executable.
 - `CODEX_HOME`: Codex profile directory. Default: `%USERPROFILE%\.codex`.
 - `ALORBACH_CODEX_MAX_CONCURRENT_JOBS`: maximum parallel local Codex jobs. Default: `2`.
@@ -240,6 +250,13 @@ for await (const chunk of response.body.pipeThrough(new TextDecoderStream())) {
 - `ALORBACH_OPENAI_API_KEY` or `OPENAI_API_KEY`: API key for optional video generation.
 - `ALORBACH_VIDEO_POLL_TIMEOUT_MS`: optional video polling timeout. Default: `600000`.
 - `ALORBACH_VIDEO_POLL_INTERVAL_MS`: optional video polling interval. Default: `3000`.
+- `XAI_API_KEY` or `AI_MODEL_RELAY_XAI_API_KEY`: enables the Grok/xAI API chat backend.
+- `XAI_BASE_URL` or `AI_MODEL_RELAY_XAI_BASE_URL`: optional xAI-compatible base URL. Default: `https://api.x.ai/v1`.
+- `AI_MODEL_RELAY_XAI_MODELS`: comma-separated Grok model IDs exposed as `model-relay:xai:*`. Default: `grok-4.3,latest`.
+- `AI_MODEL_RELAY_CLI_COMMAND`: enables the generic CLI process chat backend.
+- `AI_MODEL_RELAY_CLI_ARGS`: optional arguments for the CLI process backend. The prompt is sent on stdin.
+- `AI_MODEL_RELAY_CLI_TIMEOUT_MS`: CLI process timeout. Default: `600000`.
+- `AI_MODEL_RELAY_CHAT_API_KEY`, `AI_MODEL_RELAY_CHAT_BASE_URL`, and `AI_MODEL_RELAY_CHAT_MODEL`: optional OpenAI-compatible API-key chat backend profile for Cursor-style or other provider keys.
 
 If Windows resolves `codex` to a problematic `.cmd` shim, set `ALORBACH_CODEX_BINARY` to the real executable path before starting the bridge.
 

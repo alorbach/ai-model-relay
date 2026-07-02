@@ -2,12 +2,11 @@
 
 const crypto = require('crypto');
 const fs = require('fs');
-const os = require('os');
-const path = require('path');
+const statePaths = require('./state-paths');
 
 const MAX_BODY_BYTES = 12 * 1024 * 1024;
-const stateDir = path.join(os.homedir(), '.alorbach-codex-bridge');
-const statePath = path.join(stateDir, 'state.json');
+const stateDir = statePaths.stateDir;
+const statePath = statePaths.statePath;
 
 function timingSafeEqual(left, right) {
 	const a = Buffer.from(String(left || ''), 'utf8');

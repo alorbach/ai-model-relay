@@ -77,8 +77,8 @@ function createMockSecurity() {
 	const stateUpdates = [];
 	const codex = {
 		checkStatus: () => ({ success: true, message: 'ready', details: {} }),
-		models: () => ({ success: true, models: { text: ['codex-local:auto'], image: ['codex-local:image'], audio: ['codex-local:audio', 'codex-local:audio:whisper-large-v3'] } }),
-		capabilities: () => ({ success: true, bridge_features: { chat: true, images: true, audio_transcription: true }, codex: {}, asr: { enabled: true, ready: true, models: ['codex-local:audio', 'codex-local:audio:whisper-large-v3'] } }),
+		models: () => ({ success: true, models: { text: ['codex-local:auto'], image: ['codex-local:image'], audio: ['local-asr', 'local-asr:whisper-large-v3'] } }),
+		capabilities: () => ({ success: true, bridge_features: { chat: true, images: true, audio_transcription: true }, codex: {}, asr: { enabled: true, ready: true, models: ['local-asr', 'local-asr:whisper-large-v3'] } }),
 		chat: () => Promise.resolve({ success: true, response: { choices: [] } }),
 		images: () => Promise.resolve({ success: true, response: { data: [] } }),
 		transcribe: (payload, session = {}) => new Promise((resolve) => {
@@ -108,7 +108,7 @@ function createMockSecurity() {
 			request_hash: 'hash-1',
 			request_id: 'request-1',
 			payload: {
-				model: 'codex-local:audio:whisper-large-v3',
+				model: 'local-asr:whisper-large-v3',
 				audio_base64: Buffer.from('audio').toString('base64'),
 				audio_format: 'mp3',
 				duration_seconds: 3,
@@ -119,7 +119,7 @@ function createMockSecurity() {
 			request_hash: 'hash-2',
 			request_id: 'request-2',
 			payload: {
-				model: 'codex-local:audio',
+				model: 'local-asr',
 				audio_base64: Buffer.from('audio').toString('base64'),
 				audio_format: 'mp3',
 				duration_seconds: 3,
@@ -144,10 +144,10 @@ function createMockSecurity() {
 		assert.strictEqual(status.body.jobs.running_count, 1);
 		assert.strictEqual(status.body.jobs.queued_count, 1);
 		assert.strictEqual(status.body.jobs.active[0].type, 'transcribe');
-		assert.strictEqual(status.body.jobs.active[0].model, 'codex-local:audio:whisper-large-v3');
-		assert.ok(status.body.jobs.active[0].session_output.includes('transcribing codex-local:audio:whisper-large-v3'));
+		assert.strictEqual(status.body.jobs.active[0].model, 'local-asr:whisper-large-v3');
+		assert.ok(status.body.jobs.active[0].session_output.includes('transcribing local-asr:whisper-large-v3'));
 
-		pending.shift().resolve({ success: true, response: { text: 'Forbidden heaven', words: [{ word: 'Forbidden', start: 1.25, end: 1.75 }], model: 'codex-local:audio:whisper-large-v3' } });
+		pending.shift().resolve({ success: true, response: { text: 'Forbidden heaven', words: [{ word: 'Forbidden', start: 1.25, end: 1.75 }], model: 'local-asr:whisper-large-v3' } });
 		const firstResult = await first;
 		assert.strictEqual(firstResult.statusCode, 200);
 		assert.strictEqual(firstResult.body.response.words[0].word, 'Forbidden');

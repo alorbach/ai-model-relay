@@ -1,0 +1,175 @@
+'use strict';
+
+const assert = require('assert');
+const http = require('http');
+const { createServer } = require('../src/server');
+
+function requestJson(port, method, pathname, body, headers = {}) {
+	return new Promise((resolve, reject) => {
+		const data = body ? JSON.stringify(body) : '';
+		const req = http.request({
+			hostname: '127.0.0.1',
+			port,
+			path: pathname,
+			method,
+			headers: {
+				Origin: 'http://127.0.0.1:8787',
+				'Content-Type': 'application/json',
+				'Content-Length': Buffer.byteLength(data),
+				'X-Alorbach-Bridge-Token': 'test-token',
+				...headers,
+			},
+		}, (res) => {
+			let raw = '';
+			res.setEncoding('utf8');
+			res.on('data', (chunk) => {
+				raw += chunk;
+			});
+			res.on('end', () => resolve({ statusCode: res.statusCode, body: raw ? JSON.parse(raw) : {} }));
+		});
+		req.on('error', reject);
+		if (data) {
+			req.write(data);
+		}
+		req.end();
+	});
+}
+
+function createMockSecurity() {
+	return {
+		MAX_BODY_BYTES: 12 * 1024 * 1024,
+		createPairingCode: () => '123456',
+		createToken: () => 'test-token',
+		getPairing: () => ({ token: 'test-token', paired_at: 'now' }),
+		getPairings: () => ({ 'http://127.0.0.1:8787': { token: 'test-token', paired_at: 'now' } }),
+		isLocalAddress: () => true,
+		normalizeOrigin: (origin) => {
+			try {
+				return new URL(origin).origin;
+			} catch (error) {
+				return '';
+			}
+		},
+		removePairing: () => {},
+		savePairing: () => {},
+		validateBridgeToken: (origin, token) => !!origin && token === 'test-token',
+	};
+}
+
+(async () => {
+	const calls = [];
+	const codex = {
+		checkStatus: () => ({ success: true, message: 'ready', details: {} }),
+		models: () => ({ success: true, models: { text: ['codex-local:auto'], image: ['codex-local:image'], audio: ['local-asr'] } }),
+		capabilities: () => ({ success: true, bridge_features: { chat: true }, codex: {}, asr: { enabled: true, models: ['local-asr'] } }),
+		asrStatus: () => ({ enabled: true, ready: null, runtime_checked: false, models: ['local-asr'] }),
+		chat: (payload) => {
+			calls.push({ route: 'legacy-chat', payload });
+			return Promise.resolve({ success: true, response: { id: 'legacy-chat' } });
+		},
+		images: (payload) => {
+			calls.push({ route: 'legacy-images', payload });
+			return Promise.resolve({ success: true, response: { data: [] } });
+		},
+		transcribe: (payload) => {
+			calls.push({ route: 'legacy-transcribe', payload });
+			return Promise.resolve({ success: true, response: { words: [] } });
+		},
+	};
+	const backends = {
+		capabilities: () => [
+			{ id: 'codex-cli', label: 'Codex CLI', ready: true },
+			{ id: 'xai-api', label: 'Grok / xAI API', configured: true, ready: true },
+		],
+		models: () => [
+			{ id: 'model-relay:codex:auto', legacy_id: 'codex-local:auto', type: 'text', backend: 'codex-cli' },
+			{ id: 'model-relay:xai:grok-4.3', type: 'text', backend: 'xai-api' },
+		],
+		run: (type, payload) => {
+			calls.push({ route: `relay-${type}`, payload });
+			return Promise.resolve({
+				success: true,
+				response: {
+					id: `relay-${type}`,
+					object: type === 'chat' ? 'chat.completion' : undefined,
+					model: payload.model,
+					choices: type === 'chat' ? [{ index: 0, message: { role: 'assistant', content: 'relay ok' }, finish_reason: 'stop' }] : undefined,
+					data: type === 'images' ? [] : undefined,
+					words: type === 'transcribe' ? [] : undefined,
+					provider_details: { provider: payload.provider || payload.backend || 'auto' },
+				},
+			});
+		},
+	};
+	const server = createServer({
+		codex,
+		backends,
+		security: createMockSecurity(),
+		maxConcurrent: 2,
+		video: {
+			capabilities: () => ({ enabled: false, configured: false, models: ['sora-2'] }),
+			run: () => Promise.resolve({ success: true, response: {} }),
+		},
+		mediaAnalysis: {
+			capabilities: () => ({ enabled: true }),
+			analyze: () => Promise.resolve({ success: true, response: { text: 'media ok' } }),
+		},
+	});
+	await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+	const port = server.address().port;
+	try {
+		const capabilities = await requestJson(port, 'GET', '/v1/relay/capabilities');
+		assert.strictEqual(capabilities.statusCode, 200);
+		assert.strictEqual(capabilities.body.product.name, 'AI Model Relay');
+		assert.strictEqual(capabilities.body.product.legacy_name, 'Codex Local Bridge');
+		assert.strictEqual(capabilities.body.frontend_interfaces.relay_v1, true);
+		assert.ok(capabilities.body.frontend_interfaces.legacy_routes.includes('/v1/chat'));
+		assert.ok(!JSON.stringify(capabilities.body).includes('test-token'));
+
+		const models = await requestJson(port, 'GET', '/v1/relay/models');
+		assert.strictEqual(models.statusCode, 200);
+		assert.ok(models.body.models.text.includes('codex-local:auto'));
+		assert.ok(models.body.models.relay.includes('model-relay:xai:grok-4.3'));
+		assert.ok(models.body.backends.some((model) => model.backend === 'xai-api'));
+
+		const body = {
+			job_token: 'job-token',
+			request_hash: 'hash',
+			request_id: 'relay-request',
+			payload: {
+				model: 'model-relay:xai:grok-4.3',
+				provider: 'xai-api',
+				messages: [{ role: 'user', content: 'hi' }],
+			},
+		};
+		const relayChat = await requestJson(port, 'POST', '/v1/relay/jobs/chat', body);
+		assert.strictEqual(relayChat.statusCode, 200);
+		assert.strictEqual(relayChat.body.response.id, 'relay-chat');
+		assert.strictEqual(calls[calls.length - 1].route, 'relay-chat');
+		assert.strictEqual(calls[calls.length - 1].payload.model, 'model-relay:xai:grok-4.3');
+
+		const legacyChat = await requestJson(port, 'POST', '/v1/chat', { ...body, payload: { model: 'codex-local:auto', messages: [] } });
+		assert.strictEqual(legacyChat.statusCode, 200);
+		assert.strictEqual(legacyChat.body.response.id, 'legacy-chat');
+		assert.strictEqual(calls[calls.length - 1].route, 'legacy-chat');
+
+		const relayImages = await requestJson(port, 'POST', '/v1/relay/jobs/images', { ...body, payload: { model: 'model-relay:codex:image', prompt: 'x' } });
+		assert.strictEqual(relayImages.statusCode, 200);
+		assert.strictEqual(calls[calls.length - 1].route, 'relay-images');
+
+		const relayTranscribe = await requestJson(port, 'POST', '/v1/relay/jobs/transcribe', { ...body, payload: { model: 'model-relay:local-asr:auto' } });
+		assert.strictEqual(relayTranscribe.statusCode, 200);
+		assert.strictEqual(calls[calls.length - 1].route, 'relay-transcribe');
+
+		const relayMedia = await requestJson(port, 'POST', '/v1/relay/jobs/media/analyze', { ...body, payload: { model: 'model-relay:codex:auto' } });
+		assert.strictEqual(relayMedia.statusCode, 200);
+		assert.strictEqual(relayMedia.body.response.text, 'media ok');
+	} finally {
+		await new Promise((resolve) => server.close(resolve));
+	}
+
+	console.log('relay route tests passed');
+})().catch((error) => {
+	console.error(error);
+	process.exit(1);
+});

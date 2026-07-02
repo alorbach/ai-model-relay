@@ -1,4 +1,6 @@
-# Local Bridge API
+# AI Model Relay API
+
+This API was introduced as Codex Local Bridge. Existing `/v1` routes and `codex-local:*` model IDs remain supported. Provider-neutral aliases are exposed under `/v1/relay/*`.
 
 Default base URL:
 
@@ -33,7 +35,7 @@ Shows a local HTML status page for the same runtime data exposed by `GET /v1/sta
 
 ## `GET /v1/status`
 
-Checks bridge and local Codex readiness. This route does not require pairing.
+Checks bridge and default local Codex readiness. `GET /v1/relay/status` is an alias with the same response shape. This route does not require pairing.
 
 Example response:
 
@@ -51,6 +53,9 @@ Example response:
   },
   "bridge": {
     "version": "1.0.1",
+    "product_name": "AI Model Relay",
+    "short_name": "Model Relay",
+    "legacy_name": "Codex Local Bridge",
     "paired_origins": [
       "http://127.0.0.1:8787"
     ]
@@ -119,13 +124,18 @@ for await (const chunk of response.body.pipeThrough(new TextDecoderStream())) {
 
 ## `GET /v1/capabilities`
 
-Returns capability metadata for the bridge, local Codex executable, Local ASR providers, optional video provider, and media analysis support. This route does not require pairing. Local ASR capability data is lightweight by default so the status page can load quickly.
+Returns capability metadata for the relay, local Codex executable, Local ASR providers, optional video provider, media analysis support, frontend interfaces, and backend drivers. `GET /v1/relay/capabilities` is an alias. This route does not require pairing. Local ASR capability data is lightweight by default so the status page can load quickly.
 
 Example response:
 
 ```json
 {
   "success": true,
+  "product": {
+    "name": "AI Model Relay",
+    "short_name": "Model Relay",
+    "legacy_name": "Codex Local Bridge"
+  },
   "bridge": {
     "version": "1.0.4"
   },
@@ -144,11 +154,30 @@ Example response:
     "image_reference_attachments": true,
     "app_server": true
   },
+  "backends": [
+    {
+      "id": "codex-cli",
+      "label": "Codex CLI",
+      "kind": "local-cli",
+      "ready": true
+    },
+    {
+      "id": "xai-api",
+      "label": "Grok / xAI API",
+      "kind": "api",
+      "configured": false,
+      "ready": false
+    }
+  ],
+  "frontend_interfaces": {
+    "legacy_v1": true,
+    "relay_v1": true
+  },
   "asr": {
     "enabled": true,
     "ready": null,
     "runtime_checked": false,
-    "models": ["codex-local:audio", "codex-local:audio:whisper-large-v3"]
+    "models": ["local-asr", "local-asr:whisper-large-v3"]
   },
   "video": {
     "enabled": false,
@@ -234,7 +263,7 @@ Response:
     "enabled": true,
     "ready": null,
     "runtime_checked": false,
-    "models": ["codex-local:audio", "codex-local:audio:whisper-large-v3", "codex-local:audio:qwen3-asr-1.7b", "codex-local:audio:qwen3-asr-0.6b"]
+    "models": ["local-asr", "local-asr:whisper-large-v3", "local-asr:qwen3-asr-1.7b", "local-asr:qwen3-asr-0.6b"]
   }
 }
 ```
@@ -284,7 +313,7 @@ Response:
 
 ## `GET /v1/models`
 
-Returns local model IDs after pairing.
+Returns local and relay model IDs after pairing. `GET /v1/relay/models` is an alias.
 
 Response:
 
@@ -299,20 +328,47 @@ Response:
       "codex-local:image"
     ],
     "audio": [
-      "codex-local:audio",
-      "codex-local:audio:whisper-large-v3",
-      "codex-local:audio:whisper-medium",
-      "codex-local:audio:whisper-small",
-      "codex-local:audio:qwen3-asr-1.7b",
-      "codex-local:audio:qwen3-asr-0.6b"
+      "local-asr",
+      "local-asr:whisper-large-v3",
+      "local-asr:whisper-medium",
+      "local-asr:whisper-small",
+      "local-asr:qwen3-asr-1.7b",
+      "local-asr:qwen3-asr-0.6b"
+    ],
+    "relay": [
+      "model-relay:codex:auto",
+      "model-relay:codex:image",
+      "model-relay:local-asr:qwen3-asr-0.6b",
+      "model-relay:xai:grok-4.3"
     ]
-  }
+  },
+  "backends": [
+    {
+      "id": "model-relay:xai:grok-4.3",
+      "type": "text",
+      "backend": "xai-api"
+    }
+  ]
 }
 ```
 
 If `CODEX_HOME/models_cache.json` exists, additional text model IDs from that cache are returned as `codex-local:<id>`.
 
-Audio model IDs are configured by Local ASR settings. When a transcription request omits `payload.model` or uses `codex-local:audio`, the bridge first uses `settings.default_model` if it is set. Otherwise `codex-local:audio` auto-selects the best enabled ready local transcription model. Qwen3 ASR 1.7B is preferred when `Qwen/Qwen3-ASR-1.7B` and `Qwen/Qwen3-ForcedAligner-0.6B` are cached or explicitly downloadable and CUDA has enough free VRAM; `Qwen/Qwen3-ASR-0.6B` is the lower-VRAM Qwen ASR fallback. When `allow_qwen_cpu_offload` is enabled, explicit/default Qwen selections can use mixed GPU/CPU loading and report `device: "cuda+cpu"` with `device_map: "auto"`. The Qwen runner pre-chunks timestamped ASR locally using `qwen_chunk_seconds` and caps implausibly stretched single-word spans using `qwen_max_word_duration_seconds`, reporting any caps in provider metadata. The ForcedAligner is used only for Qwen timestamps and is not exposed as a normal audio model. If faster-whisper CUDA fails at execution time, the bridge retries on CPU/int8 when a CPU model path is available.
+Provider-neutral IDs use the `model-relay:<backend>:<model>` form. Existing frontend code can keep sending `codex-local:*`; newer clients may send `model-relay:*` or specify `payload.provider` / `payload.backend`.
+
+## `/v1/relay/jobs/*`
+
+Provider-neutral job aliases use the same signed envelope and response shapes as the legacy execution routes:
+
+- `POST /v1/relay/jobs/chat`
+- `POST /v1/relay/jobs/images`
+- `POST /v1/relay/jobs/transcribe`
+- `POST /v1/relay/jobs/videos`
+- `POST /v1/relay/jobs/media/analyze`
+
+Routing is selected from `payload.provider`, `payload.backend`, or the model ID. For example, `model-relay:xai:grok-4.3` routes to the Grok/xAI API driver, while `model-relay:local-asr:qwen3-asr-0.6b` routes to the local ASR driver. If no provider is specified, relay chat and image jobs preserve the Codex default.
+
+Audio model IDs are configured by Local ASR settings. When a transcription request omits `payload.model` or uses `local-asr`, the bridge first uses `settings.default_model` if it is set. Otherwise `local-asr` auto-selects the best enabled ready local transcription model. Qwen3 ASR 1.7B is preferred when `Qwen/Qwen3-ASR-1.7B` and `Qwen/Qwen3-ForcedAligner-0.6B` are cached or explicitly downloadable and CUDA has enough free VRAM; `Qwen/Qwen3-ASR-0.6B` is the lower-VRAM Qwen ASR fallback. When `allow_qwen_cpu_offload` is enabled, explicit/default Qwen selections can use mixed GPU/CPU loading and report `device: "cuda+cpu"` with `device_map: "auto"`. The Qwen runner pre-chunks timestamped ASR locally using `qwen_chunk_seconds` and caps implausibly stretched single-word spans using `qwen_max_word_duration_seconds`, reporting any caps in provider metadata. The ForcedAligner is used only for Qwen timestamps and is not exposed as a normal audio model. If faster-whisper CUDA fails at execution time, the bridge retries on CPU/int8 when a CPU model path is available.
 
 ## `POST /v1/chat`
 
@@ -437,7 +493,7 @@ Request:
   "request_hash": "<wordpress-request-hash>",
   "request_id": "<wordpress-request-id>",
   "payload": {
-    "model": "codex-local:audio:whisper-large-v3",
+    "model": "local-asr:whisper-large-v3",
     "audio_base64": "<base64-audio>",
     "audio_format": "mp3",
     "duration_seconds": 123,
@@ -456,7 +512,7 @@ Response:
     "words": [
       { "word": "Forbidden", "start": 1.25, "end": 1.75 }
     ],
-    "model": "codex-local:audio:whisper-large-v3",
+    "model": "local-asr:whisper-large-v3",
     "local_codex": true,
     "provider_details": {
       "asr_provider": "faster-whisper",

@@ -1,12 +1,12 @@
 'use strict';
 
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
+const statePaths = require('./state-paths');
 
 const DEFAULT_MAX_LOG_BYTES = 1024 * 1024;
 const DEFAULT_MAX_OUTPUT_CHARS = 1024 * 1024;
-const stateDir = path.join(os.homedir(), '.alorbach-codex-bridge');
+const stateDir = statePaths.stateDir;
 const logDir = path.join(stateDir, 'logs');
 
 function ensureLogDir() {

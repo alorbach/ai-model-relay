@@ -142,8 +142,8 @@ function createMockSecurity() {
 	const codex = {
 		checkStatus: () => ({ success: true, message: 'ready', details: {} }),
 		models: () => ({ success: true, models: { text: ['codex-local:auto'], image: ['codex-local:image'] } }),
-		capabilities: () => ({ success: true, bridge_features: { chat: true, images: true, audio_transcription: true }, codex: {}, asr: { enabled: true, ready: null, runtime_checked: false, runtime: { checked: false }, models: ['codex-local:audio'] } }),
-		asrStatus: () => ({ enabled: true, ready: null, runtime_checked: false, runtime: { checked: false }, models: ['codex-local:audio'] }),
+		capabilities: () => ({ success: true, bridge_features: { chat: true, images: true, audio_transcription: true }, codex: {}, asr: { enabled: true, ready: null, runtime_checked: false, runtime: { checked: false }, models: ['local-asr'] } }),
+		asrStatus: () => ({ enabled: true, ready: null, runtime_checked: false, runtime: { checked: false }, models: ['local-asr'] }),
 		asrSettings: (options = {}) => {
 			asrSettingsCalls.push(options);
 			return {
@@ -154,7 +154,7 @@ function createMockSecurity() {
 					ready: options.refresh ? true : null,
 					runtime_checked: !!options.refresh,
 					runtime: { checked: !!options.refresh },
-					models: ['codex-local:audio'],
+					models: ['local-asr'],
 				},
 			};
 		},

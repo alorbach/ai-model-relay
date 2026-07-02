@@ -6,6 +6,7 @@ const { fork } = require('child_process');
 const { app, clipboard, Menu, nativeImage, shell, Tray } = require('electron');
 const packageInfo = require('../package.json');
 const codex = require('./codex');
+const { PRODUCT_NAME, SHORT_NAME, LEGACY_PRODUCT_NAME } = require('./brand');
 const { appendLog, safeError } = require('./diagnostics');
 const security = require('./security');
 
@@ -110,7 +111,9 @@ function copyDiagnostics(status, pairedOrigins) {
 		};
 	}
 	clipboard.writeText(JSON.stringify({
-		app: packageInfo.productName || 'Codex Local Bridge',
+		app: PRODUCT_NAME,
+		short_name: SHORT_NAME,
+		legacy_app: LEGACY_PRODUCT_NAME,
 		version: buildInfo.version || packageInfo.version,
 		build_number: buildInfo.build_number || 'dev',
 		build_version: buildInfo.build_version || '',
@@ -307,7 +310,8 @@ function buildMenu() {
 	const details = status.details || {};
 	const codexLabel = status.success ? 'Codex: Ready' : 'Codex: Needs attention';
 	return Menu.buildFromTemplate([
-		{ label: `Codex Local Bridge ${displayVersion()}`, enabled: false },
+		{ label: `${PRODUCT_NAME} ${displayVersion()}`, enabled: false },
+		{ label: `formerly ${LEGACY_PRODUCT_NAME}`, enabled: false },
 		{ label: `Bridge: ${bridgeState}`, enabled: false },
 		{ label: `URL: ${bridgeUrl()}`, enabled: false },
 		{ label: codexLabel, enabled: false },
@@ -343,7 +347,7 @@ function buildMenu() {
 			click: () => shell.openExternal(bridgeUrl() + '/v1/status'),
 		},
 		{
-			label: 'Open bridge data folder',
+			label: 'Open relay data folder',
 			click: () => {
 				fs.mkdirSync(security.stateDir, { recursive: true });
 				shell.openPath(security.stateDir);
@@ -459,7 +463,8 @@ function refreshTray() {
 	});
 	updateTrayIcon();
 	const tooltip = [
-		'Codex Local Bridge',
+		PRODUCT_NAME,
+		`formerly ${LEGACY_PRODUCT_NAME}`,
 		`Bridge: ${bridgeState}`,
 		bridgeUrl(),
 		`Codex: ${cachedCodexStatus.success ? 'Ready' : 'Needs attention'}`,

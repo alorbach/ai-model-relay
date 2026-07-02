@@ -30,10 +30,10 @@ function createQwenSnapshot(snapshot) {
 	assert.ok(config.models.find((model) => model.id === 'whisper-medium'));
 	assert.strictEqual(config.models.find((model) => model.id === 'qwen3-asr-1.7b').provider, 'qwen-asr');
 	assert.strictEqual(config.models.find((model) => model.id === 'qwen3-asr-0.6b').provider, 'qwen-asr');
-	assert.ok(asr.modelIds(config).includes('codex-local:audio:whisper-large-v3'));
-	assert.ok(asr.modelIds(config).includes('codex-local:audio:qwen3-asr-1.7b'));
-	assert.ok(asr.modelIds(config).includes('codex-local:audio:qwen3-asr-0.6b'));
-	assert.ok(!asr.modelIds(config).includes('codex-local:audio:qwen3-forced-aligner-0.6b'));
+	assert.ok(asr.modelIds(config).includes('local-asr:whisper-large-v3'));
+	assert.ok(asr.modelIds(config).includes('local-asr:qwen3-asr-1.7b'));
+	assert.ok(asr.modelIds(config).includes('local-asr:qwen3-asr-0.6b'));
+	assert.ok(!asr.modelIds(config).includes('local-asr:qwen3-forced-aligner-0.6b'));
 	assert.ok(asr.transcriptionModels(config).every((model) => model.provider !== 'qwen-aligner'));
 	assert.ok(!asr.enabledModels(config).some((model) => model.id === 'disabled'));
 
@@ -49,72 +49,72 @@ function createQwenSnapshot(snapshot) {
 		createQwenSnapshot(qwenSnapshot);
 		createQwenSnapshot(qwenSmallSnapshot);
 		createQwenSnapshot(qwenAlignerSnapshot);
-		const selected = asr.selectModel('codex-local:audio:whisper-large-v3', config, {
+		const selected = asr.selectModel('local-asr:whisper-large-v3', config, {
 			gpu: { available: true, free_mb: 12288, total_mb: 12288 },
 		});
-		assert.strictEqual(selected.model_id, 'codex-local:audio:whisper-large-v3');
+		assert.strictEqual(selected.model_id, 'local-asr:whisper-large-v3');
 		assert.strictEqual(selected.device, 'cuda');
 		assert.strictEqual(selected.compute_type, 'float16');
 		assert.strictEqual(selected.model_path, snapshot);
 
-		const cpuSelected = asr.selectModel('codex-local:audio:whisper-large-v3', config, {
+		const cpuSelected = asr.selectModel('local-asr:whisper-large-v3', config, {
 			gpu: { available: true, free_mb: 2048, total_mb: 12288 },
 		});
 		assert.strictEqual(cpuSelected.device, 'cpu');
 		assert.strictEqual(cpuSelected.compute_type, 'int8');
 		assert.strictEqual(cpuSelected.model_path, '');
 
-		const blockedCuda = asr.selectModel('codex-local:audio:whisper-large-v3', config, {
+		const blockedCuda = asr.selectModel('local-asr:whisper-large-v3', config, {
 			gpu: { available: true, free_mb: 12288, total_mb: 12288 },
 			cuda_runtime: { available: false, reason: 'missing cublas64_12.dll' },
 		});
 		assert.strictEqual(blockedCuda.device, 'cpu');
 		assert.strictEqual(blockedCuda.cuda_blocked_reason, 'missing cublas64_12.dll');
 
-		const qwenSelected = asr.selectModel('codex-local:audio', config, {
+		const qwenSelected = asr.selectModel('local-asr', config, {
 			gpu: { available: true, free_mb: 12288, total_mb: 12288 },
 		});
-		assert.strictEqual(qwenSelected.model_id, 'codex-local:audio:qwen3-asr-1.7b');
+		assert.strictEqual(qwenSelected.model_id, 'local-asr:qwen3-asr-1.7b');
 		assert.strictEqual(qwenSelected.provider, 'qwen-asr');
 		assert.strictEqual(qwenSelected.device, 'cuda');
 		assert.strictEqual(qwenSelected.model_path, qwenSnapshot);
 		assert.strictEqual(qwenSelected.aligner_model_path, qwenAlignerSnapshot);
 		assert.strictEqual(qwenSelected.ready, true);
 
-		const defaultWhisperConfig = asr.normalizeSettings({ ...config, default_model: 'codex-local:audio:whisper-large-v3' });
-		const defaultWhisper = asr.selectModel('codex-local:audio', defaultWhisperConfig, {
+		const defaultWhisperConfig = asr.normalizeSettings({ ...config, default_model: 'local-asr:whisper-large-v3' });
+		const defaultWhisper = asr.selectModel('local-asr', defaultWhisperConfig, {
 			gpu: { available: true, free_mb: 12288, total_mb: 12288 },
 		});
-		assert.strictEqual(defaultWhisper.model_id, 'codex-local:audio:whisper-large-v3');
+		assert.strictEqual(defaultWhisper.model_id, 'local-asr:whisper-large-v3');
 		assert.strictEqual(defaultWhisper.model_path, snapshot);
 
-		const qwenOffloadSelected = asr.selectModel('codex-local:audio:qwen3-asr-1.7b', config, {
+		const qwenOffloadSelected = asr.selectModel('local-asr:qwen3-asr-1.7b', config, {
 			gpu: { available: true, free_mb: 7370, total_mb: 12288 },
 		});
-		assert.strictEqual(qwenOffloadSelected.model_id, 'codex-local:audio:qwen3-asr-1.7b');
+		assert.strictEqual(qwenOffloadSelected.model_id, 'local-asr:qwen3-asr-1.7b');
 		assert.strictEqual(qwenOffloadSelected.device, 'cuda+cpu');
 		assert.strictEqual(qwenOffloadSelected.device_map, 'auto');
 		assert.strictEqual(qwenOffloadSelected.cpu_offload, true);
 		assert.strictEqual(qwenOffloadSelected.ready, true);
 
 		const noOffloadConfig = asr.normalizeSettings({ ...config, allow_qwen_cpu_offload: false });
-		const qwenNoOffloadSelected = asr.selectModel('codex-local:audio:qwen3-asr-1.7b', noOffloadConfig, {
+		const qwenNoOffloadSelected = asr.selectModel('local-asr:qwen3-asr-1.7b', noOffloadConfig, {
 			gpu: { available: true, free_mb: 7370, total_mb: 12288 },
 		});
 		assert.strictEqual(qwenNoOffloadSelected.ready, false);
 		assert.ok(qwenNoOffloadSelected.cuda_blocked_reason.includes('insufficient free VRAM'));
 
-		const qwenSmallSelected = asr.selectModel('codex-local:audio', config, {
+		const qwenSmallSelected = asr.selectModel('local-asr', config, {
 			gpu: { available: true, free_mb: 6740, total_mb: 8192 },
 		});
-		assert.strictEqual(qwenSmallSelected.model_id, 'codex-local:audio:qwen3-asr-0.6b');
+		assert.strictEqual(qwenSmallSelected.model_id, 'local-asr:qwen3-asr-0.6b');
 		assert.strictEqual(qwenSmallSelected.provider, 'qwen-asr');
 		assert.strictEqual(qwenSmallSelected.cpu_offload, false);
 		assert.strictEqual(qwenSmallSelected.model_path, qwenSmallSnapshot);
 		assert.strictEqual(qwenSmallSelected.aligner_model_path, qwenAlignerSnapshot);
 		assert.strictEqual(qwenSmallSelected.ready, true);
 
-		const qwenBlocked = asr.selectModel('codex-local:audio:qwen3-asr-1.7b', config, {
+		const qwenBlocked = asr.selectModel('local-asr:qwen3-asr-1.7b', config, {
 			gpu: { available: false },
 		});
 		assert.strictEqual(qwenBlocked.provider, 'qwen-asr');
@@ -122,13 +122,13 @@ function createQwenSnapshot(snapshot) {
 		assert.ok(qwenBlocked.cuda_blocked_reason.includes('GPU'));
 
 		fs.rmSync(qwenSnapshot, { recursive: true, force: true });
-		const autoSkipsAligner = asr.selectModel('codex-local:audio', config, {
+		const autoSkipsAligner = asr.selectModel('local-asr', config, {
 			gpu: { available: true, free_mb: 12288, total_mb: 12288 },
 		});
 		assert.notStrictEqual(autoSkipsAligner.provider, 'qwen-aligner');
 
 		fs.rmSync(path.join(qwenSmallSnapshot, 'preprocessor_config.json'), { force: true });
-		const incompleteQwen = asr.selectModel('codex-local:audio:qwen3-asr-0.6b', config, {
+		const incompleteQwen = asr.selectModel('local-asr:qwen3-asr-0.6b', config, {
 			gpu: { available: true, free_mb: 6740, total_mb: 8192 },
 		});
 		assert.strictEqual(incompleteQwen.model_path, '');
@@ -136,13 +136,13 @@ function createQwenSnapshot(snapshot) {
 		assert.ok(incompleteQwen.incomplete_model_missing_files.includes('preprocessor_config.json'));
 
 		const downloadConfig = asr.normalizeSettings({ ...config, allow_model_downloads: true });
-		const incompleteDownloadableQwen = asr.selectModel('codex-local:audio:qwen3-asr-0.6b', downloadConfig, {
+		const incompleteDownloadableQwen = asr.selectModel('local-asr:qwen3-asr-0.6b', downloadConfig, {
 			gpu: { available: true, free_mb: 6740, total_mb: 8192 },
 		});
 		assert.strictEqual(incompleteDownloadableQwen.model_path, 'Qwen/Qwen3-ASR-0.6B');
 		assert.strictEqual(incompleteDownloadableQwen.allow_download, true);
 
-		const downloadable = asr.selectModel('codex-local:audio:whisper-small', downloadConfig, {
+		const downloadable = asr.selectModel('local-asr:whisper-small', downloadConfig, {
 			gpu: { available: false },
 		});
 		assert.strictEqual(downloadable.allow_download, true);
@@ -155,7 +155,7 @@ function createQwenSnapshot(snapshot) {
 		}
 	}
 
-	const unknown = asr.selectModel('codex-local:audio:not-real', config, { gpu: { available: false } });
+	const unknown = asr.selectModel('local-asr:not-real', config, { gpu: { available: false } });
 	assert.ok(unknown.error);
 	assert.strictEqual(asr.torchCudaInfo('').available, false);
 	assert.strictEqual(asr.torchCudaInfo('').reason, 'venv_missing');
@@ -167,9 +167,9 @@ function createQwenSnapshot(snapshot) {
 	assert.strictEqual(lightCapabilities.ready, null);
 
 	const lightModels = asr.models();
-	assert.ok(lightModels.models.includes('codex-local:audio'));
-	assert.ok(!lightModels.models.includes('codex-local:audio:qwen3-forced-aligner-0.6b'));
-	assert.ok(!Object.prototype.hasOwnProperty.call(lightModels.labels, 'codex-local:audio:qwen3-forced-aligner-0.6b'));
+	assert.ok(lightModels.models.includes('local-asr'));
+	assert.ok(!lightModels.models.includes('local-asr:qwen3-forced-aligner-0.6b'));
+	assert.ok(!Object.prototype.hasOwnProperty.call(lightModels.labels, 'local-asr:qwen3-forced-aligner-0.6b'));
 
 	const refreshedCapabilities = asr.capabilities({ refresh: true });
 	assert.strictEqual(refreshedCapabilities.runtime_checked, true);
