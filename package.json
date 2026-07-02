@@ -1,7 +1,7 @@
 {
-  "name": "alorbach-codex-local-bridge",
+  "name": "alorbach-ai-model-relay",
   "version": "1.0.6",
-  "description": "Windows tray companion for Alorbach AI Gateway that exposes a secure localhost relay for local and API-backed AI model drivers while preserving Codex Local Bridge compatibility.",
+  "description": "Windows tray companion for Alorbach AI Gateway that exposes a secure localhost relay for local and API-backed AI model drivers, formerly named Codex Local Bridge.",
   "private": true,
   "main": "src/main.js",
   "scripts": {
@@ -20,9 +20,9 @@
     "electron-builder": "^26.8.1"
   },
   "build": {
-    "appId": "com.alorbach.codexlocalbridge",
-    "productName": "Codex Local Bridge",
-    "artifactName": "Codex-Local-Bridge-${version}-${os}-${arch}.${ext}",
+    "appId": "com.alorbach.aimodelrelay",
+    "productName": "AI Model Relay",
+    "artifactName": "AI-Model-Relay-${version}-${os}-${arch}.${ext}",
     "directories": {
       "output": "dist"
     },
@@ -44,12 +44,12 @@
       "allowToChangeInstallationDirectory": true
     }
   },
-  "homepage": "https://github.com/alorbach/codex-local-bridge#readme",
+  "homepage": "https://github.com/alorbach/ai-model-relay#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/alorbach/codex-local-bridge.git"
+    "url": "git+https://github.com/alorbach/ai-model-relay.git"
   },
   "bugs": {
-    "url": "https://github.com/alorbach/codex-local-bridge/issues"
+    "url": "https://github.com/alorbach/ai-model-relay/issues"
   }
 }

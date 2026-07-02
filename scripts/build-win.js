@@ -47,7 +47,7 @@ fs.writeFileSync(buildInfoPath, JSON.stringify({
 	built_at: new Date().toISOString(),
 }, null, 2) + '\n');
 
-const artifactName = `Codex-Local-Bridge-${version}-build.${buildNumber}-\${os}-\${arch}.\${ext}`;
+const artifactName = `AI-Model-Relay-${version}-build.${buildNumber}-\${os}-\${arch}.\${ext}`;
 
 builder.build({
 	projectDir: root,

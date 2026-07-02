@@ -76,8 +76,8 @@ Windows builds are written to `dist/`.
 Release artifact names include the semantic version and build number:
 
 ```text
-Codex-Local-Bridge-1.0.1-build.42-win-x64.exe
-Codex-Local-Bridge-1.0.1-build.42-win-x64.zip
+AI-Model-Relay-1.0.1-build.42-win-x64.exe
+AI-Model-Relay-1.0.1-build.42-win-x64.zip
 ```
 
 Local builds increment `.build/build-number`. GitHub Actions builds use `GITHUB_RUN_NUMBER`.

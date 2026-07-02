@@ -55,7 +55,7 @@ codex login
 
 ## Install From Release
 
-1. Open the latest release at <https://github.com/alorbach/codex-local-bridge/releases>.
+1. Open the latest release at <https://github.com/alorbach/ai-model-relay/releases>.
 2. Download either the Windows installer `.exe` or portable `.zip`.
 3. Start `Codex Local Bridge`.
 4. Open the tray menu and confirm `Codex: Ready`.
@@ -270,8 +270,8 @@ npm run dist:win
 Build output is written to `dist/` and includes build-numbered artifacts:
 
 ```text
-Codex-Local-Bridge-1.0.1-build.42-win-x64.exe
-Codex-Local-Bridge-1.0.1-build.42-win-x64.zip
+AI-Model-Relay-1.0.1-build.42-win-x64.exe
+AI-Model-Relay-1.0.1-build.42-win-x64.zip
 ```
 
 Local builds increment `.build/build-number`. GitHub Actions builds use `GITHUB_RUN_NUMBER`.

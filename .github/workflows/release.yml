@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  models: read
 
 jobs:
   release:
@@ -14,6 +15,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Compute version
         id: vars
@@ -21,14 +24,47 @@ jobs:
         run: |
           $version = "${{ github.ref_name }}" -replace '^v', ''
           $buildNumber = $env:GITHUB_RUN_NUMBER
-          $installerName = "Codex-Local-Bridge-$version-build.$buildNumber-win-x64.exe"
-          $zipName = "Codex-Local-Bridge-$version-build.$buildNumber-win-x64.zip"
+          $installerName = "AI-Model-Relay-$version-build.$buildNumber-win-x64.exe"
+          $zipName = "AI-Model-Relay-$version-build.$buildNumber-win-x64.zip"
           "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           "build_number=$buildNumber" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           "installer_name=$installerName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           "zip_name=$zipName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           "installer_path=dist/$installerName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           "zip_path=dist/$zipName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Find previous release tag
+        id: prev_tag
+        shell: pwsh
+        run: |
+          $tags = @(git tag --sort=-v:refname)
+          $current = "${{ github.ref_name }}"
+          $currentIndex = [Array]::IndexOf($tags, $current)
+          $previousTag = ''
+          if ($currentIndex -ge 0 -and ($currentIndex + 1) -lt $tags.Count) {
+            $previousTag = $tags[$currentIndex + 1]
+          }
+          Write-Host "Current tag: $current"
+          Write-Host "Previous tag: $previousTag"
+          "previous_tag=$previousTag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Collect commit log between tags
+        id: commit_log
+        shell: pwsh
+        run: |
+          $previousTag = "${{ steps.prev_tag.outputs.previous_tag }}"
+          $current = "${{ github.ref_name }}"
+          $range = if ($previousTag) { "$previousTag..$current" } else { "$current" }
+          Write-Host "Commit range: $range"
+          $commits = git log $range --no-merges --pretty=format:"- %s (%h)"
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          $commitLines = @($commits -split "`n" | Where-Object { $_.Trim() -ne '' })
+          if ($commitLines.Count -eq 0) {
+            Set-Content -Path dist/commit-log.txt -Value "No commits were found in range $range." -Encoding utf8
+          } else {
+            Set-Content -Path dist/commit-log.txt -Value $commitLines -Encoding utf8
+          }
+          "commit_count=$($commitLines.Count)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -60,6 +96,39 @@ jobs:
       - name: Build Windows installer and portable ZIP
         run: npm run dist:win
 
+      - name: Generate AI changelog
+        id: ai_changelog
+        if: steps.commit_log.outputs.commit_count != '0'
+        continue-on-error: true
+        uses: actions/ai-inference@v1
+        with:
+          prompt-file: dist/commit-log.txt
+          system-prompt: |
+            You are a precise release-notes writer for AI Model Relay, a Windows tray
+            companion that exposes a secure localhost relay for local and API-backed
+            AI model drivers (formerly named Codex Local Bridge).
+
+            You will receive a list of git commit subjects, one per line, each formatted
+            as "- subject (short-hash)". Turn that list into a concise, user-facing
+            changelog in Markdown.
+
+            Rules:
+            - Group entries under "### Added", "### Changed", "### Fixed", and
+              "### Removed" headings, but only include a heading if it has at least
+              one entry.
+            - Summarize related or duplicate commits into a single bullet instead of
+              listing every commit separately.
+            - Skip routine chores that are not user-relevant, such as version bumps,
+              formatting-only changes, or CI-only tweaks, unless nothing else is
+              available.
+            - Do not include commit hashes or author names in the output.
+            - Do not invent features or fixes that are not implied by the commit
+              subjects.
+            - Keep bullets short, factual, and written for an end user, not a
+              developer.
+            - Respond with Markdown only, no surrounding commentary.
+          model: openai/gpt-4o
+
       - name: Generate release description
         uses: actions/github-script@v7
         env:
@@ -67,6 +136,9 @@ jobs:
           RELEASE_BUILD_NUMBER: ${{ steps.vars.outputs.build_number }}
           RELEASE_INSTALLER_NAME: ${{ steps.vars.outputs.installer_name }}
           RELEASE_ZIP_NAME: ${{ steps.vars.outputs.zip_name }}
+          PREVIOUS_TAG: ${{ steps.prev_tag.outputs.previous_tag }}
+          AI_CHANGELOG: ${{ steps.ai_changelog.outputs.response }}
+          AI_CHANGELOG_OUTCOME: ${{ steps.ai_changelog.outcome }}
         with:
           script: |
             const fs = require('fs');
@@ -75,20 +147,34 @@ jobs:
             const tagName = context.ref.replace('refs/tags/', '');
             const version = process.env.RELEASE_VERSION || tagName.replace(/^v/, '');
             const buildNumber = process.env.RELEASE_BUILD_NUMBER || process.env.GITHUB_RUN_NUMBER || '1';
-            const installerName = process.env.RELEASE_INSTALLER_NAME || `Codex-Local-Bridge-${version}-build.${buildNumber}-win-x64.exe`;
-            const zipName = process.env.RELEASE_ZIP_NAME || `Codex-Local-Bridge-${version}-build.${buildNumber}-win-x64.zip`;
-            const notes = await github.rest.repos.generateReleaseNotes({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              tag_name: tagName,
-              target_commitish: context.sha,
-            });
-            const generatedBody = String(notes.data.body || '').trim();
-            const changelog = generatedBody || 'No generated changelog entries were returned for this tag.';
+            const installerName = process.env.RELEASE_INSTALLER_NAME || `AI-Model-Relay-${version}-build.${buildNumber}-win-x64.exe`;
+            const zipName = process.env.RELEASE_ZIP_NAME || `AI-Model-Relay-${version}-build.${buildNumber}-win-x64.zip`;
+            const previousTag = String(process.env.PREVIOUS_TAG || '').trim();
+            const aiChangelog = String(process.env.AI_CHANGELOG || '').trim();
+            const aiSucceeded = process.env.AI_CHANGELOG_OUTCOME === 'success' && aiChangelog.length > 0;
+
+            let changelog;
+            let changelogSource;
+            if (aiSucceeded) {
+              changelog = aiChangelog;
+              changelogSource = 'AI-generated summary';
+            } else {
+              const notes = await github.rest.repos.generateReleaseNotes({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag_name: tagName,
+                target_commitish: context.sha,
+                previous_tag_name: previousTag || undefined,
+              });
+              const generatedBody = String(notes.data.body || '').trim();
+              changelog = generatedBody || 'No changelog entries were generated for this tag.';
+              changelogSource = 'GitHub auto-generated notes (AI changelog step was skipped or failed)';
+            }
+
             const body = [
-              `# Codex Local Bridge ${tagName}`,
+              `# AI Model Relay ${tagName}`,
               '',
-              'Windows tray companion for browser-mediated WordPress chat and image generation through the user-owned local Codex CLI session.',
+              'Windows tray companion for browser-mediated WordPress chat, image, and audio jobs through user-owned local and API-backed AI model drivers.',
               '',
               '## Downloads',
               '',
@@ -99,7 +185,7 @@ jobs:
               '',
               'This release was built by GitHub Actions after icon generation, JavaScript syntax checks, tests, and Windows packaging completed successfully.',
               '',
-              '## Changelog',
+              `## Changelog (${changelogSource})`,
               '',
               changelog,
               '',
@@ -122,7 +208,7 @@ jobs:
           }
           $release = $releaseJson | ConvertFrom-Json
           foreach ($asset in $release.assets) {
-            if ($asset.name -match '^Codex-Local-Bridge-.+-win-x64\.(exe|zip)$') {
+            if ($asset.name -match '^AI-Model-Relay-.+-win-x64\.(exe|zip)$') {
               Write-Host "Removing old release asset $($asset.name)"
               gh release delete-asset $tag $asset.name --repo $repo --yes
             }
