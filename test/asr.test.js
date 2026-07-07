@@ -87,6 +87,14 @@ function createQwenSnapshot(snapshot) {
 		});
 		assert.strictEqual(defaultWhisper.model_id, 'local-asr:whisper-large-v3');
 		assert.strictEqual(defaultWhisper.model_path, snapshot);
+		const legacyDefaultWhisper = asr.selectModel('codex-local:audio', defaultWhisperConfig, {
+			gpu: { available: true, free_mb: 12288, total_mb: 12288 },
+		});
+		assert.strictEqual(legacyDefaultWhisper.model_id, 'local-asr:whisper-large-v3');
+		const legacyExplicitWhisper = asr.selectModel('codex-local:audio:whisper-large-v3', config, {
+			gpu: { available: true, free_mb: 12288, total_mb: 12288 },
+		});
+		assert.strictEqual(legacyExplicitWhisper.model_id, 'local-asr:whisper-large-v3');
 
 		const qwenOffloadSelected = asr.selectModel('local-asr:qwen3-asr-1.7b', config, {
 			gpu: { available: true, free_mb: 7370, total_mb: 12288 },

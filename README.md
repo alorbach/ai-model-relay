@@ -1,6 +1,6 @@
 # AI Model Relay
 
-Formerly **Codex Local Bridge**. All `/v1` API routes, `codex-local:auto`/`codex-local:image` model IDs, the default bridge URL, and the state-folder path are unchanged. Local ASR model IDs have moved from `codex-local:audio:*` to `local-asr:*`. See [Naming and Compatibility](docs/operations.md#naming-and-compatibility) in the operations guide for the full change list.
+Formerly **Codex Local Bridge**. All `/v1` API routes, `codex-local:auto`/`codex-local:image` model IDs, the default bridge URL, and the state-folder path are unchanged. Local ASR model IDs have moved from `codex-local:audio:*` to `local-asr:*`, with the old audio prefix accepted as a compatibility alias. See [Naming and Compatibility](docs/operations.md#naming-and-compatibility) in the operations guide for the full change list.
 
 Windows tray companion for Alorbach AI Subscription Gateway. It exposes a secure localhost relay that routes browser-mediated jobs to backend drivers such as Codex CLI, local ASR, Grok/xAI API, configurable CLI tools, API-key chat providers, and optional OpenAI video generation while WordPress still owns plans, quotas, audit records, and optional Gateway fees.
 

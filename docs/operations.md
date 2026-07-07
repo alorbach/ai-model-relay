@@ -250,7 +250,7 @@ The product was originally released as **Codex Local Bridge** and has been renam
 
 - The tray app title, window title, and About text now read **AI Model Relay**.
 - The product name and short name returned by `/v1/status` and `/v1/capabilities` are `AI Model Relay` and `Model Relay`. The field `legacy_name` in those responses still returns `Codex Local Bridge`.
-- Local ASR model IDs now use the `local-asr:*` prefix (e.g. `local-asr:whisper-large-v3`, `local-asr:qwen3-asr-0.6b`). The previous `codex-local:audio:*` prefix is no longer accepted.
+- Local ASR model IDs now use the `local-asr:*` prefix (e.g. `local-asr:whisper-large-v3`, `local-asr:qwen3-asr-0.6b`). The previous `codex-local:audio:*` prefix is accepted as a compatibility alias for stale clients.
 - Provider-neutral relay model IDs use the `model-relay:<backend>:<model>` form (e.g. `model-relay:local-asr:qwen3-asr-0.6b`, `model-relay:xai:grok-4.3`). These were introduced alongside the rename and have no legacy equivalent.
 
 ### What remains unchanged

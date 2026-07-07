@@ -66,6 +66,7 @@ const {
 	assert.strictEqual(providerFromPayload({ model: 'model-relay:xai:grok-4.3' }), 'xai-api');
 	assert.strictEqual(providerFromPayload({ backend: 'cli-process' }), 'cli-process');
 	assert.strictEqual(providerFromPayload({ model: 'local-asr:qwen3-asr-0.6b' }), 'local-asr');
+	assert.strictEqual(providerFromPayload({ model: 'codex-local:audio:whisper-large-v3' }), 'local-asr');
 
 	const capabilities = registry.capabilities();
 	assert.ok(capabilities.some((backend) => backend.id === 'codex-cli' && backend.ready === true));
@@ -84,6 +85,10 @@ const {
 
 	const asrResult = await registry.run('transcribe', { model: 'model-relay:local-asr:qwen3-asr-0.6b' });
 	assert.strictEqual(asrResult.response.model, 'local-asr:qwen3-asr-0.6b');
+	const asrAutoResult = await registry.run('transcribe', { model: 'model-relay:local-asr:auto' });
+	assert.strictEqual(asrAutoResult.response.model, 'local-asr');
+	const legacyAsrResult = await registry.run('transcribe', { model: 'codex-local:audio:whisper-large-v3' });
+	assert.strictEqual(legacyAsrResult.response.model, 'local-asr:whisper-large-v3');
 
 	const xaiResult = await registry.run('chat', { model: 'model-relay:xai:grok-4.3', messages: [{ role: 'user', content: 'hi' }] });
 	assert.strictEqual(xaiResult.success, true);

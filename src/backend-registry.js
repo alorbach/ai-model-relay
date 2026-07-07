@@ -55,6 +55,9 @@ function providerFromPayload(payload = {}) {
 	if (model === 'local-asr' || model.startsWith('local-asr:')) {
 		return 'local-asr';
 	}
+	if (model === 'codex-local:audio' || model.startsWith('codex-local:audio:')) {
+		return 'local-asr';
+	}
 	if (model.startsWith('codex-local:')) {
 		return 'codex-cli';
 	}
@@ -74,6 +77,13 @@ function asrModelFromRelay(model) {
 	const text = String(model || '').trim();
 	if (text.startsWith('model-relay:local-asr:')) {
 		const slug = text.replace(/^model-relay:local-asr:/, '');
+		return slug && slug !== 'auto' ? `local-asr:${slug}` : 'local-asr';
+	}
+	if (text === 'codex-local:audio') {
+		return 'local-asr';
+	}
+	if (text.startsWith('codex-local:audio:')) {
+		const slug = text.replace(/^codex-local:audio:/, '');
 		return slug ? `local-asr:${slug}` : 'local-asr';
 	}
 	return text || 'local-asr';
