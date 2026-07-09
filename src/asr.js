@@ -10,8 +10,8 @@ const { beginLocalModelDebugLog } = require('./temp-debug-logs');
 
 const MODEL_PREFIX = 'local-asr';
 const LEGACY_AUDIO_MODEL_PREFIX = 'codex-local:audio';
-const RUNNER_PATH = path.join(__dirname, 'asr-runner.py');
-const QWEN_RUNNER_PATH = path.join(__dirname, 'asr-qwen-runner.py');
+const RUNNER_PATH = runnerPath('asr-runner.py');
+const QWEN_RUNNER_PATH = runnerPath('asr-qwen-runner.py');
 const DEFAULT_TIMEOUT_MS = Number(process.env.ALORBACH_ASR_TRANSCRIBE_TIMEOUT_MS || 1800000);
 const DEFAULT_PROBE_TTL_MS = Number(process.env.ALORBACH_ASR_PROBE_TTL_MS || 30000);
 const DEFAULT_PYTHON310 = path.join(os.homedir(), 'AppData', 'Local', 'Programs', 'Python', 'Python310', 'python.exe');
@@ -72,6 +72,20 @@ const DEFAULT_MODELS = [
 		preferred_device: 'cuda',
 	},
 ];
+
+function unpackedAsarPath(sourcePath) {
+	const normalized = String(sourcePath || '');
+	const marker = `${path.sep}app.asar${path.sep}`;
+	const index = normalized.indexOf(marker);
+	if (index === -1) {
+		return normalized;
+	}
+	return `${normalized.slice(0, index)}${path.sep}app.asar.unpacked${path.sep}${normalized.slice(index + marker.length)}`;
+}
+
+function runnerPath(filename, baseDir = __dirname) {
+	return unpackedAsarPath(path.join(baseDir, filename));
+}
 
 function readState() {
 	try {
@@ -1585,6 +1599,7 @@ module.exports = {
 	lightRuntime,
 	publicSettings,
 	resolveModelPath,
+	runnerPath,
 	saveSettings,
 	selectModel,
 	settings,

@@ -31,6 +31,10 @@
       "assets/**/*",
       "package.json"
     ],
+    "asarUnpack": [
+      "src/asr-runner.py",
+      "src/asr-qwen-runner.py"
+    ],
     "win": {
       "icon": "assets/icon.ico",
       "target": [

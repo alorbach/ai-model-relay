@@ -5,6 +5,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const asr = require('../src/asr');
+const packageInfo = require('../package.json');
 
 function createQwenSnapshot(snapshot) {
 	fs.mkdirSync(snapshot, { recursive: true });
@@ -14,6 +15,14 @@ function createQwenSnapshot(snapshot) {
 }
 
 (async () => {
+	const sourceRunnerPath = asr.runnerPath('asr-runner.py', path.join('D:', 'relay', 'src'));
+	assert.strictEqual(sourceRunnerPath, path.join('D:', 'relay', 'src', 'asr-runner.py'));
+	const packagedRunnerBase = path.join('C:', 'Users', 'AL', 'AppData', 'Local', 'Programs', 'AI Model Relay', 'resources', 'app.asar', 'src');
+	const packagedRunnerPath = asr.runnerPath('asr-runner.py', packagedRunnerBase);
+	assert.strictEqual(packagedRunnerPath, path.join('C:', 'Users', 'AL', 'AppData', 'Local', 'Programs', 'AI Model Relay', 'resources', 'app.asar.unpacked', 'src', 'asr-runner.py'));
+	assert.ok(packageInfo.build.asarUnpack.includes('src/asr-runner.py'));
+	assert.ok(packageInfo.build.asarUnpack.includes('src/asr-qwen-runner.py'));
+
 	const config = asr.normalizeSettings({
 		allow_model_downloads: false,
 		models: [
