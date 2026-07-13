@@ -1,0 +1,68 @@
+src/status-page.js
+  s_a24a52784f4f7d::t_a5c334700947f1 11
+  s_a24a52784f4f7d::t_8e825836c89779 886
+  s_a24a52784f4f7d::t_6b810dbacee741 188-197,201,203,205-213,238,882-885,887,889-892,1015-1016,1019,1029
+  s_a24a52784f4f7d::t_740b00b4496697 198-200,202,204,214-237
+  s_a24a52784f4f7d::t_93448e27ce82b2 670-673
+  s_a24a52784f4f7d::t_a5cff9e4081317 1489-1499,1501-1510,1547-1548
+  s_a24a52784f4f7d::t_1797b6fb86d853 726-728
+  s_a24a52784f4f7d::t_877146e8e971e5 888
+  s_a732edd6d38549::t_867f57edcefae1 1549
+docs/README.md
+  s_a24a52784f4f7d::t_4391ff4d72429a 5-6,8
+test/job-manager.test.js
+  s_a24a52784f4f7d::t_8485df31576f7a 93-104
+  s_a24a52784f4f7d::t_3002e5a6a88709 92
+docs/local-bridge-api.md
+  s_a24a52784f4f7d::t_529f4ab396809a 13,34,38,55,77-85,90,92,102-103,136,149,173-185,219-268
+  s_a24a52784f4f7d::t_1d02babc6f3be2 218,433,681,688,696-697
+  s_a24a52784f4f7d::t_0f185c79d7b159 415-418,447-451,566-570
+  s_5d2a88f5d78f8f::t_519c349c8d0c14 269,571
+docs/architecture.md
+  s_a24a52784f4f7d::t_4391ff4d72429a 35-37,41-46,67-74,104,110
+docs/gateway-integration.md
+  s_a24a52784f4f7d::t_4391ff4d72429a 3,18,20,187-191
+  s_a24a52784f4f7d::t_4c98bc87ac5853 192
+examples/http-app/README.md
+  s_a24a52784f4f7d::t_4391ff4d72429a 3
+docs/operations.md
+  s_a24a52784f4f7d::t_1d02babc6f3be2 105-106,282
+  s_a24a52784f4f7d::t_1e020ab9b6e364 5-6,8-26,67,73,94-95,133,135,137,206-214,216,238
+src/server.js
+  s_a24a52784f4f7d::t_a5c334700947f1 4-5,22,161-176,392-395,408-409
+  s_a24a52784f4f7d::t_dcb083ac7239b0 177-192,400-407
+src/job-manager.js
+  s_a24a52784f4f7d::t_0f38a99ced8e43 58-73,128,265-274,290,293-296,331-333,337-342,363
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.13",
+  "base_commit_sha": "2b31246893086d526d6087f23f2519cf5e615e2e",
+  "prompts": {},
+  "sessions": {
+    "s_5d2a88f5d78f8f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5b15-4974-7343-9b45-c2a3cd6c597b",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_a24a52784f4f7d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f532f-e127-77d2-af95-cf138999bbde",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_a732edd6d38549": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4db4-255f-7001-b239-cce70e95bacd",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
