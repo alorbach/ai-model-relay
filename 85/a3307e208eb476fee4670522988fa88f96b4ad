@@ -1,0 +1,93 @@
+src/local-cli.js
+  s_a24a52784f4f7d::t_9b16b20cfd3dd3 45
+  s_a24a52784f4f7d::t_2b0c3ec2d599cc 33-36
+  s_a24a52784f4f7d::t_9dfc5ba83a60e2 30,32,73,76
+  s_a24a52784f4f7d::t_dbe253a84c6a6a 15
+  s_a24a52784f4f7d::t_7c35ad314fe7ef 56-58,60-66,77-88,108
+  s_a24a52784f4f7d::t_d68d6ec2b83066 28-29
+  s_a24a52784f4f7d::t_df77532e84909d 1-14,16-27,37-42,50-51,54-55,67-72,74-75,89-95,97-107
+  s_a24a52784f4f7d::t_6f025e393b7129 31,43-44,46-49,52-53,59,96
+test/job-manager.test.js
+  s_a24a52784f4f7d::t_ed8d1694aa64f2 49,58
+  s_a24a52784f4f7d::t_6d658b43e5123b 48,50,54-57,62-63
+src/relay-settings.js
+  s_a24a52784f4f7d::t_34aecb23f56848 1-35
+test/relay-routes.test.js
+  s_a24a52784f4f7d::t_30e80dd997a603 106
+  s_a24a52784f4f7d::t_c4965f61e1ad48 88,146-150
+  s_a24a52784f4f7d::t_317204ede9dc11 119-122,141-145,151,168-170
+  s_a24a52784f4f7d::t_80db0701f358ca 171
+test/local-cli.test.js
+  s_a24a52784f4f7d::t_a296f67a31a93a 1-27
+src/status-cache.js
+  s_a24a52784f4f7d::t_4ad9aa459c2513 1-4,9-10,14-17,21,23-28
+  s_a24a52784f4f7d::t_6f025e393b7129 5-8,11-12,18-20,22
+  s_a24a52784f4f7d::t_466765eeb85e4c 13
+src/server.js
+  s_a24a52784f4f7d::t_6f1db6724b1850 303-330,500,505,518,523,536,541,554,559,572,577
+  s_a24a52784f4f7d::t_781d6cfd1b1b49 14,290-302,378,380,474-476,478-480,484,498-499,504,506,516-517,522,524,534-535,540,542,552-553,558,560,569-571,576,578,606
+  s_a24a52784f4f7d::t_30e80dd997a603 381,485,616-619
+  s_a24a52784f4f7d::t_3a69c7202b6363 379,477
+  s_a24a52784f4f7d::t_6f025e393b7129 482-483
+  s_a24a52784f4f7d::t_4ad9aa459c2513 15,224-226,254-258,481,615
+test/server-jobs.test.js
+  s_a24a52784f4f7d::t_30e80dd997a603 171
+package.json
+  s_a24a52784f4f7d::t_1f72d3588b10e7 3
+  s_a24a52784f4f7d::t_a296f67a31a93a 12
+src/security.js
+  s_a24a52784f4f7d::t_34aecb23f56848 119-120
+src/job-manager.js
+  s_a24a52784f4f7d::t_ecfb7b5502c5f5 38-39
+  s_a24a52784f4f7d::t_be771444338978 278-281
+  s_a24a52784f4f7d::t_68e814d7c2dc03 28-37,40-45,125-128,205-209,228,235-238,253-256,325
+  s_a24a52784f4f7d::t_99e36ea8f816e9 54-57,135,186,221-227,293-295,324
+  s_a24a52784f4f7d::t_75c2aaaaa5011b 229
+src/backend-registry.js
+  s_a24a52784f4f7d::t_6bb48f480ce2b6 8,155,161,163,184-194,205-206,221,223
+  s_a24a52784f4f7d::t_02b053b30603bc 56-57,196,198-204,207-220,222,224-232,236,268-273,529-530,544-547,597-598
+  s_a24a52784f4f7d::t_e24c14c6f250fb 154
+  s_a24a52784f4f7d::t_781d6cfd1b1b49 580
+  s_a24a52784f4f7d::t_761c59a7a2a0dc 3-5,237-267
+  s_a24a52784f4f7d::t_30e80dd997a603 579
+  s_a732edd6d38549::t_197650a2722e7a 195,197
+src/codex.js
+  s_a24a52784f4f7d::t_99e36ea8f816e9 739,898
+  s_a24a52784f4f7d::t_7c35ad314fe7ef 205-212,1125
+src/status-page.js
+  s_a24a52784f4f7d::t_6d658b43e5123b 1027
+  s_a24a52784f4f7d::t_de96a19f7a11dd 527-528,534-535,541-542,773-784,875-876,885-886,895-896,1004,1016
+  s_a24a52784f4f7d::t_1480eb2a5cff25 1599
+  s_a24a52784f4f7d::t_9dfc5ba83a60e2 166-167,172-173,1150,1152-1154
+  s_a24a52784f4f7d::t_9b16b20cfd3dd3 629,1173,1498-1548,1646
+  s_a24a52784f4f7d::t_ed8d1694aa64f2 944-945,948,957-960,964,972,977-980,1001,1013,1024
+  s_a24a52784f4f7d::t_7c295fa254f987 627,689-693
+  s_a24a52784f4f7d::t_792510706a8c31 1167
+  s_a24a52784f4f7d::t_e672ed0f8ea4ae 548-554,622,646-651,1144-1149,1151,1155-1166,1168-1172,1644-1645
+  s_a24a52784f4f7d::t_3fad0b3f1bb7e1 547
+  s_a24a52784f4f7d::t_e9888a5f4f9baf 1174
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "85a3307e208eb476fee4670522988fa88f96b4ad",
+  "prompts": {},
+  "sessions": {
+    "s_a24a52784f4f7d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f532f-e127-77d2-af95-cf138999bbde",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_a732edd6d38549": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4db4-255f-7001-b239-cce70e95bacd",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
