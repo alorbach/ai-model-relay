@@ -45,16 +45,22 @@ function deferredRunner(label, started, resolvers, result = { success: true }) {
 	{
 		const manager = new JobManager({ maxConcurrent: 1 });
 		let finishLive;
-		const live = manager.run({ requestId: 'request-live', type: 'chat' }, (session) => new Promise((resolve) => {
-			session.appendSessionOutput('stdout', 'live output line');
+		const live = manager.run({ requestId: 'request-live', type: 'chat', provider: 'codex-cli', providerLabel: 'Codex CLI', workflow: 'chat' }, (session) => new Promise((resolve) => {
+			session.appendSessionInput('stdin', 'Use token: hidden-value to answer.');
+			session.appendSessionOutput('stdout', "I'm using the image-generation workflow\nC:\\Users\\al\\.codex\\skills\\.system\\imagegen\\SKILL.md");
 			finishLive = () => resolve({ success: true });
 		}));
 		await tick();
-		assert.strictEqual(manager.snapshot().active[0].session_output, 'STDOUT:\nlive output line');
+		assert.strictEqual(manager.snapshot().active[0].provider, 'codex-cli');
+		assert.strictEqual(manager.snapshot().active[0].provider_label, 'Codex CLI');
+		assert.strictEqual(manager.snapshot().active[0].workflow, 'image-generation');
+		assert.deepStrictEqual(manager.snapshot().active[0].skills, ['imagegen']);
+		assert.strictEqual(manager.snapshot().active[0].session_input, 'STDIN:\nUse token: <redacted> to answer.');
 		finishLive();
 		await live;
 		assert.strictEqual(manager.snapshot().recent[0].status, 'completed');
-		assert.strictEqual(manager.snapshot().recent[0].session_output, 'STDOUT:\nlive output line');
+		assert.strictEqual(manager.snapshot().recent[0].workflow, 'image-generation');
+		assert.deepStrictEqual(manager.snapshot().recent[0].skills, ['imagegen']);
 
 		const failed = await manager.run({ requestId: 'request-fail', type: 'chat' }, () => ({ success: false, message: 'failed', details: { stderr: 'session stderr' } }));
 		assert.strictEqual(failed.success, false);

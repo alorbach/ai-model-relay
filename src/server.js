@@ -11,6 +11,8 @@ const { resetTempDebugLogs } = require('./temp-debug-logs');
 const video = require('./video');
 const { PRODUCT_NAME, SHORT_NAME, LEGACY_PRODUCT_NAME } = require('./brand');
 const { createBackendRegistry } = require('./backend-registry');
+const relaySettings = require('./relay-settings');
+const { createStatusCache } = require('./status-cache');
 const packageInfo = require('../package.json');
 const { appendLog, safeError, safeProcessSend } = require('./diagnostics');
 
@@ -219,6 +221,9 @@ function modelFromPayload(payload, fallback) {
 }
 
 function capabilitiesPayload(context) {
+	if (context.statusCache) {
+		return { ...context.statusCache.capabilities(), product: { name: PRODUCT_NAME, short_name: SHORT_NAME, legacy_name: LEGACY_PRODUCT_NAME }, bridge: { version: packageInfo.version }, frontend_interfaces: { legacy_v1: true, relay_v1: true, legacy_routes: ['/v1/status', '/v1/capabilities', '/v1/models', '/v1/chat', '/v1/images', '/v1/transcribe', '/v1/videos', '/v1/media/analyze'], relay_routes: ['/v1/relay/status', '/v1/relay/capabilities', '/v1/relay/models', '/v1/relay/jobs/chat', '/v1/relay/jobs/images', '/v1/relay/jobs/transcribe', '/v1/relay/jobs/videos', '/v1/relay/jobs/media/analyze'] } };
+	}
 	const codexCapabilities = context.codex.capabilities ? context.codex.capabilities() : { success: true, bridge_features: {} };
 	return {
 		success: true,
@@ -246,6 +251,11 @@ function capabilitiesPayload(context) {
 }
 
 function statusPayload(context, options = {}) {
+	if (context.statusCache) {
+		const cached = context.statusCache.status();
+		if (options.includePairedOrigins !== false) cached.bridge = { ...(cached.bridge || {}), paired_origins: Object.keys(context.security.getPairings()) };
+		return cached;
+	}
 	const status = context.codex.checkStatus();
 	const bridge = {
 		version: packageInfo.version,
@@ -275,6 +285,47 @@ function modelsPayload(context) {
 	modelPayload.models.relay = backendModels.map((model) => model.id);
 	modelPayload.backends = backendModels;
 	return modelPayload;
+}
+
+function relayPayloadFor(context, jobType, payload = {}) {
+	const requested = payload && typeof payload === 'object' ? payload : {};
+	if (String(requested.model || '').trim() || String(requested.provider || requested.backend || '').trim()) return { payload: requested };
+	const settings = context.relaySettings.settings();
+	const model = settings.defaults[jobType];
+	const driver = context.backends.getDriver(jobType, { model });
+	const capabilities = driver && driver.capabilities ? driver.capabilities() : null;
+	if (!driver || !(driver.job_types || []).includes(jobType) || !capabilities || !capabilities.ready) {
+		return { error: { success: false, category: 'configuration', code: 'relay_default_unavailable', message: `Configured default for ${jobType} is unavailable: ${model}. ${capabilities && capabilities.diagnostic || 'Select a ready provider in Relay settings.'}`, details: { job_type: jobType, model, backend: driver && driver.id || '' } } };
+	}
+	return { payload: { ...requested, model } };
+}
+
+function workflowForJob(jobType, provider) {
+	const key = `${provider || ''}:${jobType}`;
+	const workflows = {
+		'codex-cli:images': 'image-generation',
+		'codex-cli:chat': 'Codex chat',
+		'codex-cli:media.analyze': 'media analysis',
+		'grok-cli:images': 'Grok Imagine: image_gen',
+		'grok-cli:videos': 'Grok Imagine: image_to_video',
+		'grok-cli:chat': 'Grok chat',
+		'cursor-cli:chat': 'Cursor Agent',
+		'local-asr:transcribe': 'Local ASR',
+		'openai-videos:videos': 'OpenAI Videos API',
+		'xai-api:chat': 'xAI Chat Completions API',
+		'api-key-chat:chat': 'Chat Completions API',
+	};
+	return workflows[key] || '';
+}
+
+function jobDisplayMeta(context, jobType, payload, fallbackProvider = '', fallbackLabel = '') {
+	const driver = context.backends && context.backends.getDriver ? context.backends.getDriver(jobType, payload || {}) : null;
+	const provider = driver && driver.id || fallbackProvider;
+	return {
+		provider,
+		providerLabel: driver && driver.label || fallbackLabel,
+		workflow: workflowForJob(jobType, provider),
+	};
 }
 
 function errorStatusForResult(result) {
@@ -322,6 +373,10 @@ async function route(req, res, context) {
 	if (req.method === 'GET' && url.pathname === '/v1/asr/settings') {
 		const payload = context.codex.asrSettings ? context.codex.asrSettings({ refresh: url.searchParams.get('refresh') === '1' }) : { success: false, message: 'ASR settings are unavailable.' };
 		sendJson(res, payload.success === false ? 500 : 200, payload, origin || pairedOriginForCors(req, bridgeSecurity));
+		return;
+	}
+	if (req.method === 'GET' && url.pathname === '/v1/relay/settings') {
+		sendJson(res, 200, { success: true, settings: context.relaySettings.settings(), models: context.backends.models(), backends: context.backends.capabilities() }, origin || pairedOriginForCors(req, bridgeSecurity));
 		return;
 	}
 
@@ -416,6 +471,18 @@ async function route(req, res, context) {
 		sendJson(res, 200, { success: true, settings, capabilities: payload.capabilities }, origin);
 		return;
 	}
+	if (url.pathname === '/v1/relay/settings') {
+		const settings = context.relaySettings.saveSettings(body.settings || body || {});
+		context.statusEvents.broadcast('capabilities', capabilitiesPayload(context));
+		sendJson(res, 200, { success: true, settings, models: context.backends.models() }, origin || pairedOriginForCors(req, bridgeSecurity));
+		return;
+	}
+	if (url.pathname === '/v1/relay/refresh') {
+		context.statusCache.refresh();
+		const current = context.statusCache.status();
+		sendJson(res, 202, { success: true, checking: true, refresh: current.refresh || null }, origin || pairedOriginForCors(req, bridgeSecurity));
+		return;
+	}
 
 	const pairedOrigin = requirePairing(req, res, bridgeSecurity);
 	if (!pairedOrigin) {
@@ -428,11 +495,15 @@ async function route(req, res, context) {
 
 	if (url.pathname === '/v1/chat' || url.pathname === '/v1/relay/jobs/chat') {
 		const isRelayRoute = url.pathname === '/v1/relay/jobs/chat';
+		const resolved = isRelayRoute ? relayPayloadFor(context, 'chat', body.payload || {}) : { payload: body.payload || {} };
+		if (resolved.error) { sendErrorJson(req, res, 503, resolved.error, pairedOrigin, { requestId: body.request_id, route: url.pathname }); return; }
+		const display = isRelayRoute ? jobDisplayMeta(context, 'chat', resolved.payload) : { provider: 'codex-cli', providerLabel: 'Codex CLI', workflow: workflowForJob('chat', 'codex-cli') };
 		const result = await jobManager.run({
 			requestId: body.request_id,
 			type: 'chat',
-			model: modelFromPayload(body.payload, 'codex-local:auto'),
-		}, (session) => isRelayRoute ? context.backends.run('chat', body.payload || {}, session) : codexAdapter.chat(body.payload || {}, session));
+			model: modelFromPayload(resolved.payload, 'codex-local:auto'),
+			...display,
+		}, (session) => isRelayRoute ? context.backends.run('chat', resolved.payload, session) : codexAdapter.chat(resolved.payload, session));
 		if (!result.success) {
 			sendErrorJson(req, res, errorStatusForResult(result), result, pairedOrigin, { requestId: body.request_id, route: url.pathname });
 			return;
@@ -442,11 +513,15 @@ async function route(req, res, context) {
 	}
 	if (url.pathname === '/v1/images' || url.pathname === '/v1/relay/jobs/images') {
 		const isRelayRoute = url.pathname === '/v1/relay/jobs/images';
+		const resolved = isRelayRoute ? relayPayloadFor(context, 'images', body.payload || {}) : { payload: body.payload || {} };
+		if (resolved.error) { sendErrorJson(req, res, 503, resolved.error, pairedOrigin, { requestId: body.request_id, route: url.pathname }); return; }
+		const display = isRelayRoute ? jobDisplayMeta(context, 'images', resolved.payload) : { provider: 'codex-cli', providerLabel: 'Codex CLI', workflow: workflowForJob('images', 'codex-cli') };
 		const result = await jobManager.run({
 			requestId: body.request_id,
 			type: 'images',
-			model: modelFromPayload(body.payload, 'codex-local:image'),
-		}, (session) => isRelayRoute ? context.backends.run('images', body.payload || {}, session) : codexAdapter.images(body.payload || {}, session));
+			model: modelFromPayload(resolved.payload, 'codex-local:image'),
+			...display,
+		}, (session) => isRelayRoute ? context.backends.run('images', resolved.payload, session) : codexAdapter.images(resolved.payload, session));
 		if (!result.success) {
 			sendErrorJson(req, res, errorStatusForResult(result), result, pairedOrigin, { requestId: body.request_id, route: url.pathname });
 			return;
@@ -456,11 +531,15 @@ async function route(req, res, context) {
 	}
 	if (url.pathname === '/v1/transcribe' || url.pathname === '/v1/relay/jobs/transcribe') {
 		const isRelayRoute = url.pathname === '/v1/relay/jobs/transcribe';
+		const resolved = isRelayRoute ? relayPayloadFor(context, 'transcribe', body.payload || {}) : { payload: body.payload || {} };
+		if (resolved.error) { sendErrorJson(req, res, 503, resolved.error, pairedOrigin, { requestId: body.request_id, route: url.pathname }); return; }
+		const display = isRelayRoute ? jobDisplayMeta(context, 'transcribe', resolved.payload) : { provider: 'local-asr', providerLabel: 'Local ASR', workflow: workflowForJob('transcribe', 'local-asr') };
 		const result = await jobManager.run({
 			requestId: body.request_id,
 			type: 'transcribe',
-			model: modelFromPayload(body.payload, 'local-asr'),
-		}, (session) => isRelayRoute ? context.backends.run('transcribe', body.payload || {}, session) : codexAdapter.transcribe(body.payload || {}, session));
+			model: modelFromPayload(resolved.payload, 'local-asr'),
+			...display,
+		}, (session) => isRelayRoute ? context.backends.run('transcribe', resolved.payload, session) : codexAdapter.transcribe(resolved.payload, session));
 		if (!result.success) {
 			sendErrorJson(req, res, errorStatusForResult(result), result, pairedOrigin, { requestId: body.request_id, route: url.pathname });
 			return;
@@ -470,11 +549,15 @@ async function route(req, res, context) {
 	}
 	if (url.pathname === '/v1/videos' || url.pathname === '/v1/relay/jobs/videos') {
 		const isRelayRoute = url.pathname === '/v1/relay/jobs/videos';
+		const resolved = isRelayRoute ? relayPayloadFor(context, 'videos', body.payload || {}) : { payload: body.payload || {} };
+		if (resolved.error) { sendErrorJson(req, res, 503, resolved.error, pairedOrigin, { requestId: body.request_id, route: url.pathname }); return; }
+		const display = isRelayRoute ? jobDisplayMeta(context, 'videos', resolved.payload) : { provider: 'openai-videos', providerLabel: 'OpenAI Videos', workflow: workflowForJob('videos', 'openai-videos') };
 		const result = await jobManager.run({
 			requestId: body.request_id,
 			type: 'videos',
-			model: modelFromPayload(body.payload, 'sora-2'),
-		}, (session) => isRelayRoute ? context.backends.run('videos', body.payload || {}, session) : context.video.run(body.payload || {}, session));
+			model: modelFromPayload(resolved.payload, 'sora-2'),
+			...display,
+		}, (session) => isRelayRoute ? context.backends.run('videos', resolved.payload, session) : context.video.run(resolved.payload, session));
 		if (!result.success) {
 			sendErrorJson(req, res, errorStatusForResult(result), result, pairedOrigin, { requestId: body.request_id, route: url.pathname });
 			return;
@@ -483,11 +566,16 @@ async function route(req, res, context) {
 		return;
 	}
 	if (url.pathname === '/v1/media/analyze' || url.pathname === '/v1/relay/jobs/media/analyze') {
+		const isRelayRoute = url.pathname === '/v1/relay/jobs/media/analyze';
+		const resolved = isRelayRoute ? relayPayloadFor(context, 'media.analyze', body.payload || {}) : { payload: body.payload || {} };
+		if (resolved.error) { sendErrorJson(req, res, 503, resolved.error, pairedOrigin, { requestId: body.request_id, route: url.pathname }); return; }
+		const display = isRelayRoute ? jobDisplayMeta(context, 'media.analyze', resolved.payload) : { provider: 'codex-cli', providerLabel: 'Codex CLI', workflow: workflowForJob('media.analyze', 'codex-cli') };
 		const result = await jobManager.run({
 			requestId: body.request_id,
 			type: 'media_analysis',
-			model: modelFromPayload(body.payload, 'codex-local:auto'),
-		}, (session) => context.mediaAnalysis.analyze(body.payload || {}, codexAdapter, session));
+			model: modelFromPayload(resolved.payload, 'codex-local:auto'),
+			...display,
+		}, (session) => context.mediaAnalysis.analyze(resolved.payload, codexAdapter, session));
 		if (!result.success) {
 			sendErrorJson(req, res, errorStatusForResult(result), result, pairedOrigin, { requestId: body.request_id, route: url.pathname });
 			return;
@@ -515,6 +603,7 @@ function createServer(options = {}) {
 		video: options.video || video,
 		jobManager: options.jobManager || createJobManager({ ...options, onJobState }),
 		statusEvents,
+		relaySettings: options.relaySettings || relaySettings,
 	};
 	context.backends = options.backends || createBackendRegistry({
 		codex: context.codex,
@@ -523,6 +612,11 @@ function createServer(options = {}) {
 		cli: options.cli,
 		apiKeyChat: options.apiKeyChat,
 	});
+	context.statusCache = options.statusCache || createStatusCache(context, (status, capabilities) => { context.statusEvents.broadcast('status', statusPayload(context)); context.statusEvents.broadcast('capabilities', capabilitiesPayload(context)); });
+	if (options.backgroundRefresh !== false) {
+		const initialRefreshTimer = setTimeout(() => context.statusCache.refresh(), 1000);
+		if (typeof initialRefreshTimer.unref === 'function') initialRefreshTimer.unref();
+	}
 	const server = http.createServer((req, res) => {
 		route(req, res, context).catch((error) => {
 			appendLog('server', 'Unhandled route failure.', {

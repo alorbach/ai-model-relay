@@ -163,10 +163,14 @@ function statusPageHtml() {
 			padding: 9px 10px;
 		}
 		.feature-pill .name {
+			flex: 1 1 auto;
+			min-width: 0;
 			overflow-wrap: anywhere;
 		}
 		.feature-pill .state {
 			flex: 0 0 auto;
+			max-width: 10rem;
+			overflow-wrap: anywhere;
 			color: var(--muted);
 			font-size: 12px;
 			font-weight: 650;
@@ -520,26 +524,34 @@ function statusPageHtml() {
 			<div class="panel span-12">
 				<div class="label">Active Jobs</div>
 				<table class="table">
-					<thead><tr><th>Request</th><th>Type</th><th>Model</th><th>Status</th><th>Elapsed</th></tr></thead>
-					<tbody id="activeJobs"><tr><td colspan="5" class="muted">No active jobs</td></tr></tbody>
+					<thead><tr><th>Request</th><th>Type</th><th>Model</th><th>Provider / API</th><th>Workflow / Skill</th><th>Status</th><th>Elapsed</th></tr></thead>
+					<tbody id="activeJobs"><tr><td colspan="7" class="muted">No active jobs</td></tr></tbody>
 				</table>
 			</div>
 			<div class="panel span-12">
 				<div class="label">Queued Jobs</div>
 				<table class="table">
-					<thead><tr><th>Request</th><th>Type</th><th>Model</th><th>Status</th><th>Waited</th></tr></thead>
-					<tbody id="queuedJobs"><tr><td colspan="5" class="muted">No queued jobs</td></tr></tbody>
+					<thead><tr><th>Request</th><th>Type</th><th>Model</th><th>Provider / API</th><th>Workflow / Skill</th><th>Status</th><th>Waited</th></tr></thead>
+					<tbody id="queuedJobs"><tr><td colspan="7" class="muted">No queued jobs</td></tr></tbody>
 				</table>
 			</div>
 			<div class="panel span-12">
 				<div class="label">Recent Activity</div>
 				<table class="table">
-					<thead><tr><th>Request</th><th>Type</th><th>Model</th><th>Status</th><th>Elapsed</th><th>Finished</th></tr></thead>
-					<tbody id="recentActivity"><tr><td colspan="6" class="muted">No recent activity</td></tr></tbody>
+					<thead><tr><th>Request</th><th>Type</th><th>Model</th><th>Provider / API</th><th>Workflow / Skill</th><th>Status</th><th>Elapsed</th><th>Finished</th></tr></thead>
+					<tbody id="recentActivity"><tr><td colspan="8" class="muted">No recent activity</td></tr></tbody>
 				</table>
 			</div>
 		</section>
 		<section class="tab-panel grid" id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" hidden>
+			<div class="panel span-12">
+				<div class="label">Providers and Model Routing</div>
+				<div class="feature-grid" id="providerSettings">Loading providers</div>
+				<form class="settings-editor" id="relaySettingsForm">
+					<div class="settings-grid" id="relayDefaultSettings"></div>
+					<div class="settings-actions"><span class="muted" id="relaySettingsMessage">Loading routing settings</span><button type="button" id="refreshRelayProviders">Refresh detection</button><button type="button" id="saveRelaySettings">Save routing</button></div>
+				</form>
+			</div>
 			<div class="panel span-12">
 				<div class="label">Local ASR Settings</div>
 				<form class="settings-editor" id="asrSettingsForm">
@@ -607,11 +619,14 @@ function statusPageHtml() {
 		const statusUrl = '/v1/status';
 		const capabilitiesUrl = '/v1/capabilities';
 		const asrSettingsUrl = '/v1/asr/settings';
+		const relaySettingsUrl = '/v1/relay/settings';
 		const jobEventsUrl = '/v1/status/events';
 		let currentStatus = {};
 		let currentCapabilities = {};
 		let currentAsrSettings = null;
+		let settingsLoaded = false;
 		let fallbackPollTimer = null;
+		let providerRefreshPollTimer = null;
 		let jobEvents = null;
 		const fields = {
 			tabButtons: Array.from(document.querySelectorAll('[role="tab"]')),
@@ -628,6 +643,12 @@ function statusPageHtml() {
 			codexBinary: document.getElementById('codexBinary'),
 			detectedFeatures: document.getElementById('detectedFeatures'),
 			backendDrivers: document.getElementById('backendDrivers'),
+			providerSettings: document.getElementById('providerSettings'),
+			relaySettingsForm: document.getElementById('relaySettingsForm'),
+			relayDefaultSettings: document.getElementById('relayDefaultSettings'),
+			relaySettingsMessage: document.getElementById('relaySettingsMessage'),
+			refreshRelayProviders: document.getElementById('refreshRelayProviders'),
+			saveRelaySettings: document.getElementById('saveRelaySettings'),
 			asrDetails: document.getElementById('asrDetails'),
 			asrSettingsForm: document.getElementById('asrSettingsForm'),
 			asrGeneralSettings: document.getElementById('asrGeneralSettings'),
@@ -664,6 +685,11 @@ function statusPageHtml() {
 			}
 			if (options.focus) {
 				nextButton.focus();
+			}
+			if (nextButton.id === 'tab-settings' && !settingsLoaded) {
+				settingsLoaded = true;
+				loadAsrSettings();
+				loadRelaySettings();
 			}
 		}
 
@@ -742,6 +768,18 @@ function statusPageHtml() {
 			const requestId = text(job.request_id || job.id || job.short_request_id);
 			const label = text(job.short_request_id || job.request_id || job.id);
 			return '<button type="button" class="copy-value" data-copy-value="' + escapeHtml(requestId) + '" title="Copy request id">' + escapeHtml(label) + '</button>';
+		}
+
+		function providerCell(job) {
+			const provider = text(job.provider || 'Unknown');
+			const label = text(job.provider_label || '');
+			return '<td><code>' + escapeHtml(provider) + '</code>' + (label && label !== provider ? '<div class="muted">' + escapeHtml(label) + '</div>' : '') + '</td>';
+		}
+
+		function workflowCell(job) {
+			const workflow = text(job.workflow || 'Pending');
+			const skills = Array.isArray(job.skills) ? job.skills.filter(Boolean) : [];
+			return '<td>' + escapeHtml(workflow) + (skills.length ? '<div class="muted">Skill: ' + escapeHtml(skills.join(', ')) + '</div>' : '') + '</td>';
 		}
 
 		function statusClass(status) {
@@ -834,6 +872,8 @@ function statusPageHtml() {
 			return '<td>' + requestButton(job) + '</td>' +
 				'<td>' + escapeHtml(job.type) + '</td>' +
 				'<td>' + escapeHtml(job.model) + '</td>' +
+				providerCell(job) +
+				workflowCell(job) +
 				'<td>' + statusText(job.status) + '</td>' +
 				'<td>' + elapsedSpan(job, true) + '</td>';
 		}
@@ -842,6 +882,8 @@ function statusPageHtml() {
 			return '<td>' + requestButton(job) + '</td>' +
 				'<td>' + escapeHtml(job.type) + '</td>' +
 				'<td>' + escapeHtml(job.model) + '</td>' +
+				providerCell(job) +
+				workflowCell(job) +
 				'<td>' + statusText(job.status || 'queued') + '</td>' +
 				'<td>' + elapsedSpan(job, true) + '</td>';
 		}
@@ -850,6 +892,8 @@ function statusPageHtml() {
 			return '<td>' + requestButton(job) + '</td>' +
 				'<td>' + escapeHtml(job.type) + '</td>' +
 				'<td>' + escapeHtml(job.model) + '</td>' +
+				providerCell(job) +
+				workflowCell(job) +
 				'<td>' + statusText(job.status) + (job.error_message ? '<div class="muted">' + escapeHtml(job.error_message) + '</div>' : '') + '</td>' +
 				'<td>' + elapsedSpan(job, false) + '</td>' +
 				'<td>' + (job.finished_at ? new Date(job.finished_at).toLocaleTimeString() : '-') + '</td>';
@@ -897,9 +941,11 @@ function statusPageHtml() {
 				let outputRow = rowFor(tbody, key, 'output');
 				const debugLogs = Array.isArray(job.debug_logs) ? job.debug_logs : [];
 				const hasDebugOutput = debugLogs.some((log) => log && (log.prompt || log.output));
-				const hasOutput = !!job.session_output || hasDebugOutput;
+				const hasInput = !!job.session_input;
+				const hasOutput = hasInput || !!job.session_output || hasDebugOutput;
 				if (hasOutput) {
 					const signature = JSON.stringify({
+						input: !!job.session_input,
 						session: !!job.session_output,
 						debug: debugLogs.map((log) => [!!(log && log.prompt), !!(log && log.output)]),
 					});
@@ -908,11 +954,14 @@ function statusPageHtml() {
 							outputRow = createSessionRow(key, 'output');
 						}
 						outputRow.dataset.outputSignature = signature;
-						let blocks = '';
+					let blocks = '';
+						if (job.session_input) {
+							blocks += sessionOutputBlock(options.inputLabel, { live: !!options.live, key: key + ':input' });
+						}
 						if (job.session_output) {
 							blocks += sessionOutputBlock(options.outputLabel, {
 								live: !!options.live,
-								key,
+								key: key + ':output',
 							});
 						}
 						blocks += debugLogBlocks(job, key);
@@ -920,10 +969,14 @@ function statusPageHtml() {
 					}
 					tbody.appendChild(outputRow);
 					if (job.session_output) {
-						const output = Array.from(outputRow.querySelectorAll('.session-output')).find((item) => item.dataset.sessionKey === key);
+						const output = Array.from(outputRow.querySelectorAll('.session-output')).find((item) => item.dataset.sessionKey === key + ':output');
 						if (output) {
 							updateSessionOutput(output, job.session_output);
 						}
+					}
+					if (job.session_input) {
+						const input = Array.from(outputRow.querySelectorAll('.session-output')).find((item) => item.dataset.sessionKey === key + ':input');
+						if (input) updateSessionOutput(input, job.session_input);
 					}
 					if (hasDebugOutput) {
 						updateDebugLogBlocks(outputRow, job, key);
@@ -945,8 +998,10 @@ function statusPageHtml() {
 				emptyText: 'No active jobs',
 				keyPrefix: 'active',
 				live: true,
+				inputLabel: 'Live stdin',
 				outputLabel: 'Live Session Output',
 				summaryCells: activeSummaryCells,
+				colspan: 7,
 			});
 		}
 
@@ -955,8 +1010,10 @@ function statusPageHtml() {
 				emptyText: 'No queued jobs',
 				keyPrefix: 'queued',
 				live: true,
+				inputLabel: 'Queued stdin',
 				outputLabel: 'Queued Session Output',
 				summaryCells: queuedSummaryCells,
+				colspan: 7,
 			});
 		}
 
@@ -964,9 +1021,10 @@ function statusPageHtml() {
 			renderJobTable(fields.recentActivity, jobs, {
 				emptyText: 'No recent activity',
 				keyPrefix: 'recent',
+				inputLabel: 'stdin',
 				outputLabel: 'Session Output',
 				summaryCells: recentSummaryCells,
-				colspan: 6,
+				colspan: 8,
 			});
 		}
 
@@ -1081,6 +1139,37 @@ function statusPageHtml() {
 			renderAsrDetails(currentCapabilities.asr || {});
 			currentStatus.capabilities = currentCapabilities;
 			fields.rawStatus.textContent = JSON.stringify(currentStatus, null, 2);
+		}
+
+		function renderRelaySettings(payload) {
+			const settings = payload && payload.settings || {};
+			const defaults = settings.defaults || {};
+			const models = Array.isArray(payload && payload.models) ? payload.models : [];
+			const backends = Array.isArray(payload && payload.backends) ? payload.backends : (currentCapabilities.backends || []);
+			fields.providerSettings.innerHTML = backends.map((backend) => {
+				const status = backend.ready ? 'Ready' : (backend.state === 'not_authenticated' ? 'Not authenticated' : (backend.state === 'installed' ? 'Authentication unchecked' : (backend.installed === false ? 'Not installed' : 'Unavailable')));
+				const features = Object.keys(backend.features || {}).filter((key) => backend.features[key]).join(', ') || (backend.job_types || []).join(', ') || 'No supported jobs';
+				const detail = backend.version || backend.command || features;
+				const diagnostic = backend.diagnostic && backend.diagnostic !== 'Ready.' && backend.diagnostic !== 'Authentication not checked yet.' ? '<br><small class="muted">' + escapeHtml(backend.diagnostic) + '</small>' : '';
+				return '<div class="feature-pill ' + (backend.ready ? 'enabled' : 'disabled') + '"><span class="name"><strong>' + escapeHtml(backend.label || backend.id) + '</strong><br><small class="muted">' + escapeHtml(detail) + '</small>' + diagnostic + '</span><span class="state">' + escapeHtml(status) + '</span></div>';
+			}).join('') || '<div class="muted">No provider metadata reported</div>';
+			const labels = { chat: 'Chat and coding', images: 'Image generation', videos: 'Video generation', transcribe: 'Transcription', 'media.analyze': 'Media analysis' };
+			fields.relayDefaultSettings.innerHTML = Object.keys(labels).map((jobType) => {
+				const current = defaults[jobType] || '';
+				const compatible = models.filter((model) => (jobType === 'chat' || jobType === 'media.analyze') ? model.type === 'text' : model.type === ({ images: 'image', videos: 'video', transcribe: 'audio' }[jobType]));
+				const selectedKnown = compatible.some((model) => model.id === current);
+				const options = (selectedKnown ? [] : ['<option value="' + escapeHtml(current) + '" selected>Unavailable: ' + escapeHtml(current) + '</option>']).concat(compatible.map((model) => '<option value="' + escapeHtml(model.id) + '"' + optionAttr(model.id, current) + '>' + escapeHtml(model.id) + (model.ready === false ? ' (unavailable)' : '') + '</option>'));
+				return '<label class="field"><span>' + labels[jobType] + '</span><select data-relay-job="' + jobType + '">' + options.join('') + '</select></label>';
+			}).join('');
+		}
+
+		async function loadRelaySettings() {
+			try { const response = await fetch(relaySettingsUrl, { cache: 'no-store' }); const payload = await response.json(); if (!response.ok) throw new Error(payload.message || 'Routing settings unavailable'); renderRelaySettings(payload); if (!fields.refreshRelayProviders.disabled) fields.relaySettingsMessage.textContent = 'Routing settings loaded'; } catch (error) { if (!fields.refreshRelayProviders.disabled) fields.relaySettingsMessage.textContent = error.message || 'Routing settings load failed'; }
+		}
+
+		async function saveRelaySettings() {
+			const defaults = {}; fields.relayDefaultSettings.querySelectorAll('[data-relay-job]').forEach((select) => { defaults[select.getAttribute('data-relay-job')] = select.value; });
+			try { const response = await fetch(relaySettingsUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ settings: { defaults } }) }); const payload = await response.json(); if (!response.ok) throw new Error(payload.message || 'Routing settings save failed'); renderRelaySettings(payload); fields.relaySettingsMessage.textContent = 'Routing settings saved'; } catch (error) { fields.relaySettingsMessage.textContent = error.message || 'Routing settings save failed'; }
 		}
 
 		function checkedAttr(value) {
@@ -1406,6 +1495,57 @@ function statusPageHtml() {
 				fields.backendDrivers.innerHTML = '<div class="muted">Loading backend drivers</div>';
 			}
 			renderJobs(jobs);
+			updateProviderRefreshState(payload.refresh);
+		}
+
+		function updateProviderRefreshState(refreshState) {
+			if (!settingsLoaded || !refreshState) return;
+			const expectedId = Number(fields.refreshRelayProviders.dataset.refreshId || 0);
+			if (expectedId && Number(refreshState.id || 0) !== expectedId) return;
+			if (refreshState.active) {
+				fields.refreshRelayProviders.disabled = true;
+				fields.refreshRelayProviders.textContent = 'Checking…';
+				fields.relaySettingsMessage.textContent = 'Checking providers in background…';
+				return;
+			}
+			if (!expectedId) return;
+			clearInterval(providerRefreshPollTimer);
+			providerRefreshPollTimer = null;
+			fields.refreshRelayProviders.disabled = false;
+			fields.refreshRelayProviders.textContent = 'Refresh detection';
+			delete fields.refreshRelayProviders.dataset.refreshId;
+			if (refreshState.error) {
+				fields.relaySettingsMessage.textContent = 'Detection refresh failed: ' + refreshState.error;
+				return;
+			}
+			fields.relaySettingsMessage.textContent = 'Detection refreshed ' + new Date(refreshState.completed_at || Date.now()).toLocaleTimeString();
+			loadRelaySettings();
+		}
+
+		function pollProviderRefresh() {
+			refresh().catch(() => {});
+		}
+
+		async function refreshProviderDetection() {
+			if (fields.refreshRelayProviders.disabled) return;
+			fields.refreshRelayProviders.disabled = true;
+			fields.refreshRelayProviders.textContent = 'Checking…';
+			fields.relaySettingsMessage.textContent = 'Starting provider detection…';
+			try {
+				const response = await fetch('/v1/relay/refresh', { method: 'POST' });
+				const payload = await response.json();
+				if (!response.ok) throw new Error(payload.message || 'Detection refresh could not be started');
+				const refreshState = payload.refresh || {};
+				fields.refreshRelayProviders.dataset.refreshId = String(refreshState.id || '');
+				fields.relaySettingsMessage.textContent = 'Checking providers in background…';
+				clearInterval(providerRefreshPollTimer);
+				providerRefreshPollTimer = setInterval(pollProviderRefresh, 1000);
+				pollProviderRefresh();
+			} catch (error) {
+				fields.refreshRelayProviders.disabled = false;
+				fields.refreshRelayProviders.textContent = 'Refresh detection';
+				fields.relaySettingsMessage.textContent = 'Detection refresh failed: ' + (error.message || 'unknown error');
+			}
 		}
 
 		async function refresh() {
@@ -1456,6 +1596,7 @@ function statusPageHtml() {
 				try {
 					markLiveEvent('Capabilities');
 					renderCapabilities(JSON.parse(event.data || '{}'));
+					if (settingsLoaded) loadRelaySettings();
 				} catch (error) {}
 			});
 			jobEvents.addEventListener('jobs', (event) => {
@@ -1500,10 +1641,11 @@ function statusPageHtml() {
 		fields.saveAsrSettings.addEventListener('click', saveAsrSettings);
 		fields.applyAsrSettingsJson.addEventListener('click', applyAsrSettingsJson);
 		fields.addAsrModel.addEventListener('click', addAsrModel);
+		fields.relaySettingsForm.addEventListener('submit', (event) => { event.preventDefault(); saveRelaySettings(); });
+		fields.saveRelaySettings.addEventListener('click', saveRelaySettings);
+		fields.refreshRelayProviders.addEventListener('click', refreshProviderDetection);
 		refresh().then(connectJobEvents).catch(() => {
 			startFallbackPolling();
-		}).finally(() => {
-			setTimeout(() => loadAsrSettings(), 0);
 		});
 	</script>
 </body>

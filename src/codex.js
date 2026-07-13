@@ -202,6 +202,14 @@ function checkStatus() {
 	};
 }
 
+async function checkStatusAsync() {
+	const [version, login] = await Promise.all([runCodexAsync(['--version'], { timeout: Number(process.env.ALORBACH_CODEX_STATUS_TIMEOUT_MS || 15000) }), runCodexAsync(['login', 'status'], { timeout: Number(process.env.ALORBACH_CODEX_STATUS_TIMEOUT_MS || 15000) })]);
+	if (version.error || version.status !== 0) return { success: false, message: 'Codex CLI is not installed or not on PATH.', details: { codex_binary: resolveCodexBinary(), error: version.error && version.error.message || (version.stderr || '').trim() } };
+	const loginText = `${login.stdout || ''}\n${login.stderr || ''}`;
+	const loggedIn = !login.error && login.status === 0 && /logged in/i.test(loginText) && fs.existsSync(authPath);
+	return { success: loggedIn, message: loggedIn ? 'Local Codex CLI is installed and logged in.' : 'Codex CLI is installed, but this user is not logged in.', details: { codex_binary: resolveCodexBinary(), codex_home: codexHome, auth_path: authPath, generated_images_dir: generatedImagesDir, version: (version.stdout || version.stderr || '').trim(), login_status: (login.stdout || login.stderr || '').trim() } };
+}
+
 function normalizeTokenCount(rawValue) {
 	const digits = String(rawValue || '').replace(/[^\d]/g, '');
 	return digits ? Number.parseInt(digits, 10) || 0 : 0;
@@ -728,6 +736,7 @@ async function chat(payload, session = {}) {
 		args.push('--image', attachment.path);
 	}
 	args.push('-');
+	if (typeof session.appendSessionInput === 'function') session.appendSessionInput('stdin', prompt);
 	const run = await runCodexExec(args, { cwd: tempDir, timeout: Number(process.env.ALORBACH_CODEX_CHAT_TIMEOUT_MS || 600000), onOutput: session.appendSessionOutput, input: prompt });
 	const stdout = (run.stdout || '').trim();
 	const stderr = (run.stderr || '').trim();
@@ -886,6 +895,7 @@ async function images(payload, session = {}) {
 		args.push('--image', attachment.path);
 	}
 	args.push('-');
+	if (typeof session.appendSessionInput === 'function') session.appendSessionInput('stdin', promptText);
 	const run = await runCodexExec(args, { cwd: tempDir, timeout: Number(process.env.ALORBACH_CODEX_IMAGE_TIMEOUT_MS || 1800000), onOutput: session.appendSessionOutput, input: promptText });
 	const after = listGeneratedImages(generatedImagesDir);
 	const newImages = detectNewImage(before, after);
@@ -1112,6 +1122,7 @@ module.exports = {
 	buildChatPrompt,
 	capabilities,
 	checkStatus,
+	checkStatusAsync,
 	chat,
 	codexImageFailureFromOutput,
 	codexJsonUnsupported,

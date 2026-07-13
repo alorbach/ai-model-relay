@@ -85,6 +85,7 @@ function createMockSecurity() {
 			{ id: 'model-relay:codex:auto', legacy_id: 'codex-local:auto', type: 'text', backend: 'codex-cli' },
 			{ id: 'model-relay:xai:grok-4.3', type: 'text', backend: 'xai-api' },
 		],
+		getDriver: () => ({ id: 'codex-cli', job_types: ['chat', 'images', 'videos', 'transcribe', 'media.analyze'], checkStatus: () => ({ success: true, message: 'ready', details: {} }), capabilities: () => ({ ready: true }) }),
 		run: (type, payload) => {
 			calls.push({ route: `relay-${type}`, payload });
 			return Promise.resolve({
@@ -102,6 +103,7 @@ function createMockSecurity() {
 		},
 	};
 	const server = createServer({
+		backgroundRefresh: false,
 		codex,
 		backends,
 		security: createMockSecurity(),
@@ -113,6 +115,10 @@ function createMockSecurity() {
 		mediaAnalysis: {
 			capabilities: () => ({ enabled: true }),
 			analyze: () => Promise.resolve({ success: true, response: { text: 'media ok' } }),
+		},
+		relaySettings: {
+			settings: () => ({ defaults: { chat: 'model-relay:codex:auto', images: 'model-relay:codex:image', videos: 'model-relay:openai-videos:sora-2', transcribe: 'model-relay:local-asr:auto', 'media.analyze': 'model-relay:codex:auto' } }),
+			saveSettings: (settings) => ({ defaults: settings.defaults }),
 		},
 	});
 	await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -132,6 +138,17 @@ function createMockSecurity() {
 		assert.ok(models.body.models.relay.includes('model-relay:xai:grok-4.3'));
 		assert.ok(models.body.backends.some((model) => model.backend === 'xai-api'));
 
+		const relaySettings = await requestJson(port, 'GET', '/v1/relay/settings');
+		assert.strictEqual(relaySettings.statusCode, 200);
+		assert.strictEqual(relaySettings.body.settings.defaults.chat, 'model-relay:codex:auto');
+		const savedRelaySettings = await requestJson(port, 'POST', '/v1/relay/settings', { settings: { defaults: { chat: 'model-relay:cursor-cli:auto' } } });
+		assert.strictEqual(savedRelaySettings.statusCode, 200);
+		const refresh = await requestJson(port, 'POST', '/v1/relay/refresh', {});
+		assert.strictEqual(refresh.statusCode, 202);
+		assert.strictEqual(refresh.body.checking, true);
+		assert.strictEqual(refresh.body.refresh.active, true);
+		assert.ok(refresh.body.refresh.id > 0);
+
 		const body = {
 			job_token: 'job-token',
 			request_hash: 'hash',
@@ -147,6 +164,10 @@ function createMockSecurity() {
 		assert.strictEqual(relayChat.body.response.id, 'relay-chat');
 		assert.strictEqual(calls[calls.length - 1].route, 'relay-chat');
 		assert.strictEqual(calls[calls.length - 1].payload.model, 'model-relay:xai:grok-4.3');
+
+		const defaultRelayChat = await requestJson(port, 'POST', '/v1/relay/jobs/chat', { ...body, payload: { messages: [{ role: 'user', content: 'default' }] } });
+		assert.strictEqual(defaultRelayChat.statusCode, 200);
+		assert.strictEqual(calls[calls.length - 1].payload.model, 'model-relay:codex:auto');
 
 		const legacyChat = await requestJson(port, 'POST', '/v1/chat', { ...body, payload: { model: 'codex-local:auto', messages: [] } });
 		assert.strictEqual(legacyChat.statusCode, 200);

@@ -168,6 +168,7 @@ function createMockSecurity() {
 		images: () => Promise.resolve({ success: true, response: { data: [] } }),
 	};
 	const server = createServer({
+		backgroundRefresh: false,
 		codex,
 		security: createMockSecurity(),
 		maxConcurrent: 2,

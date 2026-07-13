@@ -116,4 +116,6 @@ module.exports = {
 	removePairing,
 	savePairing,
 	validateBridgeToken,
+	readState,
+	writeState,
 };

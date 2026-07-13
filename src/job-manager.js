@@ -25,12 +25,34 @@ function normalizeDiagnosticText(value) {
 		.replace(/\u00c2/g, '');
 }
 
+function safeJobMetadata(value, maxLength = 120) {
+	return normalizeDiagnosticText(value).replace(/[\r\n]+/g, ' ').trim().slice(0, maxLength);
+}
+
+function extractRuntimeMetadata(text) {
+	const source = String(text || '');
+	const workflowMatch = source.match(/\b(?:using|use)\s+(?:the\s+)?([a-z0-9][a-z0-9 _-]{1,80}?)\s+workflow\b/i);
+	const skills = [];
+	const skillPattern = /[\\/]skills[\\/](?:\.system[\\/])?([^\\/]+)[\\/]SKILL\.md/ig;
+	let match;
+	const pathSource = source.replace(/\\\\/g, '\\');
+	while ((match = skillPattern.exec(pathSource))) {
+		const skill = safeJobMetadata(match[1], 80);
+		if (skill && !skills.includes(skill)) skills.push(skill);
+	}
+	return { workflow: workflowMatch ? safeJobMetadata(workflowMatch[1], 100) : '', skills };
+}
+
 function truncateOutput(value, maxLength = 12000) {
 	const text = normalizeDiagnosticText(value).trim();
 	if (text.length <= maxLength) {
 		return text;
 	}
 	return `${text.slice(0, 6000)}\n\n...[truncated ${text.length - maxLength} chars]...\n\n${text.slice(-6000)}`;
+}
+
+function redactSessionInput(value) {
+	return String(value || '').replace(/\b(bearer|token|api[_ -]?key|authorization)\s*(?:[:=]\s*|\s+)([^\s,;]+)/ig, '$1: <redacted>');
 }
 
 function collectSessionOutput(failure) {
@@ -100,12 +122,17 @@ class JobManager {
 			requestId: String(meta.requestId || ''),
 			type: String(meta.type || 'job'),
 			model: String(meta.model || ''),
+			provider: safeJobMetadata(meta.provider),
+			providerLabel: safeJobMetadata(meta.providerLabel),
+			workflow: safeJobMetadata(meta.workflow),
+			skills: Array.from(new Set((Array.isArray(meta.skills) ? meta.skills : []).map((skill) => safeJobMetadata(skill, 80)).filter(Boolean))),
 			status: 'queued',
 			createdAt: now,
 			startedAt: 0,
 			finishedAt: 0,
 			lastOutputEmitAt: 0,
 			sessionOutput: '',
+			sessionInput: '',
 			runner,
 		};
 
@@ -156,6 +183,7 @@ class JobManager {
 				requestId: job.requestId,
 				type: job.type,
 				model: job.model,
+				appendSessionInput: (stream, chunk) => this.appendSessionInput(job, stream, chunk),
 				appendSessionOutput: (stream, chunk) => this.appendSessionOutput(job, stream, chunk),
 			}))
 			.then((result) => {
@@ -174,6 +202,11 @@ class JobManager {
 			return;
 		}
 		const label = String(stream || 'output').toUpperCase();
+		const runtimeMetadata = extractRuntimeMetadata(text);
+		if (runtimeMetadata.workflow) job.workflow = runtimeMetadata.workflow;
+		for (const skill of runtimeMetadata.skills) {
+			if (!job.skills.includes(skill)) job.skills.push(skill);
+		}
 		const next = job.sessionOutput
 			? `${job.sessionOutput}\n\n${label}:\n${text}`
 			: `${label}:\n${text}`;
@@ -185,11 +218,24 @@ class JobManager {
 		}
 	}
 
+	appendSessionInput(job, stream, chunk) {
+		const text = redactSessionInput(normalizeDiagnosticText(chunk)).trim();
+		if (!text) return;
+		const label = String(stream || 'stdin').toUpperCase();
+		const next = job.sessionInput ? `${job.sessionInput}\n\n${label}:\n${text}` : `${label}:\n${text}`;
+		job.sessionInput = truncateOutput(next);
+		this.emitChange();
+	}
+
 	finish(job, status, failure) {
 		this.running.delete(job.id);
 		job.status = status;
 		job.finishedAt = this.now();
 		job.errorMessage = failure && failure.message ? String(failure.message) : '';
+		const providerDetails = failure && failure.response && failure.response.provider_details && typeof failure.response.provider_details === 'object' ? failure.response.provider_details : {};
+		if (providerDetails.provider) job.provider = safeJobMetadata(providerDetails.provider);
+		if (providerDetails.imagine_tool) job.workflow = `Grok Imagine: ${safeJobMetadata(providerDetails.imagine_tool, 80)}`;
+		else if (providerDetails.operation) job.workflow = safeJobMetadata(providerDetails.operation, 100);
 		if (!job.errorMessage && failure && failure.error && failure.error.message) {
 			job.errorMessage = String(failure.error.message);
 		}
@@ -204,6 +250,10 @@ class JobManager {
 			requestId: job.requestId,
 			type: job.type,
 			model: job.model,
+			provider: job.provider,
+			provider_label: job.providerLabel,
+			workflow: job.workflow,
+			skills: job.skills,
 			status: job.status,
 			startedAt: job.startedAt,
 			finishedAt: job.finishedAt,
@@ -225,6 +275,10 @@ class JobManager {
 			short_request_id: shortRequestId(job.requestId || String(job.id)),
 			type: job.type,
 			model: job.model,
+			provider: job.provider || '',
+			provider_label: job.providerLabel || '',
+			workflow: job.workflow || '',
+			skills: Array.isArray(job.skills) ? job.skills : [],
 			status: job.status,
 			started_at: job.startedAt || 0,
 			finished_at: job.finishedAt || 0,
@@ -235,6 +289,9 @@ class JobManager {
 		}
 		if (job.sessionOutput) {
 			compacted.session_output = job.sessionOutput;
+		}
+		if (job.sessionInput) {
+			compacted.session_input = job.sessionInput;
 		}
 		if (Array.isArray(job.debugLogs) && job.debugLogs.length) {
 			compacted.debug_logs = job.debugLogs;
@@ -264,6 +321,8 @@ module.exports = {
 	collectDebugLogs,
 	collectSessionOutput,
 	normalizeDiagnosticText,
+	redactSessionInput,
+	extractRuntimeMetadata,
 	shortRequestId,
 	truncateOutput,
 };

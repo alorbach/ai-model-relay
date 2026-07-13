@@ -1,7 +1,11 @@
 'use strict';
 
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const { spawn } = require('child_process');
 const { createBoundedCollector } = require('./diagnostics');
+const { detectCli, detectCliAsync, messagesToText, runTextCommand } = require('./local-cli');
 
 const RELAY_MODEL_PREFIX = 'model-relay';
 
@@ -49,6 +53,8 @@ function providerFromPayload(payload = {}) {
 	if (model.startsWith('model-relay:codex:')) {
 		return 'codex-cli';
 	}
+	if (model.startsWith('model-relay:grok-cli:')) return 'grok-cli';
+	if (model.startsWith('model-relay:cursor-cli:')) return 'cursor-cli';
 	if (model.startsWith('model-relay:local-asr:')) {
 		return 'local-asr';
 	}
@@ -145,14 +151,16 @@ function normalizeChatResponse(provider, model, parsed, fallbackText = '') {
 }
 
 function createCodexCliDriver(codex) {
+	let snapshot = !codex.runCodexAsync && codex.capabilities ? codex.capabilities() : { success: false, bridge_features: { chat: true, images: true, media_analysis: true }, codex: { checking: true } };
+	let status = { success: false, message: 'Checking Codex CLI in background.', details: { checking: true } };
 	return {
 		id: 'codex-cli',
 		label: 'Codex CLI',
 		kind: 'local-cli',
 		job_types: ['chat', 'images', 'media.analyze'],
-		checkStatus: () => codex.checkStatus(),
+		checkStatus: () => status,
 		capabilities: () => {
-			const caps = codex.capabilities ? codex.capabilities() : { success: false };
+			const caps = snapshot;
 			return {
 				id: 'codex-cli',
 				label: 'Codex CLI',
@@ -173,7 +181,94 @@ function createCodexCliDriver(codex) {
 		},
 		chat: (payload, session) => codex.chat({ ...payload, model: codexModelFromRelay(payload.model) }, session),
 		images: (payload, session) => codex.images({ ...payload, model: codexModelFromRelay(payload.model || 'model-relay:codex:image') }, session),
+		async refresh() {
+			const [nextStatus, version, help, appServer] = await Promise.all([
+				codex.checkStatusAsync ? codex.checkStatusAsync() : Promise.resolve(codex.checkStatus()),
+				codex.runCodexAsync ? codex.runCodexAsync(['--version'], { timeout: 15000 }) : Promise.resolve(null),
+				codex.runCodexAsync ? codex.runCodexAsync(['exec', '--help'], { timeout: 15000 }) : Promise.resolve(null),
+				codex.runCodexAsync ? codex.runCodexAsync(['app-server', '--help'], { timeout: 15000 }) : Promise.resolve(null),
+			]);
+			status = nextStatus;
+			if (version) { const helpText = `${help && help.stdout || ''}\n${help && help.stderr || ''}`; snapshot = { success: !version.error && version.status === 0, bridge_features: { chat: true, images: true, audio_transcription: true, media_analysis: true, structured_exec_json: /--json/.test(helpText), output_schema: /--output-schema/.test(helpText), image_attachments: /--image/.test(helpText), image_reference_attachments: true, app_server: !appServer.error && appServer.status === 0 }, codex: { binary: status.details && status.details.codex_binary || '', version: (version.stdout || version.stderr || '').trim(), exec_help_available: !help.error && help.status === 0, app_server_available: !appServer.error && appServer.status === 0 } }; }
+			return snapshot;
+		},
 	};
+}
+
+function cliModelFromRelay(model, provider) {
+	const prefix = `model-relay:${provider}:`;
+	const value = String(model || '').trim();
+	return value.startsWith(prefix) ? value.slice(prefix.length) || 'auto' : 'auto';
+}
+
+function createNamedCliDriver(definition, options = {}) {
+	let cached = { id: definition.id, label: definition.label, kind: 'local-cli', installed: null, ready: false, state: 'checking', diagnostic: 'Checking in background.', models: definition.models || ['auto'], job_types: ['chat'] };
+	function detect() { return cached; }
+	return {
+		id: definition.id,
+		label: definition.label,
+		kind: 'local-cli',
+		job_types: ['chat'],
+		checkStatus: () => { const state = detect(); return { success: state.ready, message: state.diagnostic, details: state }; },
+		capabilities: () => {
+			const state = detect();
+			return { ...state, id: definition.id, label: definition.label, enabled: state.installed, features: { chat: true, coding: true, images: false, videos: false } };
+		},
+		models: () => {
+			const state = detect();
+			return (state.models && state.models.length ? state.models : ['auto']).map((id) => ({ id: relayModel(definition.id, id), type: 'text', backend: definition.id, ready: state.ready }));
+		},
+		refresh: async () => { cached = await detectCliAsync(definition, { ...options, timeoutMs: Number(options.timeoutMs || process.env.AI_MODEL_RELAY_CLI_PROBE_TIMEOUT_MS || 10000) }); return cached; },
+		async chat(payload = {}, session = {}) {
+			const state = await this.refresh();
+			if (!state.ready) return { success: false, category: 'configuration', code: `${definition.id}_unavailable`, message: `${definition.label} is unavailable: ${state.diagnostic}` };
+			const model = cliModelFromRelay(payload.model, definition.id);
+			const prompt = messagesToText(payload);
+			const args = definition.requestArgs(model, prompt);
+			const result = await runTextCommand(state.command, args, '', session, options);
+			if (!result.success) return result;
+			let parsed = null; try { parsed = JSON.parse(result.text); } catch (error) {}
+			return normalizeChatResponse(definition.id, model, parsed, result.text);
+		},
+	};
+}
+
+function createGrokCliDriver(options = {}) {
+	const driver = createNamedCliDriver({ id: 'grok-cli', label: 'Grok CLI', candidates: [process.env.AI_MODEL_RELAY_GROK_BINARY, 'grok'], versionArgs: ['--version'], authArgs: ['models'], jobTypes: ['chat', 'images', 'videos'], models: ['auto'], requestArgs: (model, prompt) => ['--single', prompt, '--output-format', 'json', ...(model !== 'auto' ? ['--model', model] : [])] }, options);
+	const baseCapabilities = driver.capabilities;
+	const baseModels = driver.models;
+	driver.job_types = ['chat', 'images', 'videos'];
+	driver.capabilities = () => ({ ...baseCapabilities(), features: { chat: true, coding: true, images: true, image_edit: true, videos: 'experimental', image_references: true } });
+	driver.models = () => [...baseModels(), { id: 'model-relay:grok-cli:image', type: 'image', backend: 'grok-cli', experimental: false }, { id: 'model-relay:grok-cli:video', type: 'video', backend: 'grok-cli', experimental: true }];
+	function collectFiles(root, extensions) {
+		const found = []; const walk = (folder) => { for (const entry of fs.readdirSync(folder, { withFileTypes: true })) { const full = path.join(folder, entry.name); if (entry.isDirectory()) walk(full); else if (extensions.test(entry.name)) found.push(full); } }; walk(root); return found;
+	}
+	async function media(kind, payload = {}, session = {}) {
+		const state = await driver.refresh();
+		if (!state.ready) return { success: false, category: 'configuration', code: 'grok_cli_unavailable', message: `Grok CLI is unavailable: ${state.diagnostic}` };
+		const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-model-relay-grok-'));
+		try {
+			const references = [payload.input_reference_data_url || payload.input_reference, ...(Array.isArray(payload.reference_images) ? payload.reference_images : [])].filter(Boolean);
+			const referencePaths = references.map((reference, index) => { const text = String(reference); const match = text.match(/^data:(image\/(?:png|jpeg|jpg|webp));base64,([\s\S]+)$/i); if (!match) return ''; const file = path.join(workspace, `reference-${index}.${match[1].split('/')[1].replace('jpeg', 'jpg')}`); fs.writeFileSync(file, Buffer.from(match[2], 'base64')); return file; }).filter(Boolean);
+			if (references.length && referencePaths.length !== references.length) return { success: false, category: 'validation', code: 'grok_reference_invalid', message: 'Grok media references must be image data URLs.' };
+			const toolNames = kind === 'images' ? (referencePaths.length ? 'image_edit' : 'image_gen') : (referencePaths.length > 1 ? 'reference_to_video' : 'image_to_video');
+			const instruction = kind === 'images' ? `Use the ${toolNames} tool to create the requested image${referencePaths.length ? ` using ${referencePaths.join(', ')}` : ''}.` : `Use the ${toolNames} tool to create the requested video${referencePaths.length ? ` using ${referencePaths.join(', ')}` : ''}.`;
+			const prompt = `${instruction} Save the final generated ${kind === 'images' ? 'image' : 'video'} file inside ${workspace}. Do not use shell commands or edit files outside this workspace. User request: ${String(payload.prompt || '').trim()}`;
+			const result = await runTextCommand(state.command, ['--single', prompt, '--output-format', 'json', '--cwd', workspace, '--tools', toolNames, '--permission-mode', 'auto'], '', session, options);
+			if (!result.success) return { ...result, code: result.code === 'cli_request_failed' ? 'grok_media_failed' : result.code };
+			const files = collectFiles(workspace, kind === 'images' ? /\.(png|jpe?g|webp)$/i : /\.(mp4|webm|mov)$/i);
+			if (!files.length) return { success: false, category: 'grok_media', code: 'grok_media_artifact_missing', message: `Grok completed without saving a ${kind === 'images' ? 'generated image' : 'generated video'} in the request workspace.` };
+			if (kind === 'images') return { success: true, response: { data: files.map((file) => ({ b64_json: fs.readFileSync(file).toString('base64'), mime_type: file.endsWith('.png') ? 'image/png' : file.endsWith('.webp') ? 'image/webp' : 'image/jpeg' })), provider_details: { provider: 'grok-cli', imagine_tool: toolNames } } };
+			const bytes = fs.readFileSync(files[0]); return { success: true, response: { b64_video: bytes.toString('base64'), mime_type: files[0].endsWith('.webm') ? 'video/webm' : 'video/mp4', provider_details: { provider: 'grok-cli', imagine_tool: toolNames, experimental: true } } };
+		} finally { fs.rmSync(workspace, { recursive: true, force: true }); }
+	}
+	driver.images = (payload, session) => media('images', payload, session);
+	driver.videos = (payload, session) => media('videos', payload, session);
+	return driver;
+}
+
+function createCursorCliDriver(options = {}) {
+	return createNamedCliDriver({ id: 'cursor-cli', label: 'Cursor Agent', candidates: [process.env.AI_MODEL_RELAY_CURSOR_BINARY, 'cursor-agent'], versionArgs: ['--version'], authArgs: ['status'], jobTypes: ['chat'], models: ['auto'], requestArgs: (model, prompt) => ['--print', '--output-format', 'json', ...(model !== 'auto' ? ['--model', model] : []), prompt] }, options);
 }
 
 function createLocalAsrDriver(codex) {
@@ -431,6 +526,8 @@ function createCliProcessDriver(options = {}) {
 function createBackendRegistry(options = {}) {
 	const drivers = [
 		createCodexCliDriver(options.codex),
+		createGrokCliDriver(options.grok || {}),
+		createCursorCliDriver(options.cursor || {}),
 		createLocalAsrDriver(options.codex),
 		createOpenAiVideosDriver(options.video),
 		createXaiApiDriver(options.xai || {}),
@@ -444,6 +541,10 @@ function createBackendRegistry(options = {}) {
 		const aliases = {
 			codex: 'codex-cli',
 			'codex-cli': 'codex-cli',
+			'grok-cli': 'grok-cli',
+			grok: 'grok-cli',
+			'cursor-cli': 'cursor-cli',
+			cursor: 'cursor-cli',
 			asr: 'local-asr',
 			'local-asr': 'local-asr',
 			xai: 'xai-api',
@@ -475,6 +576,8 @@ function createBackendRegistry(options = {}) {
 		list: () => drivers.slice(),
 		capabilities: () => drivers.map((driver) => driver.capabilities()),
 		models: () => drivers.flatMap((driver) => driver.models()),
+		refresh: () => Promise.all(drivers.map((driver) => driver.refresh ? driver.refresh() : driver.capabilities())),
+		getDriver: (jobType, payload) => driverFor(jobType, payload),
 		driverFor,
 		run(jobType, payload, session) {
 			const driver = driverFor(jobType, payload);
@@ -491,6 +594,8 @@ module.exports = {
 	createBackendRegistry,
 	createCliProcessDriver,
 	createCodexCliDriver,
+	createCursorCliDriver,
+	createGrokCliDriver,
 	createLocalAsrDriver,
 	createOpenAiVideosDriver,
 	createXaiApiDriver,
