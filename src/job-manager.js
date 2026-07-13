@@ -55,6 +55,22 @@ function redactSessionInput(value) {
 	return String(value || '').replace(/\b(bearer|token|api[_ -]?key|authorization)\s*(?:[:=]\s*|\s+)([^\s,;]+)/ig, '$1: <redacted>');
 }
 
+function collectImageArtifacts(result) {
+	const response = result && result.response && typeof result.response === 'object' ? result.response : {};
+	const data = Array.isArray(response.data) ? response.data : [];
+	const artifacts = [];
+	for (const item of data.slice(0, 4)) {
+		const encoded = String(item && item.b64_json || '').replace(/\s/g, '');
+		if (!encoded) continue;
+		const mimeType = String(item.mime_type || 'image/png').toLowerCase();
+		if (!['image/png', 'image/jpeg', 'image/webp'].includes(mimeType)) continue;
+		const bytes = Buffer.from(encoded, 'base64');
+		if (!bytes.length || bytes.length > 20 * 1024 * 1024) continue;
+		artifacts.push({ mime_type: mimeType, bytes });
+	}
+	return artifacts;
+}
+
 function collectSessionOutput(failure) {
 	const details = failure && failure.details && typeof failure.details === 'object' ? failure.details : {};
 	const sections = [];
@@ -109,6 +125,7 @@ class JobManager {
 		this.running = new Map();
 		this.queue = [];
 		this.recent = [];
+		this.artifacts = new Map();
 		this.nextId = 1;
 	}
 
@@ -245,6 +262,16 @@ class JobManager {
 				job.sessionOutput = truncateOutput(job.sessionOutput ? `${job.sessionOutput}\n\n${finalOutput}` : finalOutput);
 			}
 		}
+		const artifacts = status === 'completed' ? collectImageArtifacts(failure) : [];
+		if (artifacts.length) {
+			this.artifacts.set(String(job.id), artifacts);
+			job.artifacts = artifacts.map((artifact, index) => ({
+				index,
+				mime_type: artifact.mime_type,
+				size_bytes: artifact.bytes.length,
+				url: `/v1/status/jobs/${job.id}/artifacts/${index}`,
+			}));
+		}
 		this.recent.unshift({
 			id: job.id,
 			requestId: job.requestId,
@@ -260,8 +287,13 @@ class JobManager {
 			errorMessage: job.errorMessage,
 			sessionOutput: job.sessionOutput,
 			debugLogs: collectDebugLogs(failure),
+			artifacts: job.artifacts || [],
 		});
 		this.recent = this.recent.slice(0, 8);
+		const keepArtifacts = new Set(this.recent.map((recent) => String(recent.id)));
+		for (const id of this.artifacts.keys()) {
+			if (!keepArtifacts.has(id)) this.artifacts.delete(id);
+		}
 		this.emitChange();
 		this.drain();
 	}
@@ -296,7 +328,16 @@ class JobManager {
 		if (Array.isArray(job.debugLogs) && job.debugLogs.length) {
 			compacted.debug_logs = job.debugLogs;
 		}
+		if (Array.isArray(job.artifacts) && job.artifacts.length) {
+			compacted.artifacts = job.artifacts;
+		}
 		return compacted;
+	}
+
+	artifact(jobId, index) {
+		const artifacts = this.artifacts.get(String(jobId));
+		const item = artifacts && artifacts[Number(index)];
+		return item ? { mime_type: item.mime_type, bytes: item.bytes } : null;
 	}
 
 	snapshot() {
@@ -319,6 +360,7 @@ module.exports = {
 	JobManager,
 	clampMaxConcurrent,
 	collectDebugLogs,
+	collectImageArtifacts,
 	collectSessionOutput,
 	normalizeDiagnosticText,
 	redactSessionInput,

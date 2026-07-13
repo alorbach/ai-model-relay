@@ -2,13 +2,28 @@
 
 ## User Installation
 
-1. Install Codex CLI for the Windows user who will run the tray app.
-2. Run `codex login` in that same Windows account.
+1. Install the CLI or local runtime for the operations you intend to use, under the same Windows account that will run the tray app.
+2. Sign in to each CLI that requires it, for example `codex login` or the Grok CLI's own login flow.
 3. Install or unzip the latest AI Model Relay release. Existing installer artifacts may still use the Codex Local Bridge name during the compatibility transition.
-4. Start `AI Model Relay`.
-5. Open the tray menu and confirm `Codex: Ready`.
-6. In WordPress, enable Local Codex and keep the bridge URL at `http://127.0.0.1:8765` unless a custom port is required.
-7. Pair the WordPress origin with the six digit tray code when prompted.
+4. Start `AI Model Relay` and open its `/status` page.
+5. Open **Settings**, press **Refresh detection**, and wait for the provider cards to finish their background checks.
+6. Choose ready providers in **Model routing** for the relay operations you need, then save routing.
+7. In WordPress, enable the applicable local bridge integration and keep the bridge URL at `http://127.0.0.1:8765` unless a custom port is required.
+8. Pair the WordPress origin with the six digit tray code when prompted.
+
+## Providers and Model Routing
+
+The Settings page shows every supported local/API driver with an installed, ready, checking, not-authenticated, or unavailable state; executable path, version, supported operations, and concise safe diagnostics are shown separately so long paths do not distort the card layout.
+
+- **Codex CLI**: chat, image generation, and media analysis.
+- **Grok CLI**: chat/coding plus Grok Imagine image generation and experimental image-reference video generation when the local Imagine tooling is detected.
+- **Cursor Agent**: chat/coding through `cursor-agent --print --output-format json`.
+- **Local ASR**: local transcription; its detailed runtime/model editor remains below routing.
+- **OpenAI Videos**, **Grok/xAI API**, and **API Key Chat**: separately configured API drivers.
+
+The five selectors route only `/v1/relay/jobs/*`: chat, images, videos, transcription, and media analysis. Explicit `payload.model`, `payload.provider`, or `payload.backend` always overrides the saved default. Legacy `/v1/chat`, `/v1/images`, `/v1/transcribe`, `/v1/videos`, and `/v1/media/analyze` remain unchanged.
+
+The relay never silently falls back. If a selected/default model is unavailable, unauthenticated, disabled, or incompatible with the job type, the request fails with a configuration error naming that choice. An unavailable saved selection remains visible in Settings so it can be corrected.
 
 ## Development Commands
 
@@ -49,13 +64,13 @@ Run the standalone HTTP example:
 npm run example:http
 ```
 
-Check local Codex readiness:
+Check the legacy Codex smoke path:
 
 ```powershell
 npm run smoke
 ```
 
-Check Local ASR runtime readiness from the status page by opening `/status` and pressing `Refresh runtime` in the Local ASR Settings panel. The normal status page load uses cached or lightweight ASR metadata so it does not run Python, ffmpeg, GPU, or CUDA checks until this explicit refresh or a transcription job.
+The normal status page load is immediate: provider discovery uses cached diagnostics while Codex, Grok, and Cursor are checked in the background. Open **Settings** and press **Refresh detection** to start a new background provider check. Check Local ASR runtime separately by pressing **Refresh runtime** in the Local ASR Settings panel; that explicit action may run Python, ffmpeg, GPU, or CUDA checks.
 
 Generate icons:
 
@@ -76,8 +91,8 @@ Windows builds are written to `dist/`.
 Release artifact names include the semantic version and build number:
 
 ```text
-AI-Model-Relay-1.0.1-build.42-win-x64.exe
-AI-Model-Relay-1.0.1-build.42-win-x64.zip
+AI-Model-Relay-<version>-build.<number>-win-x64.exe
+AI-Model-Relay-<version>-build.<number>-win-x64.zip
 ```
 
 Local builds increment `.build/build-number`. GitHub Actions builds use `GITHUB_RUN_NUMBER`.
@@ -87,8 +102,8 @@ Local builds increment `.build/build-number`. GitHub Actions builds use `GITHUB_
 Push a version tag:
 
 ```powershell
-git tag v1.0.1
-git push origin v1.0.1
+git tag v<version>
+git push origin v<version>
 ```
 
 The release workflow:
@@ -115,11 +130,11 @@ Use the tray menu:
 - `Open status JSON` opens `/v1/status`;
 - `Copy diagnostics` copies a JSON diagnostic payload without bearer token values;
 - `Open bridge data folder` opens `%USERPROFILE%\.alorbach-codex-bridge`;
-- `Refresh Codex status` rechecks `codex --version` and `codex login status`.
+- `Refresh Codex status` rechecks legacy Codex status. For all providers, use **Settings → Refresh detection**, which starts an asynchronous cached refresh.
 
-The tray icon animates while jobs are running and changes color for queued, failed, and stopped states. Mouse-over text and the tray menu show running and queued job counts plus request IDs, job types, models, and elapsed time. Prompt and message content are not shown.
+The tray icon animates while jobs are running and changes color for queued, failed, and stopped states. Mouse-over text and the tray menu show running and queued job counts plus request IDs, job types, models, and elapsed time. The local Live tab adds the selected provider/API, workflow/skill, bounded redacted stdin, and bounded stdout/stderr/session output. It retains recent generated image thumbnails; click one to inspect it in an overlay without opening a new tab.
 
-Failed bridge requests include a `debug_help` object in the JSON response. It points to `/status`, `/v1/status`, the request id when available, and safe checks such as Codex login status, pairing state, and tray diagnostics. The `/status` page uses a local job event stream to append bounded live Codex session output for running jobs, then keeps recent failed jobs with stderr/stdout/last response text when available.
+Failed bridge requests include a `debug_help` object in the JSON response. It points to `/status`, `/v1/status`, the request id when available, and safe checks such as provider readiness, pairing state, and tray diagnostics. The `/status` page uses a local job event stream to append bounded live session input/output for running jobs, then keeps recent failed jobs with safe stdout/stderr/last response text when available.
 
 Full-fidelity temporary model debug logs are written under `%TEMP%\alorbach-codex-local-bridge-debug`. The bridge deletes that directory on startup. Each invocation gets its own folder with `prompt.txt`, `output.txt`, `stdout.txt`, `stderr.txt`, and `metadata.json`. These files are intentionally not redacted, so treat them as private local diagnostics.
 
@@ -188,9 +203,17 @@ If Local ASR setup is slow, check the job output in `/status`. The large downloa
 
 Check that the tray app is running and that no other process owns the configured port. The bridge binds only to `127.0.0.1`.
 
-### Codex installed but not ready
+### Provider is installed but not ready
 
-Run `codex login` from the same Windows account as the tray app. The bridge checks `CODEX_HOME\auth.json` and `codex login status`.
+Open **Settings**, press **Refresh detection**, and read the provider card's safe diagnostic. Sign in from the same Windows account as the tray app (for example, `codex login` for Codex) and refresh again. The bridge does not use another provider as a fallback.
+
+### Grok image or video is unavailable
+
+Grok CLI media requires its local Imagine tooling. Press **Refresh detection** after installing/updating Grok. Image/video jobs fail explicitly when the Imagine tools are unavailable, no media artifact is generated, the request is moderated, or the bounded Grok process times out. Grok video remains marked experimental until the installed tool succeeds.
+
+### Cursor Agent is unavailable
+
+Install Cursor Agent so `cursor-agent` is resolvable for the tray-app Windows user, authenticate it if required, then use **Refresh detection**. The bridge intentionally does not probe the generic `agent` command because it can refer to Grok's bundled executable.
 
 ### Pairing fails
 
@@ -212,7 +235,7 @@ The browser likely created a Gateway job and failed before calling `/fail`. The 
 
 ### Local ASR shows not checked
 
-This is expected on initial `/status` load. Press `Refresh runtime` in Local ASR Settings to run the full runtime probe. The default page load avoids those checks so bridge and job diagnostics render immediately.
+This is expected on initial `/status` load. Press `Refresh runtime` in Local ASR Settings to run the full runtime probe. Provider detection and the normal page load remain cached so bridge and job diagnostics render immediately.
 
 ### Local Whisper says Python or faster-whisper is missing
 
@@ -256,7 +279,7 @@ The product was originally released as **Codex Local Bridge** and has been renam
 ### What remains unchanged
 
 - The default bridge URL and port: `http://127.0.0.1:8765`.
-- All `/v1` HTTP routes: `/v1/status`, `/v1/capabilities`, `/v1/chat`, `/v1/images`, `/v1/transcribe`, `/v1/videos`, `/v1/media/analyze`, `/v1/models`, `/v1/pair`, `/v1/unpair`, and `/v1/asr/settings`.
+- The legacy `/v1` HTTP routes: `/v1/status`, `/v1/capabilities`, `/v1/chat`, `/v1/images`, `/v1/transcribe`, `/v1/videos`, `/v1/media/analyze`, `/v1/models`, `/v1/pair`, `/v1/unpair`, and `/v1/asr/settings`. The additive relay routes live under `/v1/relay/*`.
 - Text and image model IDs: `codex-local:auto`, `codex-local:image`, and any `codex-local:<id>` IDs from `models_cache.json`.
 - The user state directory: `%USERPROFILE%\.alorbach-codex-bridge`.
 - The bridge process name, tray binary name, and installer package ID used by existing WordPress plugins.

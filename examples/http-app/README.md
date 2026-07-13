@@ -1,6 +1,6 @@
 # Local HTTP Example
 
-This is a small standalone developer app for exercising the raw Codex Local Bridge API from a real browser origin.
+This is a small standalone developer app for exercising the raw AI Model Relay API from a real browser origin. It uses the legacy Codex routes for compatibility; relay-specific routes are documented in [the API reference](../../docs/local-bridge-api.md).
 
 It is not a replacement for the WordPress Gateway driver. The production Gateway flow must create one-time jobs server-side and complete or fail them server-side as documented in [../../docs/gateway-integration.md](../../docs/gateway-integration.md).
 

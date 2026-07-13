@@ -10,7 +10,7 @@ http://127.0.0.1:8765
 
 The port can be changed with `ALORBACH_CODEX_BRIDGE_PORT`.
 
-All routes return JSON and set `Cache-Control: no-store`. The bridge accepts only localhost socket clients. Browser callers must use an `http` or `https` origin; `file://` origins are rejected.
+JSON API routes set `Cache-Control: no-store`. `/status` returns HTML, the status-stream routes return server-sent events, and the local recent-artifact route returns an image. The bridge accepts only localhost socket clients. Browser callers must use an `http` or `https` origin; `file://` origins are rejected.
 
 ## Headers
 
@@ -31,11 +31,11 @@ The maximum JSON request body is 12 MiB. This is intended to support normal chat
 
 ## `GET /status`
 
-Shows a local HTML status page for the same runtime data exposed by `GET /v1/status`. The page uses the local event stream to show bridge readiness, capabilities, active jobs, queued jobs, recent activity, heartbeat state, and bounded live Codex session output without repeatedly reloading the full status payload. The tray app opens this page when the tray icon is double-clicked.
+Shows a local HTML status page for the same runtime data exposed by `GET /v1/status`. It renders immediately from cached diagnostics, then uses the local event stream for provider updates, active jobs, queued jobs, recent activity, and heartbeat state. The Settings tab loads its Local ASR and relay-routing settings only when first opened. The Live tab shows the selected provider/API, workflow/skill, bounded redacted stdin, bounded stdout/stderr/session output, and recent image thumbnails that open in an in-page overlay. The tray app opens this page when the tray icon is double-clicked.
 
 ## `GET /v1/status`
 
-Checks bridge and default local Codex readiness. `GET /v1/relay/status` is an alias with the same response shape. This route does not require pairing.
+Returns the cached bridge and provider-readiness snapshot. `GET /v1/relay/status` is an alias with the same response shape. This route does not run a CLI process: startup and explicit refreshes probe providers in the background. This route does not require pairing.
 
 Example response:
 
@@ -52,7 +52,7 @@ Example response:
     "login_status": "Logged in ..."
   },
   "bridge": {
-    "version": "1.0.1",
+    "version": "1.0.7",
     "product_name": "AI Model Relay",
     "short_name": "Model Relay",
     "legacy_name": "Codex Local Bridge",
@@ -74,13 +74,22 @@ Example response:
         "elapsed_ms": 1200
       }
     ]
+  },
+  "checking": false,
+  "last_checked": "2026-07-13T08:30:00.000Z",
+  "refresh": {
+    "active": false,
+    "id": 1,
+    "started_at": "2026-07-13T08:29:59.000Z",
+    "completed_at": "2026-07-13T08:30:00.000Z",
+    "error": null
   }
 }
 ```
 
-`success: false` means the tray bridge is reachable but Codex is missing, not executable, or not logged in for the current Windows user.
+During an initial or explicit probe, `checking: true` means the cached result is still being refreshed. `success: false` can mean the tray bridge is reachable while its default Codex status is not ready; inspect `details`, `checking`, and the provider cards for the safe diagnostic reason.
 
-`jobs` reports in-memory local bridge activity. It never includes prompt text or message content. `active` contains currently running jobs, while queued and recent entries may also be present for tray/status diagnostics.
+`jobs` reports in-memory local bridge activity. `active` contains currently running jobs, while queued and recent entries may also be present. Each job can include selected `provider`, `provider_label`, `workflow`, and `skills`, plus bounded redacted `session_input`, bounded `session_output`, and image `artifacts` metadata for the local status page. These diagnostics exclude common bearer/API-key/authorization values; they are not a replacement for the private debug files.
 
 Full prompt/output debug files are written separately under `%TEMP%\alorbach-codex-local-bridge-debug` and are deleted on bridge startup. Successful provider metadata and some failure details may include `debug_log_dir` pointing to the invocation folder.
 
@@ -90,8 +99,8 @@ Full prompt/output debug files are written separately under `%TEMP%\alorbach-cod
 
 Streams local status-page updates as server-sent events. This route does not require pairing because the bridge still accepts only localhost socket clients. It emits:
 
-- `status`: JSON payload compatible with `GET /v1/status`.
-- `capabilities`: JSON payload compatible with `GET /v1/capabilities`.
+- `status`: JSON payload compatible with `GET /v1/status`, including cached refresh progress.
+- `capabilities`: JSON payload compatible with `GET /v1/capabilities`, including provider discovery changes.
 - `jobs`: the `jobs` object from `GET /v1/status`.
 - `heartbeat`: `{ "time": "<iso-date>" }` keepalive events.
 
@@ -124,7 +133,7 @@ for await (const chunk of response.body.pipeThrough(new TextDecoderStream())) {
 
 ## `GET /v1/capabilities`
 
-Returns capability metadata for the relay, local Codex executable, Local ASR providers, optional video provider, media analysis support, frontend interfaces, and backend drivers. `GET /v1/relay/capabilities` is an alias. This route does not require pairing. Local ASR capability data is lightweight by default so the status page can load quickly.
+Returns cached capability metadata for the relay, local Codex executable, Grok CLI, Cursor Agent, Local ASR providers, optional API drivers, media analysis support, frontend interfaces, and backend drivers. `GET /v1/relay/capabilities` is an alias. This route does not require pairing and does not start synchronous CLI probing. Local ASR capability data is lightweight by default so the status page can load quickly.
 
 Example response:
 
@@ -137,7 +146,7 @@ Example response:
     "legacy_name": "Codex Local Bridge"
   },
   "bridge": {
-    "version": "1.0.4"
+    "version": "1.0.7"
   },
   "codex": {
     "binary": "<path-to-codex-executable>",
@@ -160,6 +169,19 @@ Example response:
       "label": "Codex CLI",
       "kind": "local-cli",
       "ready": true
+    },
+    {
+      "id": "grok-cli",
+      "label": "Grok CLI",
+      "kind": "local-cli",
+      "ready": true,
+      "features": { "chat": true, "images": true, "videos": "experimental" }
+    },
+    {
+      "id": "cursor-cli",
+      "label": "Cursor Agent",
+      "kind": "local-cli",
+      "ready": false
     },
     {
       "id": "xai-api",
@@ -190,6 +212,58 @@ Example response:
     "provider": "local-codex-vision",
     "ffmpeg_available": true
   }
+}
+```
+
+Each backend record can include `installed`, `ready`, `checking`, executable `path`, `version`, supported job types/features, and a safe diagnostic reason. API credentials and raw CLI output are never returned. Grok image and experimental-video selections are runnable only when the installed Grok Imagine tooling is available.
+
+## `GET /v1/relay/settings`
+
+Returns persisted relay-only operation defaults plus the cached compatible model and backend metadata. It does not require pairing because the bridge is localhost-only.
+
+```json
+{
+  "success": true,
+  "settings": {
+    "defaults": {
+      "chat": "model-relay:codex:auto",
+      "images": "model-relay:codex:image",
+      "videos": "model-relay:openai-videos:sora-2",
+      "transcribe": "model-relay:local-asr:auto",
+      "media.analyze": "model-relay:codex:auto"
+    }
+  },
+  "models": [],
+  "backends": []
+}
+```
+
+## `POST /v1/relay/settings`
+
+Saves the provided relay-only defaults in the existing local state file. Send either a `settings.defaults` object or the defaults object directly. Omitted or blank operations retain their built-in defaults. The Settings page keeps an unavailable saved selection visible so it can be corrected; saving it does not make an unavailable provider runnable.
+
+```json
+{
+  "settings": {
+    "defaults": {
+      "chat": "model-relay:grok-cli:auto",
+      "images": "model-relay:grok-cli:image"
+    }
+  }
+}
+```
+
+These settings apply only to `/v1/relay/jobs/*`, never to legacy `/v1/chat`, `/v1/images`, `/v1/transcribe`, `/v1/videos`, or `/v1/media/analyze`.
+
+## `POST /v1/relay/refresh`
+
+Starts one deduplicated provider-detection refresh and returns immediately with `202`. Repeated requests while a refresh is active share the same cycle. Use `/v1/status/events` or `/v1/status/stream` to receive incremental cached status and capability updates.
+
+```json
+{
+  "success": true,
+  "checking": true,
+  "refresh": { "active": true, "id": 2 }
 }
 ```
 
@@ -338,6 +412,10 @@ Response:
     "relay": [
       "model-relay:codex:auto",
       "model-relay:codex:image",
+      "model-relay:grok-cli:auto",
+      "model-relay:grok-cli:image",
+      "model-relay:grok-cli:video",
+      "model-relay:cursor-cli:auto",
       "model-relay:local-asr:qwen3-asr-0.6b",
       "model-relay:xai:grok-4.3"
     ]
@@ -352,7 +430,7 @@ Response:
 }
 ```
 
-If `CODEX_HOME/models_cache.json` exists, additional text model IDs from that cache are returned as `codex-local:<id>`.
+Grok and Cursor entries carry readiness metadata; choose them only after local detection reports them ready. Grok Imagine image entries require the installed Imagine tooling; the Grok video entry is experimental. If `CODEX_HOME/models_cache.json` exists, additional text model IDs from that cache are returned as `codex-local:<id>`.
 
 Provider-neutral IDs use the `model-relay:<backend>:<model>` form. Existing frontend code can keep sending `codex-local:*`; newer clients may send `model-relay:*` or specify `payload.provider` / `payload.backend`.
 
@@ -366,7 +444,11 @@ Provider-neutral job aliases use the same signed envelope and response shapes as
 - `POST /v1/relay/jobs/videos`
 - `POST /v1/relay/jobs/media/analyze`
 
-Routing is selected from `payload.provider`, `payload.backend`, or the model ID. For example, `model-relay:xai:grok-4.3` routes to the Grok/xAI API driver, while `model-relay:local-asr:qwen3-asr-0.6b` routes to the local ASR driver. If no provider is specified, relay chat and image jobs preserve the Codex default.
+Routing is selected from an explicit `payload.provider`, `payload.backend`, or model ID. An explicit selection wins. When none is supplied, the bridge inserts the persisted relay default for the operation: `chat`, `images`, `videos`, `transcribe`, or `media.analyze`. For example, `model-relay:xai:grok-4.3` routes to the Grok/xAI API driver, while `model-relay:local-asr:qwen3-asr-0.6b` routes to the local ASR driver.
+
+If the selected/default provider is missing, disabled, unauthenticated, or does not support the requested operation, the route returns a configuration error naming the selected model and safe reason. It never falls back to another provider. This rule is limited to `/v1/relay/jobs/*`; legacy routes retain their existing behavior.
+
+`model-relay:grok-cli:auto` is Grok CLI chat/coding. `model-relay:grok-cli:image` runs the detected Imagine image workflow. `model-relay:grok-cli:video` runs the experimental Imagine image-to-video/reference-to-video workflow. Image jobs can use reference images. Grok video jobs accept one image reference for image-to-video or multiple references for reference-to-video. The bridge materializes supplied references only in its per-request workspace and fails explicitly if Imagine tooling, generated artifacts, moderation, or the bounded process run fails.
 
 Audio model IDs are configured by Local ASR settings. When a transcription request omits `payload.model` or uses `local-asr`, the bridge first uses `settings.default_model` if it is set. Otherwise `local-asr` auto-selects the best enabled ready local transcription model. Qwen3 ASR 1.7B is preferred when `Qwen/Qwen3-ASR-1.7B` and `Qwen/Qwen3-ForcedAligner-0.6B` are cached or explicitly downloadable and CUDA has enough free VRAM; `Qwen/Qwen3-ASR-0.6B` is the lower-VRAM Qwen ASR fallback. When `allow_qwen_cpu_offload` is enabled, explicit/default Qwen selections can use mixed GPU/CPU loading and report `device: "cuda+cpu"` with `device_map: "auto"`. The Qwen runner pre-chunks timestamped ASR locally using `qwen_chunk_seconds` and caps implausibly stretched single-word spans using `qwen_max_word_duration_seconds`, reporting any caps in provider metadata. The ForcedAligner is used only for Qwen timestamps and is not exposed as a normal audio model. If faster-whisper CUDA fails at execution time, the bridge retries on CPU/int8 when a CPU model path is available.
 
@@ -481,6 +563,12 @@ The bridge returns exactly one detected generated image. If Codex completes with
 
 When the installed Codex CLI supports `codex exec --json`, image and chat jobs use the structured event stream for cleaner progress and error details. If an older CLI rejects `--json`, the bridge reruns the job without structured events and preserves the legacy result shape.
 
+## `GET /v1/status/jobs/{jobId}/artifacts/{index}`
+
+Returns a retained PNG, JPEG, or WebP image artifact from a recent completed job. This local status-page helper does not require pairing and is only available while the matching job remains in the in-memory recent-job cache. It returns `404` after eviction or for an invalid artifact index.
+
+The job's `artifacts` metadata in `/v1/status` and status events provides the same-origin URL, MIME type, and byte size. Artifact bytes are intentionally not embedded in JSON or SSE responses.
+
 ## `POST /v1/transcribe`
 
 Runs a local ASR transcription or reference-text alignment request through the private local ASR runtimes. This route requires pairing and the signed WordPress job envelope.
@@ -590,14 +678,14 @@ Most errors use:
     "status_page": "http://127.0.0.1:8765/status",
     "status_json": "http://127.0.0.1:8765/v1/status",
     "checks": [
-      "Open the status page and check Codex readiness plus recent failed jobs.",
+      "Open the status page and check selected-provider readiness plus recent failed jobs.",
       "Use the tray menu Copy diagnostics action for a safe diagnostic payload without bearer tokens."
     ]
   }
 }
 ```
 
-`debug_help` is intended for failed local bridge requests. It includes the request id when available, local status links, and safe troubleshooting steps. Running jobs and recent failed jobs in `GET /v1/status` can include bounded `session_output` when Codex stderr/stdout/last response text is available.
+`debug_help` is intended for failed local bridge requests. It includes the request id when available, local status links, and safe troubleshooting steps. Running jobs and recent failed jobs in `GET /v1/status` can include bounded `session_output` when provider stderr/stdout/last response text is available.
 
 Common status codes:
 
@@ -605,5 +693,5 @@ Common status codes:
 - `403`: non-localhost socket, bad pairing code, missing or invalid pairing token.
 - `404`: unknown route.
 - `405`: unsupported method.
-- `500`: Codex execution failed or unexpected bridge failure.
-- `503`: status route reached the bridge, but Codex is not ready.
+- `500`: provider execution failed or an unexpected bridge failure occurred.
+- `503`: a selected relay provider/default is unavailable, or the status route reached the bridge while its default Codex status is not ready.

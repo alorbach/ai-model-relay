@@ -90,6 +90,19 @@ function deferredRunner(label, started, resolvers, result = { success: true }) {
 	}
 
 	{
+		const manager = new JobManager({ maxConcurrent: 1 });
+		await manager.run({ requestId: 'request-image', type: 'images' }, () => ({
+			success: true,
+			response: { data: [{ b64_json: Buffer.from('generated image bytes').toString('base64'), mime_type: 'image/png' }] },
+		}));
+		const artifact = manager.snapshot().recent[0].artifacts[0];
+		assert.strictEqual(artifact.mime_type, 'image/png');
+		assert.strictEqual(artifact.url, '/v1/status/jobs/1/artifacts/0');
+		assert.strictEqual(manager.artifact(1, 0).bytes.toString(), 'generated image bytes');
+		assert.strictEqual(manager.artifact(1, 1), null);
+	}
+
+	{
 		const started = [];
 		const resolvers = {};
 		const manager = new JobManager({ maxConcurrent: 2 });

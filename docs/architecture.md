@@ -32,9 +32,17 @@ Execution requests are scheduled through an in-memory queue. The default limit i
 
 Entry point: `src/backend-registry.js`
 
-Backend drivers expose a common contract: `id`, `label`, `kind`, `capabilities()`, `models()`, `checkStatus()`, and execution methods for supported job types. Current drivers wrap the existing Codex CLI, local ASR, and OpenAI video modules, and add Grok/xAI API, generic CLI-process, and generic API-key chat driver families.
+Backend drivers expose a common contract: `id`, `label`, `kind`, `capabilities()`, `models()`, `checkStatus()`, and execution methods for supported job types. The built-in drivers include Codex CLI, Grok CLI, Cursor Agent, Local ASR, OpenAI Videos, Grok/xAI API, and the optional generic CLI-process and API-key chat drivers.
+
+Codex CLI supports chat, images, and media analysis. Grok CLI supports chat/coding plus locally detected Grok Imagine image generation and experimental video generation; the media requests run in a per-request temporary workspace and return only artifacts created there. Cursor Agent is a chat/coding driver. OpenAI Videos and xAI API remain separately configured API-backed drivers. A driver is never selected as a silent fallback when the requested/default driver is unavailable or lacks a capability.
 
 The registry preserves existing routes and model IDs while adding provider-neutral `model-relay:*` IDs and `/v1/relay/*` frontend aliases. Driver-specific credentials are reported only as configured/not configured and are not emitted in status, capabilities, jobs, SSE, or debug-help payloads.
+
+### Cached provider diagnostics
+
+Provider discovery is deliberately outside HTTP and SSE request handling. On startup, the bridge seeds provider records as `checking` and starts one asynchronous, deduplicated refresh. Independent Codex, Grok, and Cursor probes run with bounded child-process timeouts; their safe outcomes are retained in the shared status cache. `POST /v1/relay/refresh` starts the same background refresh and immediately returns `202`; status and capability SSE events are broadcast as the cached records change.
+
+This lets `/status`, `/v1/status`, `/v1/capabilities`, `/v1/relay/models`, and relay settings render immediately. The cache exposes `checking`, `last_checked`, readiness, executable path, version, supported operations, and a concise diagnostic reason. It never exposes token values, auth-file contents, or raw secret-bearing command output.
 
 ### Codex CLI adapter
 
@@ -55,6 +63,14 @@ Chat jobs run `codex exec` in an ephemeral temp directory and write the final as
 ### Provider-neutral frontend interfaces
 
 Legacy `/v1/chat`, `/v1/images`, `/v1/transcribe`, `/v1/videos`, and `/v1/media/analyze` routes remain backwards compatible. New aliases under `/v1/relay/jobs/*` accept the same signed envelope and may route by `payload.provider`, `payload.backend`, or provider-qualified model IDs such as `model-relay:xai:grok-4.3`.
+
+Relay-only defaults are persisted in the existing local state file for `chat`, `images`, `videos`, `transcribe`, and `media.analyze`. An explicit model, backend, or provider wins. Otherwise the saved operation default is inserted. If that selection is missing, disabled, not authenticated, or incompatible, the relay returns a clear configuration error naming the selected model and reason; it does not fall back to another driver. Legacy routes do not consult these defaults.
+
+### Job diagnostics and generated artifacts
+
+The in-memory job manager publishes safe provider metadata (`provider`, display label, workflow, and detected skill names) to the status stream. It also keeps bounded, redacted textual session input and bounded stdout/stderr/session output for recent jobs so the local Live tab can show what happened without opening debug files. Input redaction removes common bearer-token, API-key, and authorization values; full temporary debug files remain private local diagnostics.
+
+For completed image jobs, the manager can retain up to four validated PNG, JPEG, or WebP artifacts in memory for the recent-job window. The local status page obtains a same-origin artifact URL and displays a thumbnail that opens in an overlay. Artifacts are removed when their job leaves the recent-job cache and are not embedded in the SSE payload.
 
 ### Security state
 
@@ -85,13 +101,13 @@ The Gateway plugin is the production source of truth for job creation and comple
 
 ## Production Flow
 
-1. A logged-in WordPress user selects a `codex-local:*` model.
+1. A logged-in WordPress user selects a Gateway-approved legacy `codex-local:*` model or a relay model/default.
 2. Browser requests Gateway config from `/wp-json/alorbach/v1/local-codex/config`.
 3. Browser checks the tray bridge with `GET http://127.0.0.1:8765/v1/status`.
 4. If no token is stored for the WordPress origin, browser asks the user for the tray pairing code and calls `/v1/pair`.
 5. Browser asks WordPress to create a one-time local Codex job at `/wp-json/alorbach/v1/local-codex/jobs`.
 6. WordPress returns `job_id`, `job_token`, `request_hash`, `request_id`, and the normalized payload.
-7. Browser sends the job envelope to `/v1/chat` or `/v1/images` with the pairing token.
+7. Browser sends the job envelope to the matching legacy route or `/v1/relay/jobs/<operation>` with the pairing token.
 8. Bridge executes the selected backend driver and returns a normalized result.
 9. Browser posts the result to `/wp-json/alorbach/v1/local-codex/jobs/{job_id}/complete`.
 10. WordPress validates the one-time token and hash, records ledger/audit data, and returns the final response to the UI.

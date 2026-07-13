@@ -1,6 +1,8 @@
 'use strict';
 
 const http = require('http');
+const fs = require('fs');
+const path = require('path');
 const codex = require('./codex');
 const { attachDebugHelp } = require('./debug-help');
 const { JobManager, clampMaxConcurrent } = require('./job-manager');
@@ -17,6 +19,7 @@ const packageInfo = require('../package.json');
 const { appendLog, safeError, safeProcessSend } = require('./diagnostics');
 
 let pairingCode = security.createPairingCode();
+const faviconPath = path.join(__dirname, '..', 'assets', 'favicon.ico');
 
 function maxConcurrentJobs() {
 	return clampMaxConcurrent(process.env.ALORBACH_CODEX_MAX_CONCURRENT_JOBS || 2);
@@ -153,6 +156,38 @@ function sendHtml(res, statusCode, html) {
 		'Cache-Control': 'no-store',
 	});
 	res.end(html);
+}
+
+function sendFavicon(res) {
+	try {
+		const icon = fs.readFileSync(faviconPath);
+		res.writeHead(200, {
+			'Content-Type': 'image/x-icon',
+			'Content-Length': icon.length,
+			'Cache-Control': 'public, max-age=86400',
+			'X-Content-Type-Options': 'nosniff',
+		});
+		res.end(icon);
+	} catch (error) {
+		res.writeHead(404, { 'Cache-Control': 'no-store' });
+		res.end();
+	}
+}
+
+function sendArtifact(res, artifact, origin) {
+	const headers = {
+		'Content-Type': artifact.mime_type,
+		'Content-Length': artifact.bytes.length,
+		'Cache-Control': 'no-store',
+		'Content-Disposition': 'inline',
+		'X-Content-Type-Options': 'nosniff',
+	};
+	if (origin) {
+		headers['Access-Control-Allow-Origin'] = origin;
+		headers.Vary = 'Origin';
+	}
+	res.writeHead(200, headers);
+	res.end(artifact.bytes);
 }
 
 function sendErrorJson(req, res, statusCode, payload, origin, options = {}) {
@@ -354,8 +389,22 @@ async function route(req, res, context) {
 	}
 
 	const url = new URL(req.url, 'http://127.0.0.1');
+	if (req.method === 'GET' && url.pathname === '/favicon.ico') {
+		sendFavicon(res);
+		return;
+	}
 	if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/status')) {
 		sendHtml(res, 200, statusPageHtml());
+		return;
+	}
+	const artifactMatch = url.pathname.match(/^\/v1\/status\/jobs\/(\d+)\/artifacts\/(\d+)$/);
+	if (req.method === 'GET' && artifactMatch) {
+		const artifact = jobManager.artifact(artifactMatch[1], artifactMatch[2]);
+		if (!artifact) {
+			sendJson(res, 404, { success: false, message: 'Generated job artifact was not found.' }, origin || pairedOriginForCors(req, bridgeSecurity));
+			return;
+		}
+		sendArtifact(res, artifact, origin || pairedOriginForCors(req, bridgeSecurity));
 		return;
 	}
 

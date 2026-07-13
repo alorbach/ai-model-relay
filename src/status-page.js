@@ -8,6 +8,7 @@ function statusPageHtml() {
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<link rel="icon" href="/favicon.ico" sizes="any">
 	<title>${PRODUCT_NAME} Status</title>
 	<style>
 		:root {
@@ -183,6 +184,57 @@ function statusPageHtml() {
 			border-radius: 8px;
 			background: #0e1520;
 			margin-bottom: 10px;
+		}
+		.job-artifacts {
+			display: flex;
+			flex-wrap: wrap;
+			gap: 12px;
+			padding: 4px 0 12px;
+		}
+		.job-artifact-preview {
+			display: grid;
+			gap: 6px;
+			width: min(280px, 100%);
+			padding: 0;
+			border: 0;
+			background: transparent;
+			color: var(--accent);
+			cursor: zoom-in;
+			font-size: 12px;
+			text-align: left;
+			text-decoration: none;
+		}
+		.job-artifact-preview img {
+			width: 100%;
+			max-height: 220px;
+			object-fit: contain;
+			background: #070b10;
+			border: 1px solid var(--line);
+			border-radius: 8px;
+		}
+		.image-lightbox {
+			position: fixed;
+			z-index: 20;
+			inset: 0;
+			display: grid;
+			place-items: center;
+			padding: 28px;
+			background: rgba(4, 8, 14, 0.88);
+		}
+		.image-lightbox[hidden] { display: none; }
+		.image-lightbox img {
+			display: block;
+			max-width: min(1100px, 94vw);
+			max-height: 84vh;
+			border: 1px solid var(--line);
+			border-radius: 10px;
+			background: #070b10;
+			object-fit: contain;
+		}
+		.image-lightbox-close {
+			position: absolute;
+			top: 18px;
+			right: 18px;
 		}
 		.session-output-summary {
 			display: flex;
@@ -615,6 +667,10 @@ function statusPageHtml() {
 			</details>
 		</section>
 	</main>
+	<div class="image-lightbox" id="imageLightbox" role="dialog" aria-modal="true" aria-label="Generated image preview" hidden>
+		<button type="button" class="copy-session-output image-lightbox-close" id="closeImageLightbox">Close</button>
+		<img id="imageLightboxContent" alt="Generated image full preview">
+	</div>
 	<script>
 		const statusUrl = '/v1/status';
 		const capabilitiesUrl = '/v1/capabilities';
@@ -667,6 +723,9 @@ function statusPageHtml() {
 			codexDetails: document.getElementById('codexDetails'),
 			rawStatus: document.getElementById('rawStatus'),
 			copyRawStatus: document.getElementById('copyRawStatus'),
+			imageLightbox: document.getElementById('imageLightbox'),
+			imageLightboxContent: document.getElementById('imageLightboxContent'),
+			closeImageLightbox: document.getElementById('closeImageLightbox'),
 		};
 
 		function selectTab(tabId, options = {}) {
@@ -820,6 +879,17 @@ function statusPageHtml() {
 			'</details>';
 		}
 
+		function imagePreviewBlock(job) {
+			const artifacts = Array.isArray(job.artifacts) ? job.artifacts : [];
+			const previews = artifacts.map((artifact, index) => {
+				const url = text(artifact && artifact.url, '');
+				if (!/^\\/v1\\/status\\/jobs\\/\\d+\\/artifacts\\/\\d+$/.test(url) || !/^image\\//.test(text(artifact && artifact.mime_type, ''))) return '';
+				const label = 'Open generated image ' + (index + 1);
+				return '<button type="button" class="job-artifact-preview" data-image-preview="' + escapeHtml(url) + '" title="' + escapeHtml(label) + '"><img src="' + escapeHtml(url) + '" alt="Generated image preview ' + (index + 1) + '" loading="lazy"><span>' + escapeHtml(label) + '</span></button>';
+			}).filter(Boolean);
+			return previews.length ? '<div class="job-artifacts">' + previews.join('') + '</div>' : '';
+		}
+
 		function debugLogBlocks(job, key) {
 			const logs = Array.isArray(job.debug_logs) ? job.debug_logs : [];
 			const blocks = [];
@@ -942,9 +1012,11 @@ function statusPageHtml() {
 				const debugLogs = Array.isArray(job.debug_logs) ? job.debug_logs : [];
 				const hasDebugOutput = debugLogs.some((log) => log && (log.prompt || log.output));
 				const hasInput = !!job.session_input;
-				const hasOutput = hasInput || !!job.session_output || hasDebugOutput;
+				const preview = imagePreviewBlock(job);
+				const hasOutput = !!preview || hasInput || !!job.session_output || hasDebugOutput;
 				if (hasOutput) {
 					const signature = JSON.stringify({
+						artifacts: (Array.isArray(job.artifacts) ? job.artifacts : []).map((artifact) => [artifact && artifact.url, artifact && artifact.mime_type, artifact && artifact.size_bytes]),
 						input: !!job.session_input,
 						session: !!job.session_output,
 						debug: debugLogs.map((log) => [!!(log && log.prompt), !!(log && log.output)]),
@@ -954,7 +1026,7 @@ function statusPageHtml() {
 							outputRow = createSessionRow(key, 'output');
 						}
 						outputRow.dataset.outputSignature = signature;
-					let blocks = '';
+						let blocks = preview;
 						if (job.session_input) {
 							blocks += sessionOutputBlock(options.inputLabel, { live: !!options.live, key: key + ':input' });
 						}
@@ -1414,7 +1486,28 @@ function statusPageHtml() {
 			textarea.remove();
 		}
 
+		function closeImageLightbox() {
+			fields.imageLightbox.hidden = true;
+			fields.imageLightboxContent.removeAttribute('src');
+		}
+
+		function openImageLightbox(url) {
+			fields.imageLightboxContent.src = url;
+			fields.imageLightbox.hidden = false;
+			fields.closeImageLightbox.focus();
+		}
+
 		document.addEventListener('click', async (event) => {
+			const imagePreview = event.target.closest('[data-image-preview]');
+			if (imagePreview) {
+				event.preventDefault();
+				openImageLightbox(imagePreview.dataset.imagePreview);
+				return;
+			}
+			if (event.target === fields.closeImageLightbox || event.target === fields.imageLightbox) {
+				closeImageLightbox();
+				return;
+			}
 			const copyValue = event.target.closest('.copy-value');
 			if (copyValue) {
 				const original = copyValue.textContent;
@@ -1450,6 +1543,9 @@ function statusPageHtml() {
 			setTimeout(() => {
 				button.textContent = original;
 			}, 1800);
+		});
+		document.addEventListener('keydown', (event) => {
+			if (event.key === 'Escape' && !fields.imageLightbox.hidden) closeImageLightbox();
 		});
 
 		function renderJobs(jobs) {

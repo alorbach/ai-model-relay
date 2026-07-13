@@ -1,6 +1,6 @@
 # Gateway Integration
 
-This document is for developers integrating a browser-mediated local Codex flow with Alorbach AI Subscription Gateway.
+This document is for developers integrating a browser-mediated local Codex flow with Alorbach AI Subscription Gateway. It documents the Gateway's existing legacy Codex contract; relay routing is additive and must be explicitly enabled by the Gateway integration.
 
 Reference implementation in the [Alorbach AI Subscription Gateway](https://github.com/alorbach/alorbach-ai-subscription-gateway/) repository:
 
@@ -15,8 +15,9 @@ The local tray bridge owns:
 
 - localhost HTTP API;
 - origin pairing and local bearer token storage;
-- Codex CLI discovery and login checks;
+- cached provider discovery and readiness checks;
 - local Codex chat/image execution;
+- optional Grok CLI (including detected Imagine media) and Cursor Agent relay execution;
 - normalized chat and image response shapes.
 
 The WordPress Gateway owns:
@@ -182,6 +183,12 @@ async function executeLocalCodex(type, payload) {
 ```
 
 This mirrors the current Gateway demo implementation in `assets/js/demo-pages.js`.
+
+## Optional Relay Routes
+
+New integrations may send the same signed envelope to `/v1/relay/jobs/chat`, `/images`, `/videos`, `/transcribe`, or `/media/analyze`. They may set `payload.provider`, `payload.backend`, or a `model-relay:<backend>:<model>` model ID. If none is supplied, the local relay default for that operation is used. A selected unavailable or incompatible provider fails clearly; the bridge does not substitute another provider.
+
+Keep provider choice in the server-created, signed Gateway payload. Do not let browser code alter the model/provider after job creation. The legacy `codex-local:*` endpoints and contract shown above remain unchanged.
 
 ## Model IDs
 
