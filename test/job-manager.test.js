@@ -103,6 +103,18 @@ function deferredRunner(label, started, resolvers, result = { success: true }) {
 	}
 
 	{
+		const manager = new JobManager({ maxConcurrent: 1 });
+		await manager.run({ requestId: 'request-video', type: 'videos' }, () => ({
+			success: true,
+			response: { b64_video: Buffer.from('generated video bytes').toString('base64'), mime_type: 'video/mp4' },
+		}));
+		const artifact = manager.snapshot().recent[0].artifacts[0];
+		assert.strictEqual(artifact.mime_type, 'video/mp4');
+		assert.strictEqual(artifact.url, '/v1/status/jobs/1/artifacts/0');
+		assert.strictEqual(manager.artifact(1, 0).bytes.toString(), 'generated video bytes');
+	}
+
+	{
 		const started = [];
 		const resolvers = {};
 		const manager = new JobManager({ maxConcurrent: 2 });

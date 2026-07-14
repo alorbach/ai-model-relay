@@ -16,5 +16,7 @@ assert.ok(html.includes('data-provider-test'));
 assert.ok(html.includes("(isVideo ? 'video' : 'image')"));
 assert.ok(html.includes('Reference image (optional)'));
 assert.ok(html.includes('test image editing or image-guided video'));
+assert.ok(html.includes('<video src="'));
+assert.ok(html.includes('controls preload="metadata" playsinline'));
 
 console.log('status page tests passed');

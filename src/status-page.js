@@ -212,6 +212,14 @@ function statusPageHtml() {
 			border: 1px solid var(--line);
 			border-radius: 8px;
 		}
+		.job-artifact-preview video {
+			width: 100%;
+			max-height: 320px;
+			background: #070b10;
+			border: 1px solid var(--line);
+			border-radius: 8px;
+		}
+		.job-artifact-preview.video { cursor: default; }
 		.image-lightbox {
 			position: fixed;
 			z-index: 20;
@@ -930,11 +938,14 @@ function statusPageHtml() {
 			'</details>';
 		}
 
-		function imagePreviewBlock(job) {
+		function artifactPreviewBlock(job) {
 			const artifacts = Array.isArray(job.artifacts) ? job.artifacts : [];
 			const previews = artifacts.map((artifact, index) => {
 				const url = text(artifact && artifact.url, '');
-				if (!/^\\/v1\\/status\\/jobs\\/\\d+\\/artifacts\\/\\d+$/.test(url) || !/^image\\//.test(text(artifact && artifact.mime_type, ''))) return '';
+				const mimeType = text(artifact && artifact.mime_type, '');
+				if (!/^\\/v1\\/status\\/jobs\\/\\d+\\/artifacts\\/\\d+$/.test(url)) return '';
+				if (/^video\\//.test(mimeType)) return '<div class="job-artifact-preview video"><video src="' + escapeHtml(url) + '" controls preload="metadata" playsinline></video><span>Generated video ' + (index + 1) + '</span></div>';
+				if (!/^image\\//.test(mimeType)) return '';
 				const label = 'Open generated image ' + (index + 1);
 				return '<button type="button" class="job-artifact-preview" data-image-preview="' + escapeHtml(url) + '" title="' + escapeHtml(label) + '"><img src="' + escapeHtml(url) + '" alt="Generated image preview ' + (index + 1) + '" loading="lazy"><span>' + escapeHtml(label) + '</span></button>';
 			}).filter(Boolean);
@@ -1063,7 +1074,7 @@ function statusPageHtml() {
 				const debugLogs = Array.isArray(job.debug_logs) ? job.debug_logs : [];
 				const hasDebugOutput = debugLogs.some((log) => log && (log.prompt || log.output));
 				const hasInput = !!job.session_input;
-				const preview = imagePreviewBlock(job);
+				const preview = artifactPreviewBlock(job);
 				const hasOutput = !!preview || hasInput || !!job.session_output || hasDebugOutput;
 				if (hasOutput) {
 					const signature = JSON.stringify({

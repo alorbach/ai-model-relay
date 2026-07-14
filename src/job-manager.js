@@ -55,7 +55,7 @@ function redactSessionInput(value) {
 	return String(value || '').replace(/\b(bearer|token|api[_ -]?key|authorization)\s*(?:[:=]\s*|\s+)([^\s,;]+)/ig, '$1: <redacted>');
 }
 
-function collectImageArtifacts(result) {
+function collectMediaArtifacts(result) {
 	const response = result && result.response && typeof result.response === 'object' ? result.response : {};
 	const data = Array.isArray(response.data) ? response.data : [];
 	const artifacts = [];
@@ -67,6 +67,14 @@ function collectImageArtifacts(result) {
 		const bytes = Buffer.from(encoded, 'base64');
 		if (!bytes.length || bytes.length > 20 * 1024 * 1024) continue;
 		artifacts.push({ mime_type: mimeType, bytes });
+	}
+	const videoEncoded = String(response.b64_video || '').replace(/\s/g, '');
+	if (videoEncoded) {
+		const mimeType = String(response.mime_type || 'video/mp4').toLowerCase();
+		if (['video/mp4', 'video/webm', 'video/quicktime'].includes(mimeType)) {
+			const bytes = Buffer.from(videoEncoded, 'base64');
+			if (bytes.length && bytes.length <= 100 * 1024 * 1024) artifacts.push({ mime_type: mimeType, bytes });
+		}
 	}
 	return artifacts;
 }
@@ -262,7 +270,7 @@ class JobManager {
 				job.sessionOutput = truncateOutput(job.sessionOutput ? `${job.sessionOutput}\n\n${finalOutput}` : finalOutput);
 			}
 		}
-		const artifacts = status === 'completed' ? collectImageArtifacts(failure) : [];
+		const artifacts = status === 'completed' ? collectMediaArtifacts(failure) : [];
 		if (artifacts.length) {
 			this.artifacts.set(String(job.id), artifacts);
 			job.artifacts = artifacts.map((artifact, index) => ({
@@ -360,7 +368,8 @@ module.exports = {
 	JobManager,
 	clampMaxConcurrent,
 	collectDebugLogs,
-	collectImageArtifacts,
+	collectImageArtifacts: collectMediaArtifacts,
+	collectMediaArtifacts,
 	collectSessionOutput,
 	normalizeDiagnosticText,
 	redactSessionInput,
