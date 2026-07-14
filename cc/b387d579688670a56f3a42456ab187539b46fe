@@ -1,0 +1,42 @@
+test/backend-registry.test.js
+  s_a24a52784f4f7d::t_5efcdc06d2311c 93-99
+src/status-page.js
+  s_a24a52784f4f7d::t_d1c02ca33ad9e4 1221,1232-1236,1238-1239
+docs/architecture.md
+  s_a24a52784f4f7d::t_11cfebacff1c89 37,67
+docs/operations.md
+  s_a24a52784f4f7d::t_841cfc4861f00e 212
+  s_a24a52784f4f7d::t_11cfebacff1c89 19,26
+docs/local-bridge-api.md
+  s_a24a52784f4f7d::t_11cfebacff1c89 433,449,451
+src/backend-registry.js
+  s_a24a52784f4f7d::t_0310fc4ce350c9 237-238,241-242,244-302,304-321,324-341,352,355-366,368-370
+  s_a24a52784f4f7d::t_9f828e668de8e7 646-662,664-693,695-699,704-708,712,714-716
+  s_a24a52784f4f7d::t_c4ca356e1e01ad 243,322-323,342-348,709
+src/server.js
+  s_a24a52784f4f7d::t_1dfc0c2713943d 555,573,591,609,627
+  s_a24a52784f4f7d::t_278eddb949d9a0 327-341,362-363
+src/status-cache.js
+  s_a24a52784f4f7d::t_ceb72a1d37acb4 16-17
+  s_a24a52784f4f7d::t_763001520972b3 7-8,10
+docs/gateway-integration.md
+  s_a24a52784f4f7d::t_ff249df37c90e2 20
+package.json
+  s_a24a52784f4f7d::t_55c3f68cbada0e 12
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.13",
+  "base_commit_sha": "ccb387d579688670a56f3a42456ab187539b46fe",
+  "prompts": {},
+  "sessions": {
+    "s_a24a52784f4f7d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f532f-e127-77d2-af95-cf138999bbde",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
