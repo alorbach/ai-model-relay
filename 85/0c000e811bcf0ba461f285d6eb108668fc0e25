@@ -1,0 +1,28 @@
+test/status-page.test.js
+  s_a732edd6d38549::t_d142bac327e3a1 19-20
+src/status-page.js
+  s_a732edd6d38549::t_2ad2b6bf8a6915 941,945-948,1077
+  s_a732edd6d38549::t_76b26b3038418d 215-222
+test/job-manager.test.js
+  s_a732edd6d38549::t_d142bac327e3a1 106-116
+  s_a732edd6d38549::t_7e0dd419b9dbd9 105
+src/job-manager.js
+  s_a732edd6d38549::t_dcae722738fff3 371-372
+  s_a732edd6d38549::t_070e580c22b886 58,71-78,273
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "850c000e811bcf0ba461f285d6eb108668fc0e25",
+  "prompts": {},
+  "sessions": {
+    "s_a732edd6d38549": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4db4-255f-7001-b239-cce70e95bacd",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
