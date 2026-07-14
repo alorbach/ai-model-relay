@@ -1218,6 +1218,7 @@ function statusPageHtml() {
 			const defaults = settings.defaults || {};
 			const models = Array.isArray(payload && payload.models) ? payload.models : [];
 			const backends = Array.isArray(payload && payload.backends) ? payload.backends : (currentCapabilities.backends || []);
+			const backendById = new Map(backends.map((backend) => [backend.id, backend]));
 			fields.providerSettings.innerHTML = backends.map((backend) => {
 				const status = backend.ready ? 'Ready' : (backend.state === 'not_authenticated' ? 'Not authenticated' : (backend.state === 'installed' ? 'Authentication unchecked' : (backend.installed === false ? 'Not installed' : 'Unavailable')));
 				const features = Object.keys(backend.features || {}).filter((key) => backend.features[key]).join(', ') || (backend.job_types || []).join(', ') || 'No supported jobs';
@@ -1228,9 +1229,14 @@ function statusPageHtml() {
 			const labels = { chat: 'Chat and coding', images: 'Image generation', videos: 'Video generation', transcribe: 'Transcription', 'media.analyze': 'Media analysis' };
 			fields.relayDefaultSettings.innerHTML = Object.keys(labels).map((jobType) => {
 				const current = defaults[jobType] || '';
-				const compatible = models.filter((model) => (jobType === 'chat' || jobType === 'media.analyze') ? model.type === 'text' : model.type === ({ images: 'image', videos: 'video', transcribe: 'audio' }[jobType]));
+				const expectedType = (jobType === 'chat' || jobType === 'media.analyze') ? 'text' : ({ images: 'image', videos: 'video', transcribe: 'audio' }[jobType]);
+				const compatible = models.filter((model) => {
+					const backend = backendById.get(model.backend);
+					return model.type === expectedType && model.ready !== false && backend && backend.ready === true && Array.isArray(backend.job_types) && backend.job_types.includes(jobType);
+				});
 				const selectedKnown = compatible.some((model) => model.id === current);
-				const options = (selectedKnown ? [] : ['<option value="' + escapeHtml(current) + '" selected>Unavailable: ' + escapeHtml(current) + '</option>']).concat(compatible.map((model) => '<option value="' + escapeHtml(model.id) + '"' + optionAttr(model.id, current) + '>' + escapeHtml(model.id) + (model.ready === false ? ' (unavailable)' : '') + '</option>'));
+				const unavailable = current && !selectedKnown ? ['<option value="' + escapeHtml(current) + '" selected disabled>Unavailable saved selection: ' + escapeHtml(current) + '</option>'] : [];
+				const options = unavailable.concat(compatible.map((model) => '<option value="' + escapeHtml(model.id) + '"' + optionAttr(model.id, current) + '>' + escapeHtml(model.id) + (model.experimental ? ' (experimental)' : '') + '</option>'));
 				return '<label class="field"><span>' + labels[jobType] + '</span><select data-relay-job="' + jobType + '">' + options.join('') + '</select></label>';
 			}).join('');
 		}

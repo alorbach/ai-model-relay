@@ -90,6 +90,13 @@ const {
 	const legacyAsrResult = await registry.run('transcribe', { model: 'codex-local:audio:whisper-large-v3' });
 	assert.strictEqual(legacyAsrResult.response.model, 'local-asr:whisper-large-v3');
 
+	const unknownProvider = await registry.run('chat', { provider: 'not-a-provider', prompt: 'hi' });
+	assert.strictEqual(unknownProvider.code, 'backend_unknown');
+	const incompatibleModel = await registry.run('chat', { model: 'model-relay:codex:image', prompt: 'hi' });
+	assert.strictEqual(incompatibleModel.code, 'backend_model_incompatible');
+	const grokAlias = registry.resolve('chat', { provider: 'grok', prompt: 'hi' });
+	assert.strictEqual(grokAlias.error.details.provider, 'grok-cli');
+
 	const xaiResult = await registry.run('chat', { model: 'model-relay:xai:grok-4.3', messages: [{ role: 'user', content: 'hi' }] });
 	assert.strictEqual(xaiResult.success, true);
 	assert.strictEqual(xaiResult.response.model, 'model-relay:xai:grok-4.3');

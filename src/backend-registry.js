@@ -234,32 +234,140 @@ function createNamedCliDriver(definition, options = {}) {
 }
 
 function createGrokCliDriver(options = {}) {
-	const driver = createNamedCliDriver({ id: 'grok-cli', label: 'Grok CLI', candidates: [process.env.AI_MODEL_RELAY_GROK_BINARY, 'grok'], versionArgs: ['--version'], authArgs: ['models'], jobTypes: ['chat', 'images', 'videos'], models: ['auto'], requestArgs: (model, prompt) => ['--single', prompt, '--output-format', 'json', ...(model !== 'auto' ? ['--model', model] : [])] }, options);
+	const definition = { id: 'grok-cli', label: 'Grok CLI', candidates: [process.env.AI_MODEL_RELAY_GROK_BINARY, 'grok'], versionArgs: ['--version'], authArgs: ['models'], jobTypes: ['chat'], models: ['auto'], requestArgs: (model, prompt) => ['--single', prompt, '--output-format', 'json', ...(model !== 'auto' ? ['--model', model] : [])] };
+	const driver = createNamedCliDriver(definition, options);
 	const baseCapabilities = driver.capabilities;
 	const baseModels = driver.models;
-	driver.job_types = ['chat', 'images', 'videos'];
-	driver.capabilities = () => ({ ...baseCapabilities(), features: { chat: true, coding: true, images: true, image_edit: true, videos: 'experimental', image_references: true } });
-	driver.models = () => [...baseModels(), { id: 'model-relay:grok-cli:image', type: 'image', backend: 'grok-cli', experimental: false }, { id: 'model-relay:grok-cli:video', type: 'video', backend: 'grok-cli', experimental: true }];
-	function collectFiles(root, extensions) {
-		const found = []; const walk = (folder) => { for (const entry of fs.readdirSync(folder, { withFileTypes: true })) { const full = path.join(folder, entry.name); if (entry.isDirectory()) walk(full); else if (extensions.test(entry.name)) found.push(full); } }; walk(root); return found;
+	const baseRefresh = driver.refresh;
+	let imagine = { checked: false, path: '', images: false, videos: false, video_verified: false, diagnostic: 'Imagine tooling has not been checked yet.' };
+	let unavailableTools = { images: false, videos: false };
+
+	function probeImagine() {
+		const candidates = [options.imagineSkillPath, process.env.AI_MODEL_RELAY_GROK_IMAGINE_SKILL, path.join(os.homedir(), '.grok', 'skills', 'imagine', 'SKILL.md')].filter(Boolean);
+		const skillPath = candidates.find((candidate) => {
+			try { return fs.statSync(candidate).isFile(); } catch (error) { return false; }
+		});
+		if (!skillPath) return { checked: true, path: '', images: false, videos: false, video_verified: false, diagnostic: 'Grok Imagine skill was not found.' };
+		try {
+			const content = fs.readFileSync(skillPath, 'utf8').slice(0, 128 * 1024);
+			const namedImagine = /^\s*name:\s*imagine\s*$/mi.test(content);
+			const images = namedImagine && /\bimage_gen\b/.test(content) && /\bimage_edit\b/.test(content);
+			const videos = images && /\bimage_to_video\b/.test(content) && /\breference_to_video\b/.test(content);
+			return { checked: true, path: skillPath, images, videos, video_verified: false, diagnostic: images ? (videos ? 'Grok Imagine image and experimental video workflows detected.' : 'Grok Imagine image workflows detected; video workflow is unavailable.') : 'Grok Imagine skill does not declare the required image tools.' };
+		} catch (error) {
+			return { checked: true, path: '', images: false, videos: false, video_verified: false, diagnostic: 'Grok Imagine skill could not be read.' };
+		}
 	}
+
+	function extensionForMime(mime) {
+		return { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/webp': 'webp' }[String(mime || '').toLowerCase()] || '';
+	}
+
+	function decodeDataUrl(value) {
+		const match = String(value || '').match(/^data:(image\/(?:png|jpeg|jpg|webp));base64,([A-Za-z0-9+/=\s]+)$/i);
+		if (!match) return null;
+		const encoded = match[2].replace(/\s/g, '');
+		if (!encoded || encoded.length % 4 === 1) return null;
+		const bytes = Buffer.from(encoded, 'base64');
+		return bytes.length ? { mime_type: match[1].toLowerCase(), bytes } : null;
+	}
+
+	function materializeReferences(payload, inputDir) {
+		const entries = [payload.input_reference_data_url, payload.input_reference, ...(Array.isArray(payload.reference_images) ? payload.reference_images : []), ...(Array.isArray(payload.frames) ? payload.frames : [])].filter(Boolean);
+		const paths = Array.isArray(payload.referenced_image_paths) ? payload.referenced_image_paths.filter(Boolean) : [];
+		const materialized = [];
+		const write = (image) => {
+			if (!image || !image.bytes || image.bytes.length > 20 * 1024 * 1024) return false;
+			const extension = extensionForMime(image.mime_type);
+			if (!extension) return false;
+			const target = path.join(inputDir, `reference-${materialized.length + 1}.${extension}`);
+			fs.writeFileSync(target, image.bytes);
+			materialized.push(target);
+			return true;
+		};
+		for (const entry of entries) {
+			const image = typeof entry === 'object' && !Buffer.isBuffer(entry)
+				? decodeDataUrl(`data:${String(entry.mime_type || 'image/jpeg').toLowerCase()};base64,${String(entry.b64_json || '')}`)
+				: decodeDataUrl(entry);
+			if (!write(image)) return { error: 'Grok media references must be PNG, JPEG, or WebP data URLs or { b64_json, mime_type } objects.' };
+		}
+		for (const source of paths) {
+			try {
+				const bytes = fs.readFileSync(String(source));
+				const extension = path.extname(String(source)).toLowerCase();
+				const mime_type = extension === '.png' ? 'image/png' : (extension === '.webp' ? 'image/webp' : (extension === '.jpg' || extension === '.jpeg' ? 'image/jpeg' : ''));
+				if (!write({ mime_type, bytes })) return { error: 'Grok media reference paths must point to PNG, JPEG, or WebP files smaller than 20 MB.' };
+			} catch (error) { return { error: 'A Grok media reference path could not be read.' }; }
+		}
+		return { paths: materialized };
+	}
+
+	function collectOutputFiles(root, extensions) {
+		const found = [];
+		const walk = (folder) => {
+			for (const entry of fs.readdirSync(folder, { withFileTypes: true })) {
+				const full = path.join(folder, entry.name);
+				if (entry.isDirectory()) walk(full);
+				else if (extensions.test(entry.name)) found.push(full);
+			}
+		};
+		walk(root);
+		return found;
+	}
+
+	function mediaFailure(result, toolName) {
+		const message = String(result && result.message || 'Grok Imagine request failed.');
+		if (/moderation|safety policy|content policy|blocked/i.test(message)) return { success: false, category: 'moderation', code: 'grok_media_moderated', message: 'Grok Imagine blocked this media request.' };
+		if (/unknown tool|unsupported tool|tool .*not found|not available|unrecognized/i.test(message)) {
+			if (toolName === 'image_to_video' || toolName === 'reference_to_video') { unavailableTools.videos = true; imagine = { ...imagine, videos: false, diagnostic: 'Grok Imagine video tools are unavailable.' }; }
+			else { unavailableTools = { images: true, videos: true }; imagine = { ...imagine, images: false, videos: false, diagnostic: 'Grok Imagine image tools are unavailable.' }; }
+			return { success: false, category: 'configuration', code: 'grok_imagine_tool_unavailable', message: imagine.diagnostic };
+		}
+		return { ...result, code: result && result.code === 'cli_timeout' ? 'grok_media_timeout' : 'grok_media_failed', message };
+	}
+
+	driver.job_types = ['chat', 'images', 'videos'];
+	driver.supports = (jobType) => jobType === 'chat' || (jobType === 'images' && imagine.images) || (jobType === 'videos' && imagine.videos);
+	driver.capabilities = () => {
+		const base = baseCapabilities();
+		const mediaReady = !!base.ready && imagine.images;
+		return { ...base, job_types: ['chat', ...(mediaReady ? ['images'] : []), ...(mediaReady && imagine.videos ? ['videos'] : [])], features: { chat: true, coding: true, images: mediaReady, image_edit: mediaReady, videos: mediaReady && imagine.videos ? 'experimental' : false, image_references: mediaReady, imagine_detected: imagine.checked }, imagine: { detected: imagine.images, path: imagine.path ? '<detected>' : '', video_verified: imagine.video_verified, diagnostic: imagine.diagnostic } };
+	};
+	driver.models = () => {
+		const base = baseModels();
+		const state = baseCapabilities();
+		if (!state.ready || !imagine.images) return base;
+		return [...base, { id: 'model-relay:grok-cli:image', type: 'image', backend: 'grok-cli', ready: true }, ...(imagine.videos ? [{ id: 'model-relay:grok-cli:video', type: 'video', backend: 'grok-cli', ready: true, experimental: true, verified: imagine.video_verified }] : [])];
+	};
+	driver.refresh = async (refreshOptions = {}) => {
+		const state = await baseRefresh();
+		if (refreshOptions.resetMedia) unavailableTools = { images: false, videos: false };
+		const detected = probeImagine();
+		imagine = { ...detected, images: detected.images && !unavailableTools.images, videos: detected.videos && !unavailableTools.videos, video_verified: refreshOptions.resetMedia ? false : (imagine.video_verified && detected.videos) };
+		return { ...state, imagine };
+	};
 	async function media(kind, payload = {}, session = {}) {
 		const state = await driver.refresh();
 		if (!state.ready) return { success: false, category: 'configuration', code: 'grok_cli_unavailable', message: `Grok CLI is unavailable: ${state.diagnostic}` };
+		if (!driver.supports(kind)) return { success: false, category: 'configuration', code: 'grok_imagine_unavailable', message: `Grok ${kind === 'images' ? 'image' : 'video'} generation is unavailable: ${imagine.diagnostic}` };
 		const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-model-relay-grok-'));
 		try {
-			const references = [payload.input_reference_data_url || payload.input_reference, ...(Array.isArray(payload.reference_images) ? payload.reference_images : [])].filter(Boolean);
-			const referencePaths = references.map((reference, index) => { const text = String(reference); const match = text.match(/^data:(image\/(?:png|jpeg|jpg|webp));base64,([\s\S]+)$/i); if (!match) return ''; const file = path.join(workspace, `reference-${index}.${match[1].split('/')[1].replace('jpeg', 'jpg')}`); fs.writeFileSync(file, Buffer.from(match[2], 'base64')); return file; }).filter(Boolean);
-			if (references.length && referencePaths.length !== references.length) return { success: false, category: 'validation', code: 'grok_reference_invalid', message: 'Grok media references must be image data URLs.' };
-			const toolNames = kind === 'images' ? (referencePaths.length ? 'image_edit' : 'image_gen') : (referencePaths.length > 1 ? 'reference_to_video' : 'image_to_video');
-			const instruction = kind === 'images' ? `Use the ${toolNames} tool to create the requested image${referencePaths.length ? ` using ${referencePaths.join(', ')}` : ''}.` : `Use the ${toolNames} tool to create the requested video${referencePaths.length ? ` using ${referencePaths.join(', ')}` : ''}.`;
-			const prompt = `${instruction} Save the final generated ${kind === 'images' ? 'image' : 'video'} file inside ${workspace}. Do not use shell commands or edit files outside this workspace. User request: ${String(payload.prompt || '').trim()}`;
-			const result = await runTextCommand(state.command, ['--single', prompt, '--output-format', 'json', '--cwd', workspace, '--tools', toolNames, '--permission-mode', 'auto'], '', session, options);
-			if (!result.success) return { ...result, code: result.code === 'cli_request_failed' ? 'grok_media_failed' : result.code };
-			const files = collectFiles(workspace, kind === 'images' ? /\.(png|jpe?g|webp)$/i : /\.(mp4|webm|mov)$/i);
+			const inputDir = path.join(workspace, 'input');
+			const outputDir = path.join(workspace, 'output');
+			fs.mkdirSync(inputDir); fs.mkdirSync(outputDir);
+			const references = materializeReferences(payload, inputDir);
+			if (references.error) return { success: false, category: 'validation', code: 'grok_reference_invalid', message: references.error };
+			if (kind === 'videos' && !references.paths.length) return { success: false, category: 'validation', code: 'grok_video_reference_required', message: 'Grok image-to-video requires at least one image reference.' };
+			const toolName = kind === 'images' ? (references.paths.length ? 'image_edit' : 'image_gen') : (references.paths.length > 1 ? 'reference_to_video' : 'image_to_video');
+			const instruction = `Use only the ${toolName} tool to create the requested ${kind === 'images' ? 'image' : 'video'}${references.paths.length ? ` using ${references.paths.join(', ')}` : ''}.`;
+			const prompt = `${instruction} Save final generated files only in ${outputDir}. Do not use shell tools, repository tools, or files outside ${workspace}. User request: ${String(payload.prompt || '').trim()}`;
+			const result = await runTextCommand(state.command, ['--single', prompt, '--output-format', 'json', '--cwd', workspace, '--tools', toolName, '--permission-mode', 'auto'], '', session, options);
+			if (!result.success) return mediaFailure(result, toolName);
+			const files = collectOutputFiles(outputDir, kind === 'images' ? /\.(png|jpe?g|webp)$/i : /\.(mp4|webm|mov)$/i);
 			if (!files.length) return { success: false, category: 'grok_media', code: 'grok_media_artifact_missing', message: `Grok completed without saving a ${kind === 'images' ? 'generated image' : 'generated video'} in the request workspace.` };
-			if (kind === 'images') return { success: true, response: { data: files.map((file) => ({ b64_json: fs.readFileSync(file).toString('base64'), mime_type: file.endsWith('.png') ? 'image/png' : file.endsWith('.webp') ? 'image/webp' : 'image/jpeg' })), provider_details: { provider: 'grok-cli', imagine_tool: toolNames } } };
-			const bytes = fs.readFileSync(files[0]); return { success: true, response: { b64_video: bytes.toString('base64'), mime_type: files[0].endsWith('.webm') ? 'video/webm' : 'video/mp4', provider_details: { provider: 'grok-cli', imagine_tool: toolNames, experimental: true } } };
+			if (kind === 'images') return { success: true, response: { data: files.map((file) => ({ b64_json: fs.readFileSync(file).toString('base64'), mime_type: file.endsWith('.png') ? 'image/png' : file.endsWith('.webp') ? 'image/webp' : 'image/jpeg' })), provider_details: { provider: 'grok-cli', imagine_tool: toolName } } };
+			imagine = { ...imagine, video_verified: true };
+			const bytes = fs.readFileSync(files[0]); return { success: true, response: { b64_video: bytes.toString('base64'), mime_type: files[0].endsWith('.webm') ? 'video/webm' : 'video/mp4', provider_details: { provider: 'grok-cli', imagine_tool: toolName, experimental: true } } };
 		} finally { fs.rmSync(workspace, { recursive: true, force: true }); }
 	}
 	driver.images = (payload, session) => media('images', payload, session);
@@ -535,56 +643,77 @@ function createBackendRegistry(options = {}) {
 		createApiKeyChatDriver(options.apiKeyChat || {}),
 	].filter(Boolean);
 	const byId = new Map(drivers.map((driver) => [driver.id, driver]));
+	const aliases = {
+		codex: 'codex-cli',
+		'codex-cli': 'codex-cli',
+		grok: 'grok-cli',
+		'grok-cli': 'grok-cli',
+		cursor: 'cursor-cli',
+		'cursor-cli': 'cursor-cli',
+		asr: 'local-asr',
+		'local-asr': 'local-asr',
+		xai: 'xai-api',
+		'xai-api': 'xai-api',
+		cli: 'cli-process',
+		'cli-process': 'cli-process',
+		'api-key-chat': 'api-key-chat',
+		video: 'openai-videos',
+		'openai-videos': 'openai-videos',
+	};
+
+	function requestedSelection(payload = {}) {
+		const provider = providerFromPayload(payload);
+		const model = String(payload && payload.model || '').trim();
+		return { provider, model, explicit: !!(provider || model) };
+	}
+
+	function expectedModelType(jobType) {
+		return ({ chat: 'text', images: 'image', videos: 'video', transcribe: 'audio', 'media.analyze': 'text' })[jobType] || '';
+	}
+
+	function capabilitiesFor(driver) {
+		if (!driver || !driver.capabilities) return null;
+		const capabilities = driver.capabilities();
+		return { ...capabilities, job_types: capabilities.job_types || driver.job_types || [] };
+	}
+
+	function resolve(jobType, payload = {}) {
+		const selection = requestedSelection(payload);
+		if (!selection.explicit) return { error: { success: false, category: 'configuration', code: 'backend_selection_missing', message: `No provider or model was selected for ${jobType}.` } };
+		const id = aliases[selection.provider] || selection.provider;
+		const driver = byId.get(id);
+		if (!driver) return { error: { success: false, category: 'configuration', code: 'backend_unknown', message: `Selected provider is unavailable: ${selection.model || selection.provider}.`, details: { job_type: jobType, provider: selection.provider, model: selection.model } } };
+		const capabilities = capabilitiesFor(driver);
+		const supported = driver.supports ? driver.supports(jobType) : (capabilities.job_types || []).includes(jobType);
+		if (!supported || typeof driver[jobType] !== 'function') return { error: { success: false, category: 'configuration', code: 'backend_unsupported', message: `Selected provider does not support ${jobType}: ${selection.model || selection.provider}.`, details: { job_type: jobType, provider: driver.id, model: selection.model } } };
+		if (!capabilities.ready) return { error: { success: false, category: 'configuration', code: 'backend_unavailable', message: `Selected provider is unavailable: ${selection.model || selection.provider}. ${capabilities.diagnostic || 'Refresh provider detection or select another provider.'}`, details: { job_type: jobType, provider: driver.id, model: selection.model } } };
+		if (selection.model) {
+			const model = (driver.models ? driver.models() : []).find((entry) => entry.id === selection.model || entry.legacy_id === selection.model);
+			const expected = expectedModelType(jobType);
+			if (model && expected && model.type !== expected) return { error: { success: false, category: 'configuration', code: 'backend_model_incompatible', message: `Selected model is incompatible with ${jobType}: ${selection.model}.`, details: { job_type: jobType, provider: driver.id, model: selection.model } } };
+		}
+		return { driver, capabilities, provider: driver.id };
+	}
 
 	function driverFor(jobType, payload = {}) {
-		const requested = providerFromPayload(payload);
-		const aliases = {
-			codex: 'codex-cli',
-			'codex-cli': 'codex-cli',
-			'grok-cli': 'grok-cli',
-			grok: 'grok-cli',
-			'cursor-cli': 'cursor-cli',
-			cursor: 'cursor-cli',
-			asr: 'local-asr',
-			'local-asr': 'local-asr',
-			xai: 'xai-api',
-			grok: 'xai-api',
-			'xai-api': 'xai-api',
-			cli: 'cli-process',
-			'cli-process': 'cli-process',
-			'api-key-chat': 'api-key-chat',
-			video: 'openai-videos',
-			'openai-videos': 'openai-videos',
-		};
-		const id = aliases[requested] || requested;
-		if (id && byId.has(id)) {
-			return byId.get(id);
-		}
-		if (jobType === 'transcribe') {
-			return byId.get('local-asr');
-		}
-		if (jobType === 'images') {
-			return byId.get('codex-cli');
-		}
-		if (jobType === 'videos') {
-			return byId.get('openai-videos');
-		}
-		return byId.get('codex-cli');
+		return resolve(jobType, payload).driver || null;
 	}
 
 	return {
 		list: () => drivers.slice(),
-		capabilities: () => drivers.map((driver) => driver.capabilities()),
-		models: () => drivers.flatMap((driver) => driver.models()),
-		refresh: () => Promise.all(drivers.map((driver) => driver.refresh ? driver.refresh() : driver.capabilities())),
+		capabilities: () => drivers.map((driver) => capabilitiesFor(driver)),
+		models: () => drivers.flatMap((driver) => {
+			const capabilities = capabilitiesFor(driver);
+			return driver.models().map((model) => ({ ...model, ready: model.ready !== undefined ? model.ready : !!capabilities.ready, job_types: model.job_types || capabilities.job_types }));
+		}),
+		refresh: () => Promise.all(drivers.map((driver) => driver.refresh ? driver.refresh({ resetMedia: true }) : driver.capabilities())),
 		getDriver: (jobType, payload) => driverFor(jobType, payload),
 		driverFor,
+		resolve,
 		run(jobType, payload, session) {
-			const driver = driverFor(jobType, payload);
-			if (!driver || typeof driver[jobType] !== 'function') {
-				return Promise.resolve({ success: false, category: 'configuration', code: 'backend_unsupported', message: `No backend driver supports ${jobType}.` });
-			}
-			return Promise.resolve(driver[jobType](payload || {}, session || {}));
+			const resolved = resolve(jobType, payload || {});
+			if (resolved.error) return Promise.resolve(resolved.error);
+			return Promise.resolve(resolved.driver[jobType](payload || {}, session || {}));
 		},
 	};
 }

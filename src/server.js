@@ -324,15 +324,21 @@ function modelsPayload(context) {
 
 function relayPayloadFor(context, jobType, payload = {}) {
 	const requested = payload && typeof payload === 'object' ? payload : {};
-	if (String(requested.model || '').trim() || String(requested.provider || requested.backend || '').trim()) return { payload: requested };
-	const settings = context.relaySettings.settings();
-	const model = settings.defaults[jobType];
-	const driver = context.backends.getDriver(jobType, { model });
-	const capabilities = driver && driver.capabilities ? driver.capabilities() : null;
-	if (!driver || !(driver.job_types || []).includes(jobType) || !capabilities || !capabilities.ready) {
-		return { error: { success: false, category: 'configuration', code: 'relay_default_unavailable', message: `Configured default for ${jobType} is unavailable: ${model}. ${capabilities && capabilities.diagnostic || 'Select a ready provider in Relay settings.'}`, details: { job_type: jobType, model, backend: driver && driver.id || '' } } };
+	const explicit = String(requested.model || '').trim() || String(requested.provider || requested.backend || '').trim();
+	const model = explicit ? String(requested.model || '').trim() : context.relaySettings.settings().defaults[jobType];
+	const resolvedPayload = explicit ? requested : { ...requested, model };
+	const resolved = context.backends.resolve
+		? context.backends.resolve(jobType, resolvedPayload)
+		: (() => {
+			const driver = context.backends.getDriver(jobType, resolvedPayload);
+			const capabilities = driver && driver.capabilities ? driver.capabilities() : null;
+			return driver && capabilities && capabilities.ready && (driver.job_types || []).includes(jobType) ? { driver, capabilities } : { error: { success: false, category: 'configuration', code: 'backend_unavailable', message: `Selected provider is unavailable: ${model || requested.provider || requested.backend}.` } };
+		})();
+	if (resolved.error) {
+		const code = explicit ? resolved.error.code : 'relay_default_unavailable';
+		return { error: { ...resolved.error, code, message: explicit ? resolved.error.message : `Configured default for ${jobType} is unavailable: ${model}. ${resolved.error.message}` } };
 	}
-	return { payload: { ...requested, model } };
+	return { payload: resolvedPayload, resolved };
 }
 
 function workflowForJob(jobType, provider) {
@@ -353,8 +359,8 @@ function workflowForJob(jobType, provider) {
 	return workflows[key] || '';
 }
 
-function jobDisplayMeta(context, jobType, payload, fallbackProvider = '', fallbackLabel = '') {
-	const driver = context.backends && context.backends.getDriver ? context.backends.getDriver(jobType, payload || {}) : null;
+function jobDisplayMeta(context, jobType, payload, fallbackProvider = '', fallbackLabel = '', resolved = null) {
+	const driver = resolved && resolved.driver || (context.backends && context.backends.getDriver ? context.backends.getDriver(jobType, payload || {}) : null);
 	const provider = driver && driver.id || fallbackProvider;
 	return {
 		provider,
@@ -546,7 +552,7 @@ async function route(req, res, context) {
 		const isRelayRoute = url.pathname === '/v1/relay/jobs/chat';
 		const resolved = isRelayRoute ? relayPayloadFor(context, 'chat', body.payload || {}) : { payload: body.payload || {} };
 		if (resolved.error) { sendErrorJson(req, res, 503, resolved.error, pairedOrigin, { requestId: body.request_id, route: url.pathname }); return; }
-		const display = isRelayRoute ? jobDisplayMeta(context, 'chat', resolved.payload) : { provider: 'codex-cli', providerLabel: 'Codex CLI', workflow: workflowForJob('chat', 'codex-cli') };
+		const display = isRelayRoute ? jobDisplayMeta(context, 'chat', resolved.payload, '', '', resolved.resolved) : { provider: 'codex-cli', providerLabel: 'Codex CLI', workflow: workflowForJob('chat', 'codex-cli') };
 		const result = await jobManager.run({
 			requestId: body.request_id,
 			type: 'chat',
@@ -564,7 +570,7 @@ async function route(req, res, context) {
 		const isRelayRoute = url.pathname === '/v1/relay/jobs/images';
 		const resolved = isRelayRoute ? relayPayloadFor(context, 'images', body.payload || {}) : { payload: body.payload || {} };
 		if (resolved.error) { sendErrorJson(req, res, 503, resolved.error, pairedOrigin, { requestId: body.request_id, route: url.pathname }); return; }
-		const display = isRelayRoute ? jobDisplayMeta(context, 'images', resolved.payload) : { provider: 'codex-cli', providerLabel: 'Codex CLI', workflow: workflowForJob('images', 'codex-cli') };
+		const display = isRelayRoute ? jobDisplayMeta(context, 'images', resolved.payload, '', '', resolved.resolved) : { provider: 'codex-cli', providerLabel: 'Codex CLI', workflow: workflowForJob('images', 'codex-cli') };
 		const result = await jobManager.run({
 			requestId: body.request_id,
 			type: 'images',
@@ -582,7 +588,7 @@ async function route(req, res, context) {
 		const isRelayRoute = url.pathname === '/v1/relay/jobs/transcribe';
 		const resolved = isRelayRoute ? relayPayloadFor(context, 'transcribe', body.payload || {}) : { payload: body.payload || {} };
 		if (resolved.error) { sendErrorJson(req, res, 503, resolved.error, pairedOrigin, { requestId: body.request_id, route: url.pathname }); return; }
-		const display = isRelayRoute ? jobDisplayMeta(context, 'transcribe', resolved.payload) : { provider: 'local-asr', providerLabel: 'Local ASR', workflow: workflowForJob('transcribe', 'local-asr') };
+		const display = isRelayRoute ? jobDisplayMeta(context, 'transcribe', resolved.payload, '', '', resolved.resolved) : { provider: 'local-asr', providerLabel: 'Local ASR', workflow: workflowForJob('transcribe', 'local-asr') };
 		const result = await jobManager.run({
 			requestId: body.request_id,
 			type: 'transcribe',
@@ -600,7 +606,7 @@ async function route(req, res, context) {
 		const isRelayRoute = url.pathname === '/v1/relay/jobs/videos';
 		const resolved = isRelayRoute ? relayPayloadFor(context, 'videos', body.payload || {}) : { payload: body.payload || {} };
 		if (resolved.error) { sendErrorJson(req, res, 503, resolved.error, pairedOrigin, { requestId: body.request_id, route: url.pathname }); return; }
-		const display = isRelayRoute ? jobDisplayMeta(context, 'videos', resolved.payload) : { provider: 'openai-videos', providerLabel: 'OpenAI Videos', workflow: workflowForJob('videos', 'openai-videos') };
+		const display = isRelayRoute ? jobDisplayMeta(context, 'videos', resolved.payload, '', '', resolved.resolved) : { provider: 'openai-videos', providerLabel: 'OpenAI Videos', workflow: workflowForJob('videos', 'openai-videos') };
 		const result = await jobManager.run({
 			requestId: body.request_id,
 			type: 'videos',
@@ -618,7 +624,7 @@ async function route(req, res, context) {
 		const isRelayRoute = url.pathname === '/v1/relay/jobs/media/analyze';
 		const resolved = isRelayRoute ? relayPayloadFor(context, 'media.analyze', body.payload || {}) : { payload: body.payload || {} };
 		if (resolved.error) { sendErrorJson(req, res, 503, resolved.error, pairedOrigin, { requestId: body.request_id, route: url.pathname }); return; }
-		const display = isRelayRoute ? jobDisplayMeta(context, 'media.analyze', resolved.payload) : { provider: 'codex-cli', providerLabel: 'Codex CLI', workflow: workflowForJob('media.analyze', 'codex-cli') };
+		const display = isRelayRoute ? jobDisplayMeta(context, 'media.analyze', resolved.payload, '', '', resolved.resolved) : { provider: 'codex-cli', providerLabel: 'Codex CLI', workflow: workflowForJob('media.analyze', 'codex-cli') };
 		const result = await jobManager.run({
 			requestId: body.request_id,
 			type: 'media_analysis',

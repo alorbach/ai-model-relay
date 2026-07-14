@@ -17,7 +17,7 @@ The local tray bridge owns:
 - origin pairing and local bearer token storage;
 - cached provider discovery and readiness checks;
 - local Codex chat/image execution;
-- optional Grok CLI (including detected Imagine media) and Cursor Agent relay execution;
+- optional Grok CLI (with Imagine media exposed only after local skill detection) and Cursor Agent relay execution;
 - normalized chat and image response shapes.
 
 The WordPress Gateway owns:

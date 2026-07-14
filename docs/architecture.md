@@ -34,7 +34,7 @@ Entry point: `src/backend-registry.js`
 
 Backend drivers expose a common contract: `id`, `label`, `kind`, `capabilities()`, `models()`, `checkStatus()`, and execution methods for supported job types. The built-in drivers include Codex CLI, Grok CLI, Cursor Agent, Local ASR, OpenAI Videos, Grok/xAI API, and the optional generic CLI-process and API-key chat drivers.
 
-Codex CLI supports chat, images, and media analysis. Grok CLI supports chat/coding plus locally detected Grok Imagine image generation and experimental video generation; the media requests run in a per-request temporary workspace and return only artifacts created there. Cursor Agent is a chat/coding driver. OpenAI Videos and xAI API remain separately configured API-backed drivers. A driver is never selected as a silent fallback when the requested/default driver is unavailable or lacks a capability.
+Codex CLI supports chat, images, and media analysis. Grok CLI always supports chat/coding after its normal readiness check; image/video models are exposed only when the local `%USERPROFILE%\.grok\skills\imagine\SKILL.md` metadata declares the corresponding Imagine tools. Grok media runs in a per-request temporary workspace with separate `input` and `output` directories and returns only output artifacts. Video remains experimental until a successful local request confirms it. Cursor Agent is a chat/coding driver. OpenAI Videos and xAI API remain separately configured API-backed drivers. A driver is never selected as a silent fallback when the requested/default driver is unavailable or lacks a capability.
 
 The registry preserves existing routes and model IDs while adding provider-neutral `model-relay:*` IDs and `/v1/relay/*` frontend aliases. Driver-specific credentials are reported only as configured/not configured and are not emitted in status, capabilities, jobs, SSE, or debug-help payloads.
 
@@ -64,7 +64,7 @@ Chat jobs run `codex exec` in an ephemeral temp directory and write the final as
 
 Legacy `/v1/chat`, `/v1/images`, `/v1/transcribe`, `/v1/videos`, and `/v1/media/analyze` routes remain backwards compatible. New aliases under `/v1/relay/jobs/*` accept the same signed envelope and may route by `payload.provider`, `payload.backend`, or provider-qualified model IDs such as `model-relay:xai:grok-4.3`.
 
-Relay-only defaults are persisted in the existing local state file for `chat`, `images`, `videos`, `transcribe`, and `media.analyze`. An explicit model, backend, or provider wins. Otherwise the saved operation default is inserted. If that selection is missing, disabled, not authenticated, or incompatible, the relay returns a clear configuration error naming the selected model and reason; it does not fall back to another driver. Legacy routes do not consult these defaults.
+Relay-only defaults are persisted in the existing local state file for `chat`, `images`, `videos`, `transcribe`, and `media.analyze`. An explicit model, backend, or provider wins. Otherwise the saved operation default is inserted. Explicit and default selections receive the same validation: unknown, disabled, unauthenticated, or job-incompatible selections return a clear configuration error naming the choice. They never fall back to another driver. Legacy routes do not consult these defaults.
 
 ### Job diagnostics and generated artifacts
 

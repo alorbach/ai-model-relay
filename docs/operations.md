@@ -16,14 +16,14 @@
 The Settings page shows every supported local/API driver with an installed, ready, checking, not-authenticated, or unavailable state; executable path, version, supported operations, and concise safe diagnostics are shown separately so long paths do not distort the card layout.
 
 - **Codex CLI**: chat, image generation, and media analysis.
-- **Grok CLI**: chat/coding plus Grok Imagine image generation and experimental image-reference video generation when the local Imagine tooling is detected.
+- **Grok CLI**: chat/coding plus Grok Imagine image generation and experimental image-reference video generation only when `%USERPROFILE%\.grok\skills\imagine\SKILL.md` declares the matching local tools.
 - **Cursor Agent**: chat/coding through `cursor-agent --print --output-format json`.
 - **Local ASR**: local transcription; its detailed runtime/model editor remains below routing.
 - **OpenAI Videos**, **Grok/xAI API**, and **API Key Chat**: separately configured API drivers.
 
 The five selectors route only `/v1/relay/jobs/*`: chat, images, videos, transcription, and media analysis. Explicit `payload.model`, `payload.provider`, or `payload.backend` always overrides the saved default. Legacy `/v1/chat`, `/v1/images`, `/v1/transcribe`, `/v1/videos`, and `/v1/media/analyze` remain unchanged.
 
-The relay never silently falls back. If a selected/default model is unavailable, unauthenticated, disabled, or incompatible with the job type, the request fails with a configuration error naming that choice. An unavailable saved selection remains visible in Settings so it can be corrected.
+The relay never silently falls back. If an explicit or saved model/provider is unknown, unavailable, unauthenticated, disabled, or incompatible with the job type, the request fails with a configuration error naming that choice. An unavailable saved selection remains visible but disabled in Settings so it can be corrected.
 
 ## Development Commands
 
@@ -209,7 +209,7 @@ Open **Settings**, press **Refresh detection**, and read the provider card's saf
 
 ### Grok image or video is unavailable
 
-Grok CLI media requires its local Imagine tooling. Press **Refresh detection** after installing/updating Grok. Image/video jobs fail explicitly when the Imagine tools are unavailable, no media artifact is generated, the request is moderated, or the bounded Grok process times out. Grok video remains marked experimental until the installed tool succeeds.
+Grok CLI media requires `%USERPROFILE%\.grok\skills\imagine\SKILL.md` to declare the relevant Imagine tools. Press **Refresh detection** after installing/updating Grok. Image/video jobs fail explicitly when the Imagine tools are unavailable, no output artifact is generated, the request is moderated, or the bounded Grok process times out. Video remains experimental until a local video request succeeds; if Grok confirms that a video tool is unavailable, refresh detection and update Grok before selecting it again.
 
 ### Cursor Agent is unavailable
 
