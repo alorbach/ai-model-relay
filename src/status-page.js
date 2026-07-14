@@ -468,6 +468,49 @@ function statusPageHtml() {
 			border-color: var(--info);
 			outline: none;
 		}
+		.provider-media-tests {
+			display: grid;
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+			gap: 10px;
+		}
+		.provider-media-test {
+			display: grid;
+			gap: 9px;
+			min-width: 0;
+			padding: 12px;
+			background: var(--panel-2);
+			border: 1px solid var(--line);
+			border-radius: 8px;
+		}
+		.provider-media-test-heading {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			gap: 10px;
+			font-weight: 650;
+			overflow-wrap: anywhere;
+		}
+		.provider-media-test button {
+			justify-self: start;
+			appearance: none;
+			border: 1px solid var(--line);
+			border-radius: 6px;
+			background: var(--panel);
+			color: var(--text);
+			cursor: pointer;
+			font: inherit;
+			font-size: 12px;
+			padding: 8px 11px;
+		}
+		.provider-media-test button:hover,
+		.provider-media-test button:focus-visible {
+			border-color: var(--info);
+			outline: none;
+		}
+		.provider-media-test button:disabled {
+			cursor: progress;
+			opacity: 0.7;
+		}
 		.tabs {
 			display: flex;
 			align-items: center;
@@ -512,7 +555,8 @@ function statusPageHtml() {
 			.span-6 { grid-column: span 12; }
 			.feature-grid { grid-template-columns: 1fr; }
 			.settings-grid,
-			.model-settings-grid { grid-template-columns: 1fr; }
+			.model-settings-grid,
+			.provider-media-tests { grid-template-columns: 1fr; }
 			.table { display: block; overflow-x: auto; }
 		}
 	</style>
@@ -605,6 +649,11 @@ function statusPageHtml() {
 				</form>
 			</div>
 			<div class="panel span-12">
+				<div class="label">Provider media tests</div>
+				<p class="muted">Runs a real request against the selected ready provider. Provider usage or API charges may apply. You may attach a reference image to test image editing or image-guided video.</p>
+				<div class="provider-media-tests" id="providerMediaTests">Load routing settings to see ready image and video providers.</div>
+			</div>
+			<div class="panel span-12">
 				<div class="label">Local ASR Settings</div>
 				<form class="settings-editor" id="asrSettingsForm">
 					<div class="settings-grid" id="asrGeneralSettings"></div>
@@ -676,6 +725,7 @@ function statusPageHtml() {
 		const capabilitiesUrl = '/v1/capabilities';
 		const asrSettingsUrl = '/v1/asr/settings';
 		const relaySettingsUrl = '/v1/relay/settings';
+		const relayTestUrl = '/v1/relay/test';
 		const jobEventsUrl = '/v1/status/events';
 		let currentStatus = {};
 		let currentCapabilities = {};
@@ -705,6 +755,7 @@ function statusPageHtml() {
 			relaySettingsMessage: document.getElementById('relaySettingsMessage'),
 			refreshRelayProviders: document.getElementById('refreshRelayProviders'),
 			saveRelaySettings: document.getElementById('saveRelaySettings'),
+			providerMediaTests: document.getElementById('providerMediaTests'),
 			asrDetails: document.getElementById('asrDetails'),
 			asrSettingsForm: document.getElementById('asrSettingsForm'),
 			asrGeneralSettings: document.getElementById('asrGeneralSettings'),
@@ -1239,6 +1290,74 @@ function statusPageHtml() {
 				const options = unavailable.concat(compatible.map((model) => '<option value="' + escapeHtml(model.id) + '"' + optionAttr(model.id, current) + '>' + escapeHtml(model.id) + (model.experimental ? ' (experimental)' : '') + '</option>'));
 				return '<label class="field"><span>' + labels[jobType] + '</span><select data-relay-job="' + jobType + '">' + options.join('') + '</select></label>';
 			}).join('');
+			renderProviderMediaTests(models, backends);
+		}
+
+		function readyMediaModels(models, backends, jobType, type) {
+			const backendById = new Map(backends.map((backend) => [backend.id, backend]));
+			return models.filter((model) => {
+				const backend = backendById.get(model.backend);
+				return model.type === type && model.ready !== false && backend && backend.ready === true && Array.isArray(backend.job_types) && backend.job_types.includes(jobType);
+			});
+		}
+
+		function renderProviderMediaTests(models, backends) {
+			const tests = [
+				...readyMediaModels(models, backends, 'images', 'image').map((model) => ({ model, jobType: 'images', title: 'Image generation', prompt: 'Create a polished abstract AI Model Relay icon on a dark background.' })),
+				...readyMediaModels(models, backends, 'videos', 'video').map((model) => ({ model, jobType: 'videos', title: 'Video generation', prompt: 'Create a short, subtle cinematic motion from the supplied reference image.' })),
+			];
+			if (!tests.length) {
+				fields.providerMediaTests.innerHTML = '<div class="muted">No ready image or video providers are available for testing.</div>';
+				return;
+			}
+			fields.providerMediaTests.innerHTML = tests.map(({ model, jobType, title, prompt }) => {
+				const isVideo = jobType === 'videos';
+				const reference = '<label class="field"><span>Reference image (optional)</span><input type="file" accept="image/png,image/jpeg,image/webp" data-test-reference></label>';
+				return '<article class="provider-media-test" data-provider-media-test>' +
+					'<div class="provider-media-test-heading"><span>' + escapeHtml(title) + '</span><code>' + escapeHtml(model.id) + '</code></div>' +
+					'<label class="field"><span>Test prompt</span><input type="text" data-test-prompt value="' + escapeHtml(prompt) + '"></label>' +
+					reference +
+					'<button type="button" data-provider-test="' + jobType + '" data-model="' + escapeHtml(model.id) + '">Run ' + (isVideo ? 'video' : 'image') + ' test</button>' +
+					'<small class="muted" data-test-message>Ready to test ' + escapeHtml(model.id) + '.</small>' +
+				'</article>';
+			}).join('');
+		}
+
+		function fileAsDataUrl(file) {
+			return new Promise((resolve, reject) => {
+				const reader = new FileReader();
+				reader.onload = () => resolve(String(reader.result || ''));
+				reader.onerror = () => reject(new Error('The reference image could not be read.'));
+				reader.readAsDataURL(file);
+			});
+		}
+
+		async function runProviderMediaTest(button) {
+			const card = button.closest('[data-provider-media-test]');
+			const message = card && card.querySelector('[data-test-message]');
+			const jobType = button.dataset.providerTest;
+			const prompt = card && card.querySelector('[data-test-prompt]');
+			const reference = card && card.querySelector('[data-test-reference]');
+			const original = button.textContent;
+			try {
+				button.disabled = true;
+				button.textContent = 'Running...';
+				if (message) message.textContent = 'Starting provider test. Follow progress in Live.';
+				const body = { job_type: jobType, model: button.dataset.model || '', prompt: prompt ? prompt.value.trim() : '' };
+				const file = reference && reference.files && reference.files[0];
+				if (file) {
+					body.input_reference_data_url = await fileAsDataUrl(file);
+				}
+				const response = await fetch(relayTestUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+				const payload = await response.json().catch(() => ({}));
+				if (!response.ok || !payload.success) throw new Error(payload.message || 'Provider test failed.');
+				if (message) message.textContent = 'Completed. Open Live to inspect output and generated media.';
+			} catch (error) {
+				if (message) message.textContent = error.message || 'Provider test failed.';
+			} finally {
+				button.disabled = false;
+				button.textContent = original;
+			}
 		}
 
 		async function loadRelaySettings() {
@@ -1504,6 +1623,12 @@ function statusPageHtml() {
 		}
 
 		document.addEventListener('click', async (event) => {
+			const providerTest = event.target.closest('[data-provider-test]');
+			if (providerTest) {
+				event.preventDefault();
+				await runProviderMediaTest(providerTest);
+				return;
+			}
 			const imagePreview = event.target.closest('[data-image-preview]');
 			if (imagePreview) {
 				event.preventDefault();

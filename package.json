@@ -28,7 +28,8 @@
     },
     "files": [
       "src/**/*",
-      "assets/**/*",
+      "assets/favicon.ico",
+      "assets/favicon.png",
       "package.json"
     ],
     "asarUnpack": [

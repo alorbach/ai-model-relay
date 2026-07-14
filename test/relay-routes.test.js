@@ -178,6 +178,21 @@ function createMockSecurity() {
 		assert.strictEqual(relayImages.statusCode, 200);
 		assert.strictEqual(calls[calls.length - 1].route, 'relay-images');
 
+		const localImageTest = await requestJson(port, 'POST', '/v1/relay/test', { job_type: 'images', model: 'model-relay:codex:image', prompt: 'test image' });
+		assert.strictEqual(localImageTest.statusCode, 200);
+		assert.strictEqual(localImageTest.body.success, true);
+		assert.strictEqual(calls[calls.length - 1].route, 'relay-images');
+		assert.strictEqual(calls[calls.length - 1].payload.prompt, 'test image');
+
+		const localVideoTest = await requestJson(port, 'POST', '/v1/relay/test', { job_type: 'videos', model: 'model-relay:openai-videos:sora-2', prompt: 'test video', input_reference_data_url: 'data:image/png;base64,AA==' });
+		assert.strictEqual(localVideoTest.statusCode, 200);
+		assert.strictEqual(calls[calls.length - 1].route, 'relay-videos');
+		assert.strictEqual(calls[calls.length - 1].payload.input_reference_data_url, 'data:image/png;base64,AA==');
+
+		const missingTestModel = await requestJson(port, 'POST', '/v1/relay/test', { job_type: 'images', prompt: 'x' });
+		assert.strictEqual(missingTestModel.statusCode, 400);
+		assert.match(missingTestModel.body.message, /specific provider model/i);
+
 		const relayTranscribe = await requestJson(port, 'POST', '/v1/relay/jobs/transcribe', { ...body, payload: { model: 'model-relay:local-asr:auto' } });
 		assert.strictEqual(relayTranscribe.statusCode, 200);
 		assert.strictEqual(calls[calls.length - 1].route, 'relay-transcribe');

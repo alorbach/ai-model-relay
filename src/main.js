@@ -25,18 +25,15 @@ let bridgeState = 'Starting';
 let lastServerError = '';
 let cachedCodexStatus = { success: false, message: 'Checking Codex status...', details: {} };
 let jobState = { running_count: 0, queued_count: 0, max_concurrent: 2, active: [], queued: [], recent: [] };
-let trayIcons = {};
+let trayIconImage = null;
 let currentTrayIconKey = '';
-let trayAnimationTimer = null;
-let trayAnimationFrame = 0;
 
-const activeAnimationFrameCount = 6;
-
-function loadTrayIcon(name = 'idle') {
-	const assetName = name === 'idle' ? 'tray-icon.png' : `tray-${name}.png`;
+function loadTrayIcon() {
 	const candidates = [
-		path.join(__dirname, '..', 'assets', assetName),
-		path.join(__dirname, '..', 'assets', 'tray-icon.png'),
+		// The relay favicon is the single product icon for the application, tray,
+		// installer, and browser page.
+		path.join(__dirname, '..', 'assets', 'favicon.ico'),
+		path.join(__dirname, '..', 'assets', 'favicon.png'),
 	];
 	for (const iconPath of candidates) {
 		const icon = nativeImage.createFromPath(iconPath);
@@ -44,19 +41,14 @@ function loadTrayIcon(name = 'idle') {
 			return icon.resize({ width: 16, height: 16 });
 		}
 	}
-	const fallbackPath = path.join(__dirname, '..', 'assets', 'icon.ico');
-	const fallback = nativeImage.createFromPath(fallbackPath);
-	if (!fallback.isEmpty()) {
-		return fallback.resize({ width: 16, height: 16 });
-	}
 	return nativeImage.createFromDataURL('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAKElEQVR4AWMYNmzYf2RgYGBg+P//PwM1ARMDlcGogaMGjhowasCoAQB2pQMe98LPUQAAAABJRU5ErkJggg==');
 }
 
-function trayIcon(name) {
-	if (!trayIcons[name]) {
-		trayIcons[name] = loadTrayIcon(name);
+function trayIcon() {
+	if (!trayIconImage) {
+		trayIconImage = loadTrayIcon();
 	}
-	return trayIcons[name];
+	return trayIconImage;
 }
 
 function shortPath(value) {
@@ -389,67 +381,16 @@ function buildMenu() {
 	]);
 }
 
-function trayIconName() {
-	const failedState = /failed|unexpected/i.test(bridgeState);
-	if (failedState) {
-		return 'error';
-	}
-	const stoppedState = /stopped|starting|restart/i.test(bridgeState);
-	if (stoppedState) {
-		return 'stopped';
-	}
-	const recentFailure = (jobState.recent || []).some((job) => {
-		const finishedAt = Number(job.finished_at || 0);
-		return job.status === 'failed' && finishedAt && Date.now() - finishedAt < 120000;
-	});
-	if (recentFailure) {
-		return 'error';
-	}
-	if ((jobState.running_count || 0) > 0) {
-		return 'active';
-	}
-	if ((jobState.queued_count || 0) > 0) {
-		return 'queued';
-	}
-	return 'idle';
-}
-
-function setTrayIcon(name) {
-	if (!tray || name === currentTrayIconKey) {
+function setTrayIcon() {
+	if (!tray || currentTrayIconKey === 'favicon') {
 		return;
 	}
-	tray.setImage(trayIcon(name));
-	currentTrayIconKey = name;
-}
-
-function stopTrayAnimation() {
-	if (trayAnimationTimer) {
-		clearInterval(trayAnimationTimer);
-		trayAnimationTimer = null;
-	}
-	trayAnimationFrame = 0;
-}
-
-function animateTrayIcon() {
-	const frameName = `active-${trayAnimationFrame % activeAnimationFrameCount}`;
-	setTrayIcon(frameName);
-	trayAnimationFrame += 1;
+	tray.setImage(trayIcon());
+	currentTrayIconKey = 'favicon';
 }
 
 function updateTrayIcon() {
-	const iconName = trayIconName();
-	if (iconName === 'active') {
-		if (!trayAnimationTimer) {
-			animateTrayIcon();
-			trayAnimationTimer = setInterval(animateTrayIcon, 450);
-			if (typeof trayAnimationTimer.unref === 'function') {
-				trayAnimationTimer.unref();
-			}
-		}
-		return;
-	}
-	stopTrayAnimation();
-	setTrayIcon(iconName);
+	setTrayIcon();
 }
 
 function refreshTray() {
@@ -515,7 +456,6 @@ process.on('unhandledRejection', (reason) => {
 });
 
 app.on('before-quit', () => {
-	stopTrayAnimation();
 	if (serverProcess) {
 		try {
 			serverProcess.kill();

@@ -31,7 +31,7 @@ The maximum JSON request body is 12 MiB. This is intended to support normal chat
 
 ## `GET /status`
 
-Shows a local HTML status page for the same runtime data exposed by `GET /v1/status`. It renders immediately from cached diagnostics, then uses the local event stream for provider updates, active jobs, queued jobs, recent activity, and heartbeat state. The Settings tab loads its Local ASR and relay-routing settings only when first opened. The Live tab shows the selected provider/API, workflow/skill, bounded redacted stdin, bounded stdout/stderr/session output, and recent image thumbnails that open in an in-page overlay. The tray app opens this page when the tray icon is double-clicked.
+Shows a local HTML status page for the same runtime data exposed by `GET /v1/status`. It renders immediately from cached diagnostics, then uses the local event stream for provider updates, active jobs, queued jobs, recent activity, and heartbeat state. The Settings tab loads its Local ASR and relay-routing settings only when first opened. It also provides a real image or video test action for each ready, compatible provider model; a reference image is optional for either test and exercises image editing or image-guided video when supplied. The Live tab shows the selected provider/API, workflow/skill, bounded redacted stdin, bounded stdout/stderr/session output, and recent image thumbnails that open in an in-page overlay. The tray app opens this page when the tray icon is double-clicked.
 
 ## `GET /v1/status`
 
@@ -267,6 +267,21 @@ Starts one deduplicated provider-detection refresh and returns immediately with 
 }
 ```
 
+## `POST /v1/relay/test`
+
+Local status-page helper for deliberately testing one ready image or video provider. It only accepts localhost socket clients, requires an explicit model, uses the same strict relay resolution as `/v1/relay/jobs/*`, and never falls back to another provider. It is not a WordPress integration route and does not use a signed job envelope.
+
+```json
+{
+  "job_type": "videos",
+  "model": "model-relay:grok-cli:video",
+  "prompt": "Create a short motion from this image.",
+  "input_reference_data_url": "data:image/png;base64,..."
+}
+```
+
+`input_reference_data_url` is optional for image and video tests and is materialized only in the provider request workspace. When Grok video has no supplied image, the relay first generates a temporary source image in the request workspace, then runs image-to-video. The response uses the normal image/video job response shape, and the resulting job and any image preview are visible in the Live tab.
+
 ## `GET /v1/asr/settings`
 
 Returns Local ASR settings and cached or lightweight runtime metadata. This route does not require pairing because the bridge only accepts localhost clients.
@@ -448,7 +463,7 @@ Routing is selected from an explicit `payload.provider`, `payload.backend`, or m
 
 If the selected/default provider is unknown, disabled, unauthenticated, or does not support the requested operation, the route returns a configuration error naming the selected model and safe reason. It never falls back to another provider. `grok` and `grok-cli` select the local Grok CLI; `xai` and `xai-api` select the separately configured xAI API. This rule is limited to `/v1/relay/jobs/*`; legacy routes retain their existing behavior.
 
-`model-relay:grok-cli:auto` is Grok CLI chat/coding. `model-relay:grok-cli:image` runs the detected Imagine image workflow. `model-relay:grok-cli:video` runs the experimental Imagine image-to-video/reference-to-video workflow. Image references may be data URLs, `{ b64_json, mime_type }` objects, `referenced_image_paths`, or `frames`; the bridge validates and materializes them only in the per-request workspace. Grok video requires one image reference for image-to-video or multiple for reference-to-video. The bridge collects only artifacts from that workspace's output directory and fails explicitly if Imagine tooling, generated artifacts, moderation, or the bounded process run fails.
+`model-relay:grok-cli:auto` is Grok CLI chat/coding. `model-relay:grok-cli:image` runs the detected Imagine image workflow. `model-relay:grok-cli:video` runs the experimental Imagine image-to-video/reference-to-video workflow. Image references may be data URLs, `{ b64_json, mime_type }` objects, `referenced_image_paths`, or `frames`; the bridge validates and materializes them only in the per-request workspace. With one supplied image, Grok runs image-to-video; with multiple, it runs reference-to-video. Without one, the relay first generates a temporary source image and then runs image-to-video. The bridge collects only final artifacts from that workspace's output directory and fails explicitly if Imagine tooling, generated artifacts, moderation, or the bounded process run fails.
 
 Audio model IDs are configured by Local ASR settings. When a transcription request omits `payload.model` or uses `local-asr`, the bridge first uses `settings.default_model` if it is set. Otherwise `local-asr` auto-selects the best enabled ready local transcription model. Qwen3 ASR 1.7B is preferred when `Qwen/Qwen3-ASR-1.7B` and `Qwen/Qwen3-ForcedAligner-0.6B` are cached or explicitly downloadable and CUDA has enough free VRAM; `Qwen/Qwen3-ASR-0.6B` is the lower-VRAM Qwen ASR fallback. When `allow_qwen_cpu_offload` is enabled, explicit/default Qwen selections can use mixed GPU/CPU loading and report `device: "cuda+cpu"` with `device_map: "auto"`. The Qwen runner pre-chunks timestamped ASR locally using `qwen_chunk_seconds` and caps implausibly stretched single-word spans using `qwen_max_word_duration_seconds`, reporting any caps in provider metadata. The ForcedAligner is used only for Qwen timestamps and is not exposed as a normal audio model. If faster-whisper CUDA fails at execution time, the bridge retries on CPU/int8 when a CPU model path is available.
 

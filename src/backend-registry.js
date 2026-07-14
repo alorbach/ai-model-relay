@@ -357,17 +357,30 @@ function createGrokCliDriver(options = {}) {
 			fs.mkdirSync(inputDir); fs.mkdirSync(outputDir);
 			const references = materializeReferences(payload, inputDir);
 			if (references.error) return { success: false, category: 'validation', code: 'grok_reference_invalid', message: references.error };
-			if (kind === 'videos' && !references.paths.length) return { success: false, category: 'validation', code: 'grok_video_reference_required', message: 'Grok image-to-video requires at least one image reference.' };
-			const toolName = kind === 'images' ? (references.paths.length ? 'image_edit' : 'image_gen') : (references.paths.length > 1 ? 'reference_to_video' : 'image_to_video');
-			const instruction = `Use only the ${toolName} tool to create the requested ${kind === 'images' ? 'image' : 'video'}${references.paths.length ? ` using ${references.paths.join(', ')}` : ''}.`;
-			const prompt = `${instruction} Save final generated files only in ${outputDir}. Do not use shell tools, repository tools, or files outside ${workspace}. User request: ${String(payload.prompt || '').trim()}`;
-			const result = await runTextCommand(state.command, ['--single', prompt, '--output-format', 'json', '--cwd', workspace, '--tools', toolName, '--permission-mode', 'auto'], '', session, options);
+			const runImagineTool = async (toolName, targetDir, sourcePaths = [], outputLabel = kind === 'images' ? 'image' : 'video') => {
+				const instruction = `Use only the ${toolName} tool to create the requested ${outputLabel}${sourcePaths.length ? ` using ${sourcePaths.join(', ')}` : ''}.`;
+				const prompt = `${instruction} Save final generated files only in ${targetDir}. Do not use shell tools, repository tools, or files outside ${workspace}. User request: ${String(payload.prompt || '').trim()}`;
+				return runTextCommand(state.command, ['--single', prompt, '--output-format', 'json', '--cwd', workspace, '--tools', toolName, '--permission-mode', 'dontAsk', '--no-subagents', '--disable-web-search'], '', session, options);
+			};
+			let generatedSource = false;
+			if (kind === 'videos' && !references.paths.length) {
+				const sourceDir = path.join(outputDir, 'source');
+				fs.mkdirSync(sourceDir);
+				const sourceResult = await runImagineTool('image_gen', sourceDir, [], 'source image');
+				if (!sourceResult.success) return mediaFailure(sourceResult, 'image_gen');
+				const sourceFiles = collectOutputFiles(sourceDir, /\.(png|jpe?g|webp)$/i);
+				if (!sourceFiles.length) return { success: false, category: 'grok_media', code: 'grok_media_source_missing', message: 'Grok could not create a source image for the video request.' };
+				references.paths.push(sourceFiles[0]);
+				generatedSource = true;
+			}
+			const toolName = kind === 'images' ? (references.paths.length ? 'image_edit' : 'image_gen') : (references.paths.length > 1 && !generatedSource ? 'reference_to_video' : 'image_to_video');
+			const result = await runImagineTool(toolName, outputDir, references.paths);
 			if (!result.success) return mediaFailure(result, toolName);
 			const files = collectOutputFiles(outputDir, kind === 'images' ? /\.(png|jpe?g|webp)$/i : /\.(mp4|webm|mov)$/i);
 			if (!files.length) return { success: false, category: 'grok_media', code: 'grok_media_artifact_missing', message: `Grok completed without saving a ${kind === 'images' ? 'generated image' : 'generated video'} in the request workspace.` };
 			if (kind === 'images') return { success: true, response: { data: files.map((file) => ({ b64_json: fs.readFileSync(file).toString('base64'), mime_type: file.endsWith('.png') ? 'image/png' : file.endsWith('.webp') ? 'image/webp' : 'image/jpeg' })), provider_details: { provider: 'grok-cli', imagine_tool: toolName } } };
 			imagine = { ...imagine, video_verified: true };
-			const bytes = fs.readFileSync(files[0]); return { success: true, response: { b64_video: bytes.toString('base64'), mime_type: files[0].endsWith('.webm') ? 'video/webm' : 'video/mp4', provider_details: { provider: 'grok-cli', imagine_tool: toolName, experimental: true } } };
+			const bytes = fs.readFileSync(files[0]); return { success: true, response: { b64_video: bytes.toString('base64'), mime_type: files[0].endsWith('.webm') ? 'video/webm' : 'video/mp4', provider_details: { provider: 'grok-cli', imagine_tool: toolName, generated_source_image: generatedSource, experimental: true } } };
 		} finally { fs.rmSync(workspace, { recursive: true, force: true }); }
 	}
 	driver.images = (payload, session) => media('images', payload, session);

@@ -257,7 +257,7 @@ function modelFromPayload(payload, fallback) {
 
 function capabilitiesPayload(context) {
 	if (context.statusCache) {
-		return { ...context.statusCache.capabilities(), product: { name: PRODUCT_NAME, short_name: SHORT_NAME, legacy_name: LEGACY_PRODUCT_NAME }, bridge: { version: packageInfo.version }, frontend_interfaces: { legacy_v1: true, relay_v1: true, legacy_routes: ['/v1/status', '/v1/capabilities', '/v1/models', '/v1/chat', '/v1/images', '/v1/transcribe', '/v1/videos', '/v1/media/analyze'], relay_routes: ['/v1/relay/status', '/v1/relay/capabilities', '/v1/relay/models', '/v1/relay/jobs/chat', '/v1/relay/jobs/images', '/v1/relay/jobs/transcribe', '/v1/relay/jobs/videos', '/v1/relay/jobs/media/analyze'] } };
+		return { ...context.statusCache.capabilities(), product: { name: PRODUCT_NAME, short_name: SHORT_NAME, legacy_name: LEGACY_PRODUCT_NAME }, bridge: { version: packageInfo.version }, frontend_interfaces: { legacy_v1: true, relay_v1: true, legacy_routes: ['/v1/status', '/v1/capabilities', '/v1/models', '/v1/chat', '/v1/images', '/v1/transcribe', '/v1/videos', '/v1/media/analyze'], relay_routes: ['/v1/relay/status', '/v1/relay/capabilities', '/v1/relay/models', '/v1/relay/jobs/chat', '/v1/relay/jobs/images', '/v1/relay/jobs/transcribe', '/v1/relay/jobs/videos', '/v1/relay/jobs/media/analyze'], local_status_test_route: '/v1/relay/test' } };
 	}
 	const codexCapabilities = context.codex.capabilities ? context.codex.capabilities() : { success: true, bridge_features: {} };
 	return {
@@ -279,6 +279,7 @@ function capabilitiesPayload(context) {
 			relay_v1: true,
 			legacy_routes: ['/v1/status', '/v1/capabilities', '/v1/models', '/v1/chat', '/v1/images', '/v1/transcribe', '/v1/videos', '/v1/media/analyze'],
 			relay_routes: ['/v1/relay/status', '/v1/relay/capabilities', '/v1/relay/models', '/v1/relay/jobs/chat', '/v1/relay/jobs/images', '/v1/relay/jobs/transcribe', '/v1/relay/jobs/videos', '/v1/relay/jobs/media/analyze'],
+			local_status_test_route: '/v1/relay/test',
 		},
 		video: context.video.capabilities ? context.video.capabilities() : { enabled: false },
 		media_analysis: context.mediaAnalysis.capabilities ? context.mediaAnalysis.capabilities() : { enabled: false },
@@ -536,6 +537,45 @@ async function route(req, res, context) {
 		context.statusCache.refresh();
 		const current = context.statusCache.status();
 		sendJson(res, 202, { success: true, checking: true, refresh: current.refresh || null }, origin || pairedOriginForCors(req, bridgeSecurity));
+		return;
+	}
+	if (url.pathname === '/v1/relay/test') {
+		const jobType = String(body.job_type || '').trim();
+		const model = String(body.model || '').trim();
+		if (jobType !== 'images' && jobType !== 'videos') {
+			sendErrorJson(req, res, 400, { success: false, category: 'validation', message: 'Provider tests support only images or videos.' }, origin);
+			return;
+		}
+		if (!model) {
+			sendErrorJson(req, res, 400, { success: false, category: 'validation', message: 'Choose a specific provider model to run a media test.' }, origin);
+			return;
+		}
+		const requestedPayload = {
+			...(body.payload && typeof body.payload === 'object' ? body.payload : {}),
+			model,
+			prompt: String(body.prompt || '').trim(),
+		};
+		if (body.input_reference_data_url) {
+			requestedPayload.input_reference_data_url = String(body.input_reference_data_url);
+		}
+		const resolved = relayPayloadFor(context, jobType, requestedPayload);
+		if (resolved.error) {
+			sendErrorJson(req, res, 503, resolved.error, origin, { route: url.pathname });
+			return;
+		}
+		const display = jobDisplayMeta(context, jobType, resolved.payload, '', '', resolved.resolved);
+		const requestId = `status-test-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
+		const result = await jobManager.run({
+			requestId,
+			type: jobType,
+			model: modelFromPayload(resolved.payload, model),
+			...display,
+		}, (session) => context.backends.run(jobType, resolved.payload, session));
+		if (!result.success) {
+			sendErrorJson(req, res, errorStatusForResult(result), result, origin, { requestId, route: url.pathname });
+			return;
+		}
+		sendJson(res, 200, result, origin);
 		return;
 	}
 
