@@ -36,7 +36,7 @@
       "src/asr-qwen-runner.py"
     ],
     "win": {
-      "icon": "assets/icon.ico",
+      "icon": "assets/favicon.ico",
       "target": [
         "nsis",
         "zip"
@@ -45,7 +45,10 @@
     "nsis": {
       "oneClick": false,
       "perMachine": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "include": "build/installer.nsh",
+      "installerIcon": "assets/favicon.ico",
+      "uninstallerIcon": "assets/favicon.ico"
     }
   },
   "homepage": "https://github.com/alorbach/ai-model-relay#readme",
