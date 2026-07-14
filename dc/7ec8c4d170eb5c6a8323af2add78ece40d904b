@@ -1,0 +1,51 @@
+package.json
+  s_a24a52784f4f7d::t_79478ebaef477d 31-32
+docs/local-bridge-api.md
+  s_a24a52784f4f7d::t_343c909c884da3 270-282
+  s_a24a52784f4f7d::t_bc2022b4993df1 466
+  s_a24a52784f4f7d::t_018fb207b53981 34,283
+  s_e50c5764ef22f2::t_e5a923f5d48269 284
+src/backend-registry.js
+  s_a24a52784f4f7d::t_5eaf28147c022b 360-361,369
+  s_a24a52784f4f7d::t_18f9aea200d21b 362-368,370-377,383
+src/main.js
+  s_a24a52784f4f7d::t_79478ebaef477d 28,47-49,51,384-385,388-389,393
+  s_a24a52784f4f7d::t_9d7060e642b68b 31,33-34
+  s_a24a52784f4f7d::t_0dfd1c35fa776e 35-36
+src/status-page.js
+  s_a24a52784f4f7d::t_18f9aea200d21b 653,1347-1348
+  s_a24a52784f4f7d::t_3d071b93f1de92 1315
+  s_a24a52784f4f7d::t_fe2d8460870ac6 471-513,558-559,651-652,654-655,728,758,1293-1314,1316-1346,1349-1360
+  s_a24a52784f4f7d::t_7337fa5a677172 1626-1631
+scripts/generate-icons.js
+  s_a24a52784f4f7d::t_f26966b2b753f7 6,8-9,12
+src/server.js
+  s_a24a52784f4f7d::t_0dfd1c35fa776e 542-580
+  s_a24a52784f4f7d::t_7337fa5a677172 260,282
+test/relay-routes.test.js
+  s_a24a52784f4f7d::t_dbabbadcdc69d2 181-195
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.13",
+  "base_commit_sha": "dc7ec8c4d170eb5c6a8323af2add78ece40d904b",
+  "prompts": {},
+  "sessions": {
+    "s_a24a52784f4f7d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f532f-e127-77d2-af95-cf138999bbde",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_e50c5764ef22f2": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5fc6-57ad-75c2-8f6a-b059b58583de",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
