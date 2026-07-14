@@ -550,6 +550,7 @@ async function route(req, res, context) {
 			sendErrorJson(req, res, 400, { success: false, category: 'validation', message: 'Choose a specific provider model to run a media test.' }, origin);
 			return;
 		}
+		await context.statusCache.refresh();
 		const requestedPayload = {
 			...(body.payload && typeof body.payload === 'object' ? body.payload : {}),
 			model,
@@ -571,6 +572,7 @@ async function route(req, res, context) {
 			model: modelFromPayload(resolved.payload, model),
 			...display,
 		}, (session) => context.backends.run(jobType, resolved.payload, session));
+		context.statusCache.sync();
 		if (!result.success) {
 			sendErrorJson(req, res, errorStatusForResult(result), result, origin, { requestId, route: url.pathname });
 			return;

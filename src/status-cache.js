@@ -8,6 +8,17 @@ function createStatusCache(context, onUpdate = () => {}) {
 	const initialCodexCapabilities = initialCodexDriver && initialCodexDriver.capabilities ? initialCodexDriver.capabilities() : {};
 	let status = { success: false, message: 'Checking local model providers in background.', details: { checking: true }, bridge: {}, asr: context.codex.asrStatus ? context.codex.asrStatus() : {}, jobs: context.jobManager.snapshot(), checking: true, last_checked: null, refresh: refreshState };
 	let capabilities = { success: true, codex: initialCodexCapabilities.details || { checking: true }, asr: context.codex.asrStatus ? context.codex.asrStatus() : {}, features: initialCodexCapabilities.features || {}, backends: context.backends.capabilities(), video: context.video.capabilities ? context.video.capabilities() : { enabled: false }, media_analysis: context.mediaAnalysis.capabilities ? context.mediaAnalysis.capabilities() : { enabled: false }, checking: true, last_checked: null, refresh: refreshState };
+	function sync() {
+		capabilities = {
+			...capabilities,
+			asr: context.codex.asrStatus ? context.codex.asrStatus() : {},
+			backends: context.backends.capabilities(),
+			video: context.video.capabilities ? context.video.capabilities() : { enabled: false },
+			media_analysis: context.mediaAnalysis.capabilities ? context.mediaAnalysis.capabilities() : { enabled: false },
+		};
+		onUpdate(status, capabilities);
+		return capabilities;
+	}
 	function refresh() {
 		if (refreshing) return refreshing;
 		refreshState = { active: true, id: ++refreshId, started_at: new Date().toISOString(), completed_at: null, error: null };
@@ -25,7 +36,7 @@ function createStatusCache(context, onUpdate = () => {}) {
 		}).catch((error) => { const now = new Date().toISOString(); refreshState = { ...refreshState, active: false, completed_at: now, error: error.message || 'Provider refresh failed.' }; status = { ...status, checking: false, message: refreshState.error, refresh: refreshState }; capabilities = { ...capabilities, checking: false, refresh: refreshState }; onUpdate(status, capabilities); }).finally(() => { refreshing = null; });
 		return refreshing;
 	}
-	return { capabilities: () => capabilities, refresh, status: () => ({ ...status, jobs: context.jobManager.snapshot() }) };
+	return { capabilities: () => capabilities, refresh, sync, status: () => ({ ...status, jobs: context.jobManager.snapshot() }) };
 }
 
 module.exports = { createStatusCache };

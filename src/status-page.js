@@ -1355,6 +1355,7 @@ function statusPageHtml() {
 			} catch (error) {
 				if (message) message.textContent = error.message || 'Provider test failed.';
 			} finally {
+				await Promise.all([refresh().catch(() => {}), loadRelaySettings().catch(() => {})]);
 				button.disabled = false;
 				button.textContent = original;
 			}

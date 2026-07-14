@@ -82,6 +82,8 @@ const {
 
 	const codexResult = await registry.run('chat', { model: 'model-relay:codex:gpt-5', messages: [{ role: 'user', content: 'hi' }] });
 	assert.strictEqual(codexResult.response.model, 'codex-local:gpt-5');
+	const codexAutoResult = await registry.run('chat', { model: 'model-relay:codex:auto', messages: [{ role: 'user', content: 'hi' }] });
+	assert.strictEqual(codexAutoResult.response.model, 'codex-local:auto');
 
 	const asrResult = await registry.run('transcribe', { model: 'model-relay:local-asr:qwen3-asr-0.6b' });
 	assert.strictEqual(asrResult.response.model, 'local-asr:qwen3-asr-0.6b');

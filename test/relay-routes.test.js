@@ -58,6 +58,7 @@ function createMockSecurity() {
 
 (async () => {
 	const calls = [];
+	let backendRefreshes = 0;
 	const codex = {
 		checkStatus: () => ({ success: true, message: 'ready', details: {} }),
 		models: () => ({ success: true, models: { text: ['codex-local:auto'], image: ['codex-local:image'], audio: ['local-asr'] } }),
@@ -77,6 +78,7 @@ function createMockSecurity() {
 		},
 	};
 	const backends = {
+		refresh: async () => { backendRefreshes += 1; },
 		capabilities: () => [
 			{ id: 'codex-cli', label: 'Codex CLI', ready: true },
 			{ id: 'xai-api', label: 'Grok / xAI API', configured: true, ready: true },
@@ -178,9 +180,11 @@ function createMockSecurity() {
 		assert.strictEqual(relayImages.statusCode, 200);
 		assert.strictEqual(calls[calls.length - 1].route, 'relay-images');
 
+		const refreshesBeforeImageTest = backendRefreshes;
 		const localImageTest = await requestJson(port, 'POST', '/v1/relay/test', { job_type: 'images', model: 'model-relay:codex:image', prompt: 'test image' });
 		assert.strictEqual(localImageTest.statusCode, 200);
 		assert.strictEqual(localImageTest.body.success, true);
+		assert.ok(backendRefreshes > refreshesBeforeImageTest, 'provider test should refresh detection before model preflight');
 		assert.strictEqual(calls[calls.length - 1].route, 'relay-images');
 		assert.strictEqual(calls[calls.length - 1].payload.prompt, 'test image');
 

@@ -315,6 +315,24 @@ function createGrokCliDriver(options = {}) {
 		return found;
 	}
 
+	function importGrokSessionArtifacts(resultText, workspace, targetDir, extensions) {
+		let payload;
+		try { payload = JSON.parse(String(resultText || '')); } catch (error) { return []; }
+		const sessionId = String(payload && payload.sessionId || '');
+		if (!/^[0-9a-f-]{36}$/i.test(sessionId)) return [];
+		const sessionsRoot = path.resolve(options.grokSessionsRoot || path.join(os.homedir(), '.grok', 'sessions'));
+		const sessionDir = path.resolve(sessionsRoot, encodeURIComponent(path.resolve(workspace)), sessionId);
+		if (sessionDir !== sessionsRoot && !sessionDir.startsWith(`${sessionsRoot}${path.sep}`)) return [];
+		let files = [];
+		try { files = collectOutputFiles(sessionDir, extensions); } catch (error) { return []; }
+		return files.map((source, index) => {
+			const extension = path.extname(source).toLowerCase();
+			const target = path.join(targetDir, `generated-${index + 1}${extension}`);
+			fs.copyFileSync(source, target);
+			return target;
+		});
+	}
+
 	function mediaFailure(result, toolName) {
 		const message = String(result && result.message || 'Grok Imagine request failed.');
 		if (/moderation|safety policy|content policy|blocked/i.test(message)) return { success: false, category: 'moderation', code: 'grok_media_moderated', message: 'Grok Imagine blocked this media request.' };
@@ -358,9 +376,11 @@ function createGrokCliDriver(options = {}) {
 			const references = materializeReferences(payload, inputDir);
 			if (references.error) return { success: false, category: 'validation', code: 'grok_reference_invalid', message: references.error };
 			const runImagineTool = async (toolName, targetDir, sourcePaths = [], outputLabel = kind === 'images' ? 'image' : 'video') => {
-				const instruction = `Use only the ${toolName} tool to create the requested ${outputLabel}${sourcePaths.length ? ` using ${sourcePaths.join(', ')}` : ''}.`;
-				const prompt = `${instruction} Save final generated files only in ${targetDir}. Do not use shell tools, repository tools, or files outside ${workspace}. User request: ${String(payload.prompt || '').trim()}`;
-				return runTextCommand(state.command, ['--single', prompt, '--output-format', 'json', '--cwd', workspace, '--tools', toolName, '--permission-mode', 'dontAsk', '--no-subagents', '--disable-web-search'], '', session, options);
+				const instruction = `Call the ${toolName} tool exactly once to create the requested ${outputLabel}${sourcePaths.length ? ` using ${sourcePaths.join(', ')}` : ''}.`;
+				const prompt = `${instruction} The tool saves the generated file in its managed Grok session directory; do not search for, copy, or move it. Do not call any other tool. User request: ${String(payload.prompt || '').trim()}`;
+				const result = await runTextCommand(state.command, ['--single', prompt, '--output-format', 'json', '--cwd', workspace, '--disallowed-tools', 'run_terminal_cmd', '--permission-mode', 'dontAsk', '--no-subagents', '--disable-web-search', '--max-turns', '2'], '', session, options);
+				if (result.success) importGrokSessionArtifacts(result.text, workspace, targetDir, outputLabel === 'video' ? /\.(mp4|webm|mov)$/i : /\.(png|jpe?g|webp)$/i);
+				return result;
 			};
 			let generatedSource = false;
 			if (kind === 'videos' && !references.paths.length) {
