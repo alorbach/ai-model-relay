@@ -1044,6 +1044,15 @@ function statusPageHtml() {
 			output.textContent = next;
 		}
 
+		function providerSessionLabel(job, label, channel) {
+			if (text(job && job.provider, '') !== 'grok-cli') {
+				return label;
+			}
+			return channel === 'input'
+				? label.replace(/stdin/i, 'Grok CLI request')
+				: label.replace(/Session Output/i, 'Grok CLI stdout / stderr');
+		}
+
 		function renderJobTable(tbody, jobs, options) {
 			const visibleJobs = options.filter ? jobs.filter(options.filter) : jobs;
 			const colspan = Number(options.colspan || 5);
@@ -1090,10 +1099,10 @@ function statusPageHtml() {
 						outputRow.dataset.outputSignature = signature;
 						let blocks = preview;
 						if (job.session_input) {
-							blocks += sessionOutputBlock(options.inputLabel, { live: !!options.live, key: key + ':input' });
+							blocks += sessionOutputBlock(providerSessionLabel(job, options.inputLabel, 'input'), { live: !!options.live, key: key + ':input' });
 						}
 						if (job.session_output) {
-							blocks += sessionOutputBlock(options.outputLabel, {
+							blocks += sessionOutputBlock(providerSessionLabel(job, options.outputLabel, 'output'), {
 								live: !!options.live,
 								key: key + ':output',
 							});

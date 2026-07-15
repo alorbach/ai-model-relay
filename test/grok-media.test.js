@@ -5,7 +5,7 @@ const { EventEmitter } = require('events');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { createGrokCliDriver } = require('../src/backend-registry');
+const { createGrokCliDriver, GROK_MEDIA_TIMEOUT_MS } = require('../src/backend-registry');
 
 function toolForArgs(args) {
 	const prompt = args[args.indexOf('--single') + 1] || '';
@@ -36,6 +36,10 @@ function createFakeGrok(options = {}) {
 			if (options.unsupportedTool === tool) {
 				child.stderr.emit('data', 'unknown tool'); child.emit('close', 1); return;
 			}
+			if (options.upstreamTimeout === tool) {
+				child.stdout.emit('data', JSON.stringify({ text: 'Video generation did not complete within 300s.', requestId: 'upstream-timeout-id' })); child.emit('close', 0); return;
+			}
+			if (options.hangTool === tool) return;
 			const workspace = args[args.indexOf('--cwd') + 1];
 			const sessionId = '11111111-2222-4333-8444-555555555555';
 			const output = path.join(sessionsRoot, encodeURIComponent(path.resolve(workspace)), sessionId, tool.includes('video') ? 'videos' : 'images');
@@ -47,10 +51,11 @@ function createFakeGrok(options = {}) {
 	};
 	const skill = path.join(root, 'SKILL.md');
 	fs.writeFileSync(skill, '---\nname: imagine\n---\nimage_gen image_edit image_to_video reference_to_video');
-	return { root, calls, driver: createGrokCliDriver({ candidates: ['grok-test'], lookup: () => ({ status: 0, stdout: 'grok-test\n' }), spawn, imagineSkillPath: skill, grokSessionsRoot: sessionsRoot, timeoutMs: 100 }) };
+	return { root, calls, driver: createGrokCliDriver({ candidates: ['grok-test'], lookup: () => ({ status: 0, stdout: 'grok-test\n' }), spawn, imagineSkillPath: skill, grokSessionsRoot: sessionsRoot, timeoutMs: 100, mediaTimeoutMs: options.mediaTimeoutMs }) };
 }
 
 (async () => {
+	assert.strictEqual(GROK_MEDIA_TIMEOUT_MS, 450000);
 	const fixture = createFakeGrok();
 	try {
 		await fixture.driver.refresh();
@@ -74,6 +79,16 @@ function createFakeGrok(options = {}) {
 		assert.strictEqual(oneReference.response.provider_details.generated_source_image, false);
 		assert.ok(fixture.calls.some((args) => toolForArgs(args) === 'image_to_video'));
 
+		const sessionInput = [];
+		const sessionOutput = [];
+		const visibleStreams = await fixture.driver.videos({ prompt: 'animate', input_reference: `data:image/png;base64,${Buffer.from('stream frame').toString('base64')}` }, {
+			appendSessionInput: (stream, chunk) => sessionInput.push([stream, chunk]),
+			appendSessionOutput: (stream, chunk) => sessionOutput.push([stream, chunk]),
+		});
+		assert.strictEqual(visibleStreams.success, true);
+		assert.ok(sessionInput.some(([stream, chunk]) => stream === 'grok cli request' && chunk.includes('Prompt (passed with --single; stdin is empty):')));
+		assert.ok(sessionOutput.some(([stream, chunk]) => stream === 'stdout' && chunk.includes('sessionId')));
+
 		const first = path.join(fixture.root, 'one.png');
 		const second = path.join(fixture.root, 'two.jpg');
 		fs.writeFileSync(first, 'one'); fs.writeFileSync(second, 'two');
@@ -87,6 +102,7 @@ function createFakeGrok(options = {}) {
 		assert.ok(mediaArgs.includes('--no-subagents'));
 		assert.ok(mediaArgs.includes('--disable-web-search'));
 		assert.strictEqual(mediaArgs[mediaArgs.indexOf('--max-turns') + 1], '2');
+		assert.strictEqual(fixture.driver.capabilities().imagine.video_verified, true);
 	} finally {
 		fs.rmSync(fixture.root, { recursive: true, force: true });
 	}
@@ -100,6 +116,17 @@ function createFakeGrok(options = {}) {
 		fs.rmSync(unsupported.root, { recursive: true, force: true });
 	}
 
+	const upstreamTimeout = createFakeGrok({ upstreamTimeout: 'image_to_video' });
+	try {
+		const result = await upstreamTimeout.driver.videos({ prompt: 'animate', input_reference: `data:image/png;base64,${Buffer.from('frame').toString('base64')}` });
+		assert.strictEqual(result.code, 'grok_media_timeout');
+		assert.strictEqual(result.message, 'Grok Imagine image_to_video timed out after 300 seconds. Request ID: upstream-timeout-id.');
+		assert.strictEqual(result.details.upstream_timeout_seconds, 300);
+		assert.strictEqual(result.details.upstream_request_id, 'upstream-timeout-id');
+	} finally {
+		fs.rmSync(upstreamTimeout.root, { recursive: true, force: true });
+	}
+
 	const malformed = createFakeGrok();
 	try {
 		fs.writeFileSync(path.join(malformed.root, 'SKILL.md'), 'name: not-imagine');
@@ -107,6 +134,16 @@ function createFakeGrok(options = {}) {
 		assert.strictEqual(malformed.driver.capabilities().features.images, false);
 	} finally {
 		fs.rmSync(malformed.root, { recursive: true, force: true });
+	}
+
+	const timedOut = createFakeGrok({ hangTool: 'image_to_video', mediaTimeoutMs: 10 });
+	try {
+		const result = await timedOut.driver.videos({ prompt: 'animate', input_reference: `data:image/png;base64,${Buffer.from('frame').toString('base64')}` });
+		assert.strictEqual(result.code, 'grok_media_timeout');
+		assert.strictEqual(result.message, 'CLI request timed out after 1 second.');
+		assert.strictEqual(result.details.timeout_ms, 10);
+	} finally {
+		fs.rmSync(timedOut.root, { recursive: true, force: true });
 	}
 
 	console.log('grok media tests passed');

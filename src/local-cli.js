@@ -94,7 +94,9 @@ function runTextCommand(command, args, input, session = {}, options = {}) {
 		const err = createBoundedCollector({ maxChars: 1024 * 1024 });
 		let child; let settled = false;
 		try { const invocation = commandAndArgs(command, args); child = (options.spawn || spawn)(invocation.command, invocation.args, { shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] }); } catch (error) { resolve({ success: false, category: 'configuration', code: 'cli_spawn_failed', message: safeDiagnostic(error.message) }); return; }
-		const timer = setTimeout(() => { if (!settled) { child.kill(); settled = true; resolve({ success: false, category: 'timeout', code: 'cli_timeout', message: 'CLI request timed out.' }); } }, Number(options.timeoutMs || 600000));
+		const timeoutMs = Number(options.timeoutMs || 600000);
+		const timeoutSeconds = Math.ceil(timeoutMs / 1000);
+		const timer = setTimeout(() => { if (!settled) { settled = true; child.kill(); resolve({ success: false, category: 'timeout', code: 'cli_timeout', message: `CLI request timed out after ${timeoutSeconds} second${timeoutSeconds === 1 ? '' : 's'}.`, details: { timeout_ms: timeoutMs, stdout: out.value(), stderr: err.value() } }); } }, timeoutMs);
 		child.stdout.on('data', (chunk) => { out.append(chunk); session.appendSessionOutput && session.appendSessionOutput('stdout', String(chunk)); });
 		child.stderr.on('data', (chunk) => { err.append(chunk); session.appendSessionOutput && session.appendSessionOutput('stderr', String(chunk)); });
 		child.on('error', (error) => { if (!settled) { settled = true; clearTimeout(timer); resolve({ success: false, category: 'configuration', code: 'cli_spawn_failed', message: safeDiagnostic(error.message) }); } });

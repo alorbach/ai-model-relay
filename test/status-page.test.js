@@ -18,5 +18,7 @@ assert.ok(html.includes('Reference image (optional)'));
 assert.ok(html.includes('test image editing or image-guided video'));
 assert.ok(html.includes('<video src="'));
 assert.ok(html.includes('controls preload="metadata" playsinline'));
+assert.ok(html.includes('Grok CLI request'));
+assert.ok(html.includes('Grok CLI stdout / stderr'));
 
 console.log('status page tests passed');

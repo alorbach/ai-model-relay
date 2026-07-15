@@ -8,6 +8,7 @@ const { createBoundedCollector } = require('./diagnostics');
 const { detectCli, detectCliAsync, messagesToText, runTextCommand } = require('./local-cli');
 
 const RELAY_MODEL_PREFIX = 'model-relay';
+const GROK_MEDIA_TIMEOUT_MS = 450000;
 
 function truthy(value) {
 	return /^(1|true|yes|on)$/i.test(String(value || ''));
@@ -235,6 +236,8 @@ function createNamedCliDriver(definition, options = {}) {
 
 function createGrokCliDriver(options = {}) {
 	const definition = { id: 'grok-cli', label: 'Grok CLI', candidates: [process.env.AI_MODEL_RELAY_GROK_BINARY, 'grok'], versionArgs: ['--version'], authArgs: ['models'], jobTypes: ['chat'], models: ['auto'], requestArgs: (model, prompt) => ['--single', prompt, '--output-format', 'json', ...(model !== 'auto' ? ['--model', model] : [])] };
+	const configuredMediaTimeout = Number(options.mediaTimeoutMs || process.env.AI_MODEL_RELAY_GROK_MEDIA_TIMEOUT_MS || GROK_MEDIA_TIMEOUT_MS);
+	const mediaTimeoutMs = Number.isFinite(configuredMediaTimeout) && configuredMediaTimeout > 0 ? configuredMediaTimeout : GROK_MEDIA_TIMEOUT_MS;
 	const driver = createNamedCliDriver(definition, options);
 	const baseCapabilities = driver.capabilities;
 	const baseModels = driver.models;
@@ -333,8 +336,27 @@ function createGrokCliDriver(options = {}) {
 		});
 	}
 
+	function upstreamGrokMediaTimeout(resultText, toolName) {
+		let payload;
+		try { payload = JSON.parse(String(resultText || '')); } catch (error) { return null; }
+		const responseText = String(payload && payload.text || '');
+		const timeout = responseText.match(/(?:timed out after|did not complete within)\s*(\d+)\s*(?:s|seconds?)\b/i);
+		if (!timeout) return null;
+		const seconds = Number(timeout[1]);
+		if (!Number.isFinite(seconds) || seconds <= 0) return null;
+		const requestId = String(payload && payload.requestId || '').trim();
+		return {
+			success: false,
+			category: 'timeout',
+			code: 'grok_media_timeout',
+			message: `Grok Imagine ${toolName} timed out after ${seconds} seconds.${requestId ? ` Request ID: ${requestId}.` : ''}`,
+			details: { upstream_timeout_seconds: seconds, upstream_request_id: requestId },
+		};
+	}
+
 	function mediaFailure(result, toolName) {
 		const message = String(result && result.message || 'Grok Imagine request failed.');
+		if (result && result.code === 'grok_media_timeout') return result;
 		if (/moderation|safety policy|content policy|blocked/i.test(message)) return { success: false, category: 'moderation', code: 'grok_media_moderated', message: 'Grok Imagine blocked this media request.' };
 		if (/unknown tool|unsupported tool|tool .*not found|not available|unrecognized/i.test(message)) {
 			if (toolName === 'image_to_video' || toolName === 'reference_to_video') { unavailableTools.videos = true; imagine = { ...imagine, videos: false, diagnostic: 'Grok Imagine video tools are unavailable.' }; }
@@ -378,8 +400,15 @@ function createGrokCliDriver(options = {}) {
 			const runImagineTool = async (toolName, targetDir, sourcePaths = [], outputLabel = kind === 'images' ? 'image' : 'video') => {
 				const instruction = `Call the ${toolName} tool exactly once to create the requested ${outputLabel}${sourcePaths.length ? ` using ${sourcePaths.join(', ')}` : ''}.`;
 				const prompt = `${instruction} The tool saves the generated file in its managed Grok session directory; do not search for, copy, or move it. Do not call any other tool. User request: ${String(payload.prompt || '').trim()}`;
-				const result = await runTextCommand(state.command, ['--single', prompt, '--output-format', 'json', '--cwd', workspace, '--disallowed-tools', 'run_terminal_cmd', '--permission-mode', 'dontAsk', '--no-subagents', '--disable-web-search', '--max-turns', '2'], '', session, options);
-				if (result.success) importGrokSessionArtifacts(result.text, workspace, targetDir, outputLabel === 'video' ? /\.(mp4|webm|mov)$/i : /\.(png|jpe?g|webp)$/i);
+				if (session.appendSessionInput) {
+					session.appendSessionInput('grok cli request', `Tool: ${toolName}\nWorkspace: ${workspace}\n\nPrompt (passed with --single; stdin is empty):\n${prompt}`);
+				}
+				const result = await runTextCommand(state.command, ['--single', prompt, '--output-format', 'json', '--cwd', workspace, '--disallowed-tools', 'run_terminal_cmd', '--permission-mode', 'dontAsk', '--no-subagents', '--disable-web-search', '--max-turns', '2'], '', session, { ...options, timeoutMs: mediaTimeoutMs });
+				if (result.success) {
+					const upstreamTimeout = upstreamGrokMediaTimeout(result.text, toolName);
+					if (upstreamTimeout) return upstreamTimeout;
+					importGrokSessionArtifacts(result.text, workspace, targetDir, outputLabel === 'video' ? /\.(mp4|webm|mov)$/i : /\.(png|jpe?g|webp)$/i);
+				}
 				return result;
 			};
 			let generatedSource = false;
@@ -761,5 +790,6 @@ module.exports = {
 	createLocalAsrDriver,
 	createOpenAiVideosDriver,
 	createXaiApiDriver,
+	GROK_MEDIA_TIMEOUT_MS,
 	providerFromPayload,
 };
