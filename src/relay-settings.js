@@ -8,6 +8,7 @@ const DEFAULTS = {
 	videos: 'model-relay:openai-videos:sora-2',
 	transcribe: 'model-relay:local-asr:auto',
 	'media.analyze': 'model-relay:codex:auto',
+	'music.analyze': 'model-relay:music-analysis:core',
 };
 
 function normalizeDefaults(value = {}) {

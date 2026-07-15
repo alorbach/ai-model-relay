@@ -91,7 +91,7 @@ jobs:
           node --check scripts/generate-icons.js
 
       - name: Run tests
-        run: npm test
+        run: npm run test:release
 
       - name: Build Windows installer and portable ZIP
         run: npm run dist:win

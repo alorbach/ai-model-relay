@@ -22,6 +22,7 @@ function createQwenSnapshot(snapshot) {
 	assert.strictEqual(packagedRunnerPath, path.join('C:', 'Users', 'AL', 'AppData', 'Local', 'Programs', 'AI Model Relay', 'resources', 'app.asar.unpacked', 'src', 'asr-runner.py'));
 	assert.ok(packageInfo.build.asarUnpack.includes('src/asr-runner.py'));
 	assert.ok(packageInfo.build.asarUnpack.includes('src/asr-qwen-runner.py'));
+	assert.ok(packageInfo.build.asarUnpack.includes('src/music-analysis-runner.py'));
 
 	const config = asr.normalizeSettings({
 		allow_model_downloads: false,

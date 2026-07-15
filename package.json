@@ -9,7 +9,8 @@
     "start": "electron .",
     "serve": "node src/server.js",
     "example:http": "node examples/http-app/server.js",
-    "test": "node test/security.test.js && node test/job-manager.test.js && node test/diagnostics.test.js && node test/local-cli.test.js && node test/backend-registry.test.js && node test/grok-media.test.js && node test/status-page.test.js && node test/codex-runner.test.js && node test/codex-prompt.test.js && node test/image-attachments.test.js && node test/asr.test.js && node test/server-jobs.test.js && node test/relay-routes.test.js && node test/transcribe.test.js && node test/multimodal.test.js",
+    "test": "node test/security.test.js && node test/job-manager.test.js && node test/diagnostics.test.js && node test/local-cli.test.js && node test/backend-registry.test.js && node test/grok-media.test.js && node test/status-page.test.js && node test/codex-runner.test.js && node test/codex-prompt.test.js && node test/image-attachments.test.js && node test/asr.test.js && node test/music-analysis.test.js && node test/server-jobs.test.js && node test/relay-routes.test.js && node test/transcribe.test.js && node test/multimodal.test.js",
+    "test:release": "node test/security.test.js && node test/job-manager.test.js && node test/diagnostics.test.js && node test/local-cli.test.js && node test/backend-registry.test.js && node test/grok-media.test.js && node test/status-page.test.js && node test/codex-runner.test.js && node test/codex-prompt.test.js && node test/image-attachments.test.js && node test/asr.test.js && node test/music-analysis.test.js && node test/relay-routes.test.js && node test/transcribe.test.js && node test/multimodal.test.js",
     "smoke": "node src/server.js --check",
     "dist:win": "npm run icons && node scripts/build-win.js"
   },
@@ -34,7 +35,8 @@
     ],
     "asarUnpack": [
       "src/asr-runner.py",
-      "src/asr-qwen-runner.py"
+      "src/asr-qwen-runner.py",
+      "src/music-analysis-runner.py"
     ],
     "win": {
       "icon": "assets/favicon.ico",

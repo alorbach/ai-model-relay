@@ -86,8 +86,10 @@ function createMockSecurity() {
 		models: () => [
 			{ id: 'model-relay:codex:auto', legacy_id: 'codex-local:auto', type: 'text', backend: 'codex-cli' },
 			{ id: 'model-relay:xai:grok-4.3', type: 'text', backend: 'xai-api' },
+			{ id: 'model-relay:xai:stt', type: 'audio', backend: 'xai-api' },
+			{ id: 'model-relay:music-analysis:core', type: 'audio', backend: 'music-analysis' },
 		],
-		getDriver: () => ({ id: 'codex-cli', job_types: ['chat', 'images', 'videos', 'transcribe', 'media.analyze'], checkStatus: () => ({ success: true, message: 'ready', details: {} }), capabilities: () => ({ ready: true }) }),
+		getDriver: () => ({ id: 'codex-cli', job_types: ['chat', 'images', 'videos', 'transcribe', 'media.analyze', 'music.analyze'], checkStatus: () => ({ success: true, message: 'ready', details: {} }), capabilities: () => ({ ready: true }) }),
 		run: (type, payload) => {
 			calls.push({ route: `relay-${type}`, payload });
 			return Promise.resolve({
@@ -118,8 +120,15 @@ function createMockSecurity() {
 			capabilities: () => ({ enabled: true }),
 			analyze: () => Promise.resolve({ success: true, response: { text: 'media ok' } }),
 		},
+		musicAnalysis: {
+			capabilities: () => ({ enabled: true, ready: true, models: ['model-relay:music-analysis:core'] }),
+			publicSettings: () => ({ success: true, settings: {}, capabilities: { enabled: true, ready: true } }),
+			saveSettings: () => ({}),
+			setup: () => Promise.resolve({ success: true }),
+			analyze: (payload) => Promise.resolve({ success: true, response: { model: payload.model || 'model-relay:music-analysis:core', music_analysis: {} } }),
+		},
 		relaySettings: {
-			settings: () => ({ defaults: { chat: 'model-relay:codex:auto', images: 'model-relay:codex:image', videos: 'model-relay:openai-videos:sora-2', transcribe: 'model-relay:local-asr:auto', 'media.analyze': 'model-relay:codex:auto' } }),
+			settings: () => ({ defaults: { chat: 'model-relay:codex:auto', images: 'model-relay:codex:image', videos: 'model-relay:openai-videos:sora-2', transcribe: 'model-relay:local-asr:auto', 'media.analyze': 'model-relay:codex:auto', 'music.analyze': 'model-relay:music-analysis:core' } }),
 			saveSettings: (settings) => ({ defaults: settings.defaults }),
 		},
 	});
@@ -132,17 +141,26 @@ function createMockSecurity() {
 		assert.strictEqual(capabilities.body.product.legacy_name, 'Codex Local Bridge');
 		assert.strictEqual(capabilities.body.frontend_interfaces.relay_v1, true);
 		assert.ok(capabilities.body.frontend_interfaces.legacy_routes.includes('/v1/chat'));
+		assert.ok(capabilities.body.frontend_interfaces.relay_routes.includes('/v1/relay/jobs/music/analyze'));
 		assert.ok(!JSON.stringify(capabilities.body).includes('test-token'));
 
 		const models = await requestJson(port, 'GET', '/v1/relay/models');
 		assert.strictEqual(models.statusCode, 200);
 		assert.ok(models.body.models.text.includes('codex-local:auto'));
 		assert.ok(models.body.models.relay.includes('model-relay:xai:grok-4.3'));
+		assert.ok(models.body.models.relay.includes('model-relay:xai:stt'));
+		assert.ok(models.body.models.relay.includes('model-relay:music-analysis:core'));
 		assert.ok(models.body.backends.some((model) => model.backend === 'xai-api'));
 
 		const relaySettings = await requestJson(port, 'GET', '/v1/relay/settings');
 		assert.strictEqual(relaySettings.statusCode, 200);
 		assert.strictEqual(relaySettings.body.settings.defaults.chat, 'model-relay:codex:auto');
+		const musicSettings = await requestJson(port, 'GET', '/v1/music-analysis/settings');
+		assert.strictEqual(musicSettings.statusCode, 200);
+		const savedMusicSettings = await requestJson(port, 'POST', '/v1/music-analysis/settings', { settings: { sample_rate: 24000 } });
+		assert.strictEqual(savedMusicSettings.statusCode, 200);
+		const musicSetup = await requestJson(port, 'POST', '/v1/music-analysis/setup', {});
+		assert.strictEqual(musicSetup.statusCode, 200);
 		const savedRelaySettings = await requestJson(port, 'POST', '/v1/relay/settings', { settings: { defaults: { chat: 'model-relay:cursor-cli:auto' } } });
 		assert.strictEqual(savedRelaySettings.statusCode, 200);
 		const refresh = await requestJson(port, 'POST', '/v1/relay/refresh', {});
@@ -200,6 +218,17 @@ function createMockSecurity() {
 		const relayTranscribe = await requestJson(port, 'POST', '/v1/relay/jobs/transcribe', { ...body, payload: { model: 'model-relay:local-asr:auto' } });
 		assert.strictEqual(relayTranscribe.statusCode, 200);
 		assert.strictEqual(calls[calls.length - 1].route, 'relay-transcribe');
+		const xaiTranscribeTest = await requestJson(port, 'POST', '/v1/relay/test', { job_type: 'transcribe', model: 'model-relay:xai:stt', audio_base64: Buffer.from('audio').toString('base64'), audio_format: 'mp3' });
+		assert.strictEqual(xaiTranscribeTest.statusCode, 200);
+		assert.strictEqual(calls[calls.length - 1].route, 'relay-transcribe');
+		assert.strictEqual(calls[calls.length - 1].payload.audio_format, 'mp3');
+
+		const relayMusic = await requestJson(port, 'POST', '/v1/relay/jobs/music/analyze', { ...body, payload: { model: 'model-relay:music-analysis:core', audio_base64: Buffer.from('audio').toString('base64'), audio_format: 'wav' } });
+		assert.strictEqual(relayMusic.statusCode, 200);
+		assert.strictEqual(calls[calls.length - 1].route, 'relay-music.analyze');
+		const legacyMusic = await requestJson(port, 'POST', '/v1/music/analyze', { ...body, payload: { audio_base64: Buffer.from('audio').toString('base64'), audio_format: 'wav' } });
+		assert.strictEqual(legacyMusic.statusCode, 200);
+		assert.strictEqual(legacyMusic.body.response.model, 'model-relay:music-analysis:core');
 
 		const relayMedia = await requestJson(port, 'POST', '/v1/relay/jobs/media/analyze', { ...body, payload: { model: 'model-relay:codex:auto' } });
 		assert.strictEqual(relayMedia.statusCode, 200);

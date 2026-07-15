@@ -31,7 +31,7 @@ The maximum JSON request body is 12 MiB. This is intended to support normal chat
 
 ## `GET /status`
 
-Shows a local HTML status page for the same runtime data exposed by `GET /v1/status`. It renders immediately from cached diagnostics, then uses the local event stream for provider updates, active jobs, queued jobs, recent activity, and heartbeat state. The Settings tab loads its Local ASR and relay-routing settings only when first opened. It also provides a real image or video test action for each ready, compatible provider model; a reference image is optional for either test and exercises image editing or image-guided video when supplied. The Live tab shows the selected provider/API, workflow/skill, bounded redacted stdin, bounded stdout/stderr/session output, and recent image thumbnails that open in an in-page overlay. The tray app opens this page when the tray icon is double-clicked.
+Shows a local HTML status page for the same runtime data exposed by `GET /v1/status`. It renders immediately from cached diagnostics, then uses the local event stream for provider updates, active jobs, queued jobs, recent activity, and heartbeat state. The Settings tab loads its Local ASR, local music-analysis, and relay-routing settings only when first opened. It also provides a real image, video, transcription, or music-analysis test action for each ready, compatible provider model. Audio tests visibly warn when the selected xAI model uploads the file to the cloud; local music-analysis tests stay on the machine. The Live tab shows the selected provider/API, workflow/skill, bounded redacted stdin, bounded stdout/stderr/session output, and recent image thumbnails that open in an in-page overlay. The tray app opens this page when the tray icon is double-clicked.
 
 ## `GET /v1/status`
 
@@ -94,6 +94,8 @@ During an initial or explicit probe, `checking: true` means the cached result is
 Full prompt/output debug files are written separately under `%TEMP%\alorbach-codex-local-bridge-debug` and are deleted on bridge startup. Successful provider metadata and some failure details may include `debug_log_dir` pointing to the invocation folder.
 
 `asr` contains a Local ASR summary. The default status response is intentionally lightweight and does not run Python, ffmpeg, GPU, or CUDA probes; runtime fields may report `runtime_checked: false` until `/v1/asr/settings?refresh=1` is called or a transcription job runs.
+
+`music_analysis` is the separate local acoustic-feature runtime. It is also lightweight by default: call `/v1/music-analysis/settings?refresh=1` or run its explicit setup action to check Python, ffmpeg/ffprobe, and the dedicated `librosa` environment.
 
 ## `GET /v1/status/events`
 
@@ -230,7 +232,8 @@ Returns persisted relay-only operation defaults plus the cached compatible model
       "images": "model-relay:codex:image",
       "videos": "model-relay:openai-videos:sora-2",
       "transcribe": "model-relay:local-asr:auto",
-      "media.analyze": "model-relay:codex:auto"
+      "media.analyze": "model-relay:codex:auto",
+      "music.analyze": "model-relay:music-analysis:core"
     }
   },
   "models": [],
@@ -253,7 +256,7 @@ Saves the provided relay-only defaults in the existing local state file. Send ei
 }
 ```
 
-These settings apply only to `/v1/relay/jobs/*`, never to legacy `/v1/chat`, `/v1/images`, `/v1/transcribe`, `/v1/videos`, or `/v1/media/analyze`.
+These settings apply only to `/v1/relay/jobs/*`, never to legacy `/v1/chat`, `/v1/images`, `/v1/transcribe`, `/v1/videos`, `/v1/media/analyze`, or `/v1/music/analyze`.
 
 ## `POST /v1/relay/refresh`
 
@@ -269,7 +272,7 @@ Starts one deduplicated provider-detection refresh and returns immediately with 
 
 ## `POST /v1/relay/test`
 
-Local status-page helper for deliberately testing one ready image or video provider. It only accepts localhost socket clients, requires an explicit model, uses the same strict relay resolution as `/v1/relay/jobs/*`, and never falls back to another provider. It is not a WordPress integration route and does not use a signed job envelope.
+Local status-page helper for deliberately testing one ready image, video, transcription, or music-analysis provider. It only accepts localhost socket clients, requires an explicit model, uses the same strict relay resolution as `/v1/relay/jobs/*`, and never falls back to another provider. It is not a WordPress integration route and does not use a signed job envelope.
 
 ```json
 {
@@ -280,7 +283,7 @@ Local status-page helper for deliberately testing one ready image or video provi
 }
 ```
 
-`input_reference_data_url` is optional for image and video tests and is materialized only in the provider request workspace. When Grok video has no supplied image, the relay first generates a temporary source image in the request workspace, then runs image-to-video. The response uses the normal image/video job response shape, and the resulting job and any image preview are visible in the Live tab.
+`input_reference_data_url` is optional for image and video tests and is materialized only in the provider request workspace. When Grok video has no supplied image, the relay first generates a temporary source image in the request workspace, then runs image-to-video. For transcription and music-analysis tests send bounded `audio_base64` and `audio_format` instead. `model-relay:xai:stt` sends that selected audio to xAI; `model-relay:music-analysis:core` processes it locally. The response uses the normal job response shape, and the resulting job and any image preview are visible in the Live tab.
 
 ## `GET /v1/asr/settings`
 
@@ -360,6 +363,30 @@ Response:
 When runtime probing is refreshed, `capabilities.runtime.qwen_torch_cuda` reports whether the Qwen venv has a CUDA-enabled PyTorch build. If `qwen-asr` installed CPU-only torch, the bridge can repair it when package installation is enabled.
 
 `POST /v1/asr/settings` saves the same settings object. Saving invalidates the in-memory runtime probe cache; the status page can then call `GET /v1/asr/settings?refresh=1` to recheck the environment.
+
+## `GET /v1/music-analysis/settings`
+
+Returns settings and cached readiness for the separate local music-analysis runtime. It does not require pairing because the bridge only accepts localhost clients. A normal request performs no Python or ffmpeg work; append `?refresh=1` for an explicit runtime probe.
+
+```json
+{
+  "success": true,
+  "settings": {
+    "python_path": "",
+    "venv_path": "<user-home>\\.alorbach-codex-bridge\\music-analysis-venv",
+    "sample_rate": 22050,
+    "max_sections": 12
+  },
+  "capabilities": {
+    "enabled": true,
+    "ready": null,
+    "runtime_checked": false,
+    "models": ["model-relay:music-analysis:core"]
+  }
+}
+```
+
+`POST /v1/music-analysis/settings` saves the same settings object. `POST /v1/music-analysis/setup` is the explicit opt-in setup action: it creates the dedicated virtual environment and installs `numpy`, `scipy`, `soundfile`, `librosa`, and `pyloudnorm`. It never runs automatically. The runtime also requires `ffmpeg` and `ffprobe` on PATH.
 
 ## `POST /v1/pair`
 
@@ -458,14 +485,17 @@ Provider-neutral job aliases use the same signed envelope and response shapes as
 - `POST /v1/relay/jobs/transcribe`
 - `POST /v1/relay/jobs/videos`
 - `POST /v1/relay/jobs/media/analyze`
+- `POST /v1/relay/jobs/music/analyze`
 
-Routing is selected from an explicit `payload.provider`, `payload.backend`, or model ID. An explicit selection wins. When none is supplied, the bridge inserts the persisted relay default for the operation: `chat`, `images`, `videos`, `transcribe`, or `media.analyze`. For example, `model-relay:xai:grok-4.3` routes to the Grok/xAI API driver, while `model-relay:local-asr:qwen3-asr-0.6b` routes to the local ASR driver.
+Routing is selected from an explicit `payload.provider`, `payload.backend`, or model ID. An explicit selection wins. When none is supplied, the bridge inserts the persisted relay default for the operation: `chat`, `images`, `videos`, `transcribe`, `media.analyze`, or `music.analyze`. For example, `model-relay:xai:grok-4.3` routes to the Grok/xAI API driver, `model-relay:xai:stt` routes to xAI Speech-to-Text, and `model-relay:local-asr:qwen3-asr-0.6b` routes to the local ASR driver.
 
 If the selected/default provider is unknown, disabled, unauthenticated, or does not support the requested operation, the route returns a configuration error naming the selected model and safe reason. It never falls back to another provider. `grok` and `grok-cli` select the local Grok CLI; `xai` and `xai-api` select the separately configured xAI API. This rule is limited to `/v1/relay/jobs/*`; legacy routes retain their existing behavior.
 
 `model-relay:grok-cli:auto` is Grok CLI chat/coding. `model-relay:grok-cli:image` runs the detected Imagine image workflow. `model-relay:grok-cli:video` runs the experimental Imagine image-to-video/reference-to-video workflow. Image references may be data URLs, `{ b64_json, mime_type }` objects, `referenced_image_paths`, or `frames`; the bridge validates and materializes them only in the per-request workspace. With one supplied image, Grok runs image-to-video; with multiple, it runs reference-to-video. Without one, the relay first generates a temporary source image and then runs image-to-video. The bridge collects only final artifacts from that workspace's output directory and fails explicitly if Imagine tooling, generated artifacts, moderation, or the bounded process run fails.
 
 Audio model IDs are configured by Local ASR settings. When a transcription request omits `payload.model` or uses `local-asr`, the bridge first uses `settings.default_model` if it is set. Otherwise `local-asr` auto-selects the best enabled ready local transcription model. Qwen3 ASR 1.7B is preferred when `Qwen/Qwen3-ASR-1.7B` and `Qwen/Qwen3-ForcedAligner-0.6B` are cached or explicitly downloadable and CUDA has enough free VRAM; `Qwen/Qwen3-ASR-0.6B` is the lower-VRAM Qwen ASR fallback. When `allow_qwen_cpu_offload` is enabled, explicit/default Qwen selections can use mixed GPU/CPU loading and report `device: "cuda+cpu"` with `device_map: "auto"`. The Qwen runner pre-chunks timestamped ASR locally using `qwen_chunk_seconds` and caps implausibly stretched single-word spans using `qwen_max_word_duration_seconds`, reporting any caps in provider metadata. The ForcedAligner is used only for Qwen timestamps and is not exposed as a normal audio model. If faster-whisper CUDA fails at execution time, the bridge retries on CPU/int8 when a CPU model path is available.
+
+`model-relay:xai:stt` is opt-in and never selected by the Local ASR fallback. It sends `audio_base64`/`audio_format` as a multipart file to xAI. Optional `payload.xai_options` supports `language` (or `locale`), `format`, `diarize`, `filler_words`, `multichannel`, `channels`, and a bounded `keyterms` array; response data is normalized to `{ text, words, duration_seconds, language }`. The bridge never includes the xAI API key in an error, status, job, or diagnostic payload. Choose local ASR when the audio must remain on the machine.
 
 ## `POST /v1/chat`
 
@@ -626,7 +656,44 @@ Response:
 }
 ```
 
-The bridge writes the submitted audio to a temporary local file, runs `src/asr-runner.py` for faster-whisper or `src/asr-qwen-runner.py` for Qwen providers, and requires explicit per-word `start` and `end` seconds. Missing timestamps are returned as an output-detection failure. The JSON body is still bounded by the bridge request size limit.
+The bridge writes the submitted audio to a temporary local file, runs `src/asr-runner.py` for faster-whisper or `src/asr-qwen-runner.py` for Qwen providers, and requires explicit per-word `start` and `end` seconds. Missing timestamps are returned as an output-detection failure. The JSON body is still bounded by the bridge request size limit. This legacy route remains local ASR only; use `/v1/relay/jobs/transcribe` with `model-relay:xai:stt` for the deliberate cloud option.
+
+## `POST /v1/music/analyze`
+
+Runs bounded local acoustic feature extraction. It requires pairing and the signed envelope; `/v1/relay/jobs/music/analyze` uses the same payload and can select the persisted `music.analyze` default.
+
+```json
+{
+  "job_token": "<wordpress-job-token>",
+  "request_hash": "<wordpress-request-hash>",
+  "request_id": "<wordpress-request-id>",
+  "payload": {
+    "model": "model-relay:music-analysis:core",
+    "audio_base64": "<base64-audio>",
+    "audio_format": "mp3"
+  }
+}
+```
+
+```json
+{
+  "success": true,
+  "response": {
+    "model": "model-relay:music-analysis:core",
+    "duration_seconds": 183.2,
+    "music_analysis": {
+      "tempo": { "bpm": 120.1, "beat_grid_seconds": [0.42, 0.92] },
+      "key": { "tonic": "A", "mode": "minor", "confidence": 0.61 },
+      "loudness": { "integrated_lufs": -10.3, "peak_dbfs": -0.2, "dynamic_range_db": 8.4 },
+      "spectral": { "centroid_hz_mean": 2410.7, "rolloff_hz_mean": 4890.1 },
+      "sections": [{ "label": "section_01", "start_seconds": 0, "end_seconds": 31.7 }]
+    },
+    "provider_details": { "provider": "music-analysis", "local": true }
+  }
+}
+```
+
+Sections are deliberately neutral numbered boundaries, not verse/chorus labels. This first local pipeline does not separate stems, detect chords, extract melody/MIDI, rank similarity, or chain transcription automatically.
 
 ## `POST /v1/videos`
 

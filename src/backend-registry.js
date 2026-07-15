@@ -9,6 +9,7 @@ const { detectCli, detectCliAsync, messagesToText, runTextCommand } = require('.
 
 const RELAY_MODEL_PREFIX = 'model-relay';
 const GROK_MEDIA_TIMEOUT_MS = 450000;
+const MAX_AUDIO_BASE64_LENGTH = 67108864;
 
 function truthy(value) {
 	return /^(1|true|yes|on)$/i.test(String(value || ''));
@@ -59,6 +60,9 @@ function providerFromPayload(payload = {}) {
 	if (model.startsWith('model-relay:local-asr:')) {
 		return 'local-asr';
 	}
+	if (model.startsWith('model-relay:music-analysis:')) {
+		return 'music-analysis';
+	}
 	if (model === 'local-asr' || model.startsWith('local-asr:')) {
 		return 'local-asr';
 	}
@@ -98,6 +102,41 @@ function asrModelFromRelay(model) {
 
 function xaiModelFromRelay(model) {
 	return String(model || '').replace(/^model-relay:(?:xai|grok):/, '').trim() || process.env.AI_MODEL_RELAY_XAI_MODEL || 'grok-4.3';
+}
+
+function decodeAudioBase64(value) {
+	const encoded = String(value || '').replace(/\s+/g, '');
+	if (!encoded || encoded.length > MAX_AUDIO_BASE64_LENGTH || encoded.length % 4 === 1 || !/^[A-Za-z0-9+/]*={0,2}$/.test(encoded)) return null;
+	const bytes = Buffer.from(encoded, 'base64');
+	return bytes.length ? bytes : null;
+}
+
+function xaiAudioFileInfo(value) {
+	const raw = String(value || '').toLowerCase().replace(/^audio\//, '').replace(/[^a-z0-9]/g, '');
+	const details = {
+		mpeg: ['mp3', 'audio/mpeg'], mp3: ['mp3', 'audio/mpeg'], wav: ['wav', 'audio/wav'], xwav: ['wav', 'audio/wav'],
+		flac: ['flac', 'audio/flac'], m4a: ['m4a', 'audio/mp4'], mp4: ['m4a', 'audio/mp4'], ogg: ['ogg', 'audio/ogg'],
+		opus: ['opus', 'audio/ogg'], webm: ['webm', 'audio/webm'], aac: ['aac', 'audio/aac'],
+	}[raw];
+	return { extension: details ? details[0] : 'bin', mime_type: details ? details[1] : 'application/octet-stream' };
+}
+
+function normalizeXaiWords(words) {
+	return (Array.isArray(words) ? words : []).map((entry) => {
+		const word = String(entry && (entry.word || entry.text || entry.token) || '').trim();
+		const start = Number(entry && (entry.start ?? entry.start_seconds));
+		const end = Number(entry && (entry.end ?? entry.end_seconds));
+		if (!word || !Number.isFinite(start) || !Number.isFinite(end)) return null;
+		const normalized = { word, start, end };
+		if (Number.isInteger(Number(entry && entry.speaker))) normalized.speaker = Number(entry.speaker);
+		return normalized;
+	}).filter(Boolean);
+}
+
+function redactProviderSecret(value, secret) {
+	const text = String(value || '');
+	const token = String(secret || '').trim();
+	return token ? text.split(token).join('[redacted]') : text;
 }
 
 function openAiCompatText(response) {
@@ -209,7 +248,7 @@ function createNamedCliDriver(definition, options = {}) {
 		id: definition.id,
 		label: definition.label,
 		kind: 'local-cli',
-		job_types: ['chat'],
+		job_types: ['chat', 'transcribe'],
 		checkStatus: () => { const state = detect(); return { success: state.ready, message: state.diagnostic, details: state }; },
 		capabilities: () => {
 			const state = detect();
@@ -473,6 +512,35 @@ function createLocalAsrDriver(codex) {
 	};
 }
 
+function createMusicAnalysisDriver(musicAnalysis) {
+	const model = musicAnalysis && musicAnalysis.MODEL_ID || 'model-relay:music-analysis:core';
+	return {
+		id: 'music-analysis',
+		label: 'Local Music Analysis',
+		kind: 'local-runtime',
+		job_types: ['music.analyze'],
+		checkStatus: () => {
+			const caps = musicAnalysis && musicAnalysis.capabilities ? musicAnalysis.capabilities() : { enabled: false, ready: false };
+			return { success: caps.ready === true, message: caps.ready === true ? 'Local music analysis runtime is ready.' : 'Local music analysis runtime has not been set up or checked.', details: caps };
+		},
+		capabilities: () => {
+			const caps = musicAnalysis && musicAnalysis.capabilities ? musicAnalysis.capabilities() : { enabled: false, ready: false, models: [] };
+			return {
+				id: 'music-analysis',
+				label: 'Local Music Analysis',
+				kind: 'local-runtime',
+				enabled: caps.enabled !== false,
+				ready: caps.ready === true,
+				runtime_checked: caps.runtime_checked,
+				models: caps.models || [model],
+				diagnostic: caps.ready === false ? 'Set up or refresh the local music-analysis runtime.' : '',
+			};
+		},
+		models: () => [{ id: model, type: 'audio', backend: 'music-analysis' }],
+		'music.analyze': (payload, session) => musicAnalysis.analyze(payload, session),
+	};
+}
+
 function createOpenAiVideosDriver(video) {
 	return {
 		id: 'openai-videos',
@@ -509,7 +577,7 @@ function createXaiApiDriver(options = {}) {
 		id: 'xai-api',
 		label: 'Grok / xAI API',
 		kind: 'api',
-		job_types: ['chat'],
+		job_types: ['chat', 'transcribe'],
 		checkStatus: () => ({ success: !!apiKey, message: apiKey ? 'xAI API key is configured.' : 'xAI API key is not configured.', details: { provider: 'xai-api', configured: !!apiKey, base_url: baseUrl } }),
 		capabilities: () => ({
 			id: 'xai-api',
@@ -518,10 +586,11 @@ function createXaiApiDriver(options = {}) {
 			enabled: !!apiKey,
 			configured: !!apiKey,
 			ready: !!apiKey,
-			models: defaultModels.map((id) => relayModel('xai', id)),
+			models: [...defaultModels.map((id) => relayModel('xai', id)), 'model-relay:xai:stt'],
+			features: { chat: true, speech_to_text: true, cloud_audio: true },
 			requires: ['XAI_API_KEY or AI_MODEL_RELAY_XAI_API_KEY'],
 		}),
-		models: () => defaultModels.map((id) => ({ id: relayModel('xai', id), type: 'text', backend: 'xai-api' })),
+		models: () => [...defaultModels.map((id) => ({ id: relayModel('xai', id), type: 'text', backend: 'xai-api' })), { id: 'model-relay:xai:stt', type: 'audio', backend: 'xai-api' }],
 		async chat(payload = {}) {
 			if (!apiKey) {
 				return { success: false, category: 'configuration', code: 'xai_api_key_missing', message: 'Grok/xAI API requires XAI_API_KEY or AI_MODEL_RELAY_XAI_API_KEY.' };
@@ -553,10 +622,72 @@ function createXaiApiDriver(options = {}) {
 				parsed = text ? JSON.parse(text) : {};
 			} catch (error) {}
 			if (!response.ok) {
-				const message = parsed && parsed.error && parsed.error.message || `xAI API request failed with HTTP ${response.status}.`;
+				const message = redactProviderSecret(parsed && parsed.error && parsed.error.message || `xAI API request failed with HTTP ${response.status}.`, apiKey);
 				return { success: false, category: response.status === 401 || response.status === 403 ? 'configuration' : 'api', code: 'xai_api_failed', message, details: { status: response.status, provider: 'xai-api' } };
 			}
 			return normalizeChatResponse('xai', model, parsed, text);
+		},
+		async transcribe(payload = {}, session = {}) {
+			if (!apiKey) {
+				return { success: false, category: 'configuration', code: 'xai_api_key_missing', message: 'Grok/xAI API requires XAI_API_KEY or AI_MODEL_RELAY_XAI_API_KEY.' };
+			}
+			if (!fetchImpl || typeof FormData === 'undefined' || typeof Blob === 'undefined') {
+				return { success: false, category: 'configuration', code: 'xai_stt_runtime_unavailable', message: 'This Node runtime does not provide multipart upload support for xAI Speech-to-Text.' };
+			}
+			const audioBytes = decodeAudioBase64(payload.audio_base64);
+			if (!audioBytes) {
+				return { success: false, category: 'validation', code: 'xai_stt_audio_invalid', message: 'Audio payload is missing, invalid, or too large.' };
+			}
+			const form = new FormData();
+			const options = payload.xai_options && typeof payload.xai_options === 'object' ? payload.xai_options : payload;
+			const language = String(options.language || options.locale || '').trim();
+			if (language) form.append('language', language);
+			for (const key of ['format', 'diarize', 'filler_words', 'multichannel', 'channels']) {
+				if (options[key] !== undefined && options[key] !== null && options[key] !== '') form.append(key, String(options[key]));
+			}
+			const keyterms = Array.isArray(options.keyterms) ? options.keyterms : (Array.isArray(options.key_terms) ? options.key_terms : []);
+			for (const keyterm of keyterms.slice(0, 100)) {
+				const value = String(keyterm || '').trim().slice(0, 50);
+				if (value) form.append('keyterm', value);
+			}
+			const file = xaiAudioFileInfo(payload.audio_format);
+			// xAI requires the file to be the final multipart field.
+			form.append('file', new Blob([audioBytes], { type: file.mime_type }), `audio.${file.extension}`);
+			if (typeof session.appendSessionOutput === 'function') session.appendSessionOutput('stdout', 'Uploading audio to xAI Speech-to-Text.\n');
+			let response;
+			let text;
+			try {
+				response = await fetchImpl(`${baseUrl}/stt`, { method: 'POST', headers: { Authorization: `Bearer ${apiKey}` }, body: form });
+				text = await response.text();
+			} catch (error) {
+				return { success: false, category: 'api', code: 'xai_stt_request_failed', message: 'xAI Speech-to-Text could not be reached.', retryable: true, details: { provider: 'xai-api' } };
+			}
+			let parsed = null;
+			try { parsed = text ? JSON.parse(text) : {}; } catch (error) {}
+			if (!response.ok) {
+				const message = redactProviderSecret(parsed && parsed.error && parsed.error.message || `xAI Speech-to-Text request failed with HTTP ${response.status}.`, apiKey);
+				return {
+					success: false,
+					category: response.status === 401 || response.status === 403 ? 'configuration' : (response.status === 413 ? 'validation' : (response.status === 429 ? 'rate_limit' : 'api')),
+					code: 'xai_stt_failed',
+					message,
+					retryable: response.status === 429 || response.status >= 500,
+					details: { status: response.status, provider: 'xai-api' },
+				};
+			}
+			const words = normalizeXaiWords(parsed && parsed.words);
+			return {
+				success: true,
+				response: {
+					text: String(parsed && parsed.text || '').trim() || words.map((word) => word.word).join(' '),
+					words,
+					language: String(parsed && parsed.language || '').trim() || undefined,
+					duration_seconds: Number(parsed && (parsed.duration_seconds ?? parsed.duration) || 0) || undefined,
+					channels: Array.isArray(parsed && parsed.channels) ? parsed.channels : undefined,
+					model: 'model-relay:xai:stt',
+					provider_details: { provider: 'xai-api', raw_model: 'stt', cloud: true },
+				},
+			};
 		},
 	};
 }
@@ -699,6 +830,7 @@ function createBackendRegistry(options = {}) {
 		createGrokCliDriver(options.grok || {}),
 		createCursorCliDriver(options.cursor || {}),
 		createLocalAsrDriver(options.codex),
+		createMusicAnalysisDriver(options.musicAnalysis),
 		createOpenAiVideosDriver(options.video),
 		createXaiApiDriver(options.xai || {}),
 		createCliProcessDriver(options.cli || {}),
@@ -714,6 +846,7 @@ function createBackendRegistry(options = {}) {
 		'cursor-cli': 'cursor-cli',
 		asr: 'local-asr',
 		'local-asr': 'local-asr',
+		'music-analysis': 'music-analysis',
 		xai: 'xai-api',
 		'xai-api': 'xai-api',
 		cli: 'cli-process',
@@ -730,7 +863,7 @@ function createBackendRegistry(options = {}) {
 	}
 
 	function expectedModelType(jobType) {
-		return ({ chat: 'text', images: 'image', videos: 'video', transcribe: 'audio', 'media.analyze': 'text' })[jobType] || '';
+		return ({ chat: 'text', images: 'image', videos: 'video', transcribe: 'audio', 'media.analyze': 'text', 'music.analyze': 'audio' })[jobType] || '';
 	}
 
 	function capabilitiesFor(driver) {
@@ -788,6 +921,7 @@ module.exports = {
 	createCursorCliDriver,
 	createGrokCliDriver,
 	createLocalAsrDriver,
+	createMusicAnalysisDriver,
 	createOpenAiVideosDriver,
 	createXaiApiDriver,
 	GROK_MEDIA_TIMEOUT_MS,

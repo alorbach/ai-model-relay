@@ -657,9 +657,23 @@ function statusPageHtml() {
 				</form>
 			</div>
 			<div class="panel span-12">
-				<div class="label">Provider media tests</div>
-				<p class="muted">Runs a real request against the selected ready provider. Provider usage or API charges may apply. You may attach a reference image to test image editing or image-guided video.</p>
-				<div class="provider-media-tests" id="providerMediaTests">Load routing settings to see ready image and video providers.</div>
+				<div class="label">Provider media and audio tests</div>
+				<p class="muted">Runs a real request against the selected ready provider. Provider usage or API charges may apply. Selecting xAI Speech-to-Text uploads the chosen audio to xAI; Local ASR and Local Music Analysis stay on this computer.</p>
+				<div class="provider-media-tests" id="providerMediaTests">Load routing settings to see ready image, video, and audio providers.</div>
+			</div>
+			<div class="panel span-12">
+				<div class="label">Local Music Analysis Settings</div>
+				<p class="muted">Core album metrics run privately with ffmpeg/ffprobe, librosa, and pyloudnorm. Setup downloads Python packages only when you press Setup.</p>
+				<form class="settings-editor" id="musicAnalysisSettingsForm">
+					<div class="settings-grid" id="musicAnalysisSettings"></div>
+					<div class="settings-actions">
+						<span class="muted" id="musicAnalysisSettingsMessage">Loading settings</span>
+						<button type="button" id="reloadMusicAnalysisSettings">Reload</button>
+						<button type="button" id="refreshMusicAnalysisRuntime">Refresh runtime</button>
+						<button type="button" id="setupMusicAnalysis">Setup local runtime</button>
+						<button type="button" id="saveMusicAnalysisSettings">Save settings</button>
+					</div>
+				</form>
 			</div>
 			<div class="panel span-12">
 				<div class="label">Local ASR Settings</div>
@@ -732,12 +746,15 @@ function statusPageHtml() {
 		const statusUrl = '/v1/status';
 		const capabilitiesUrl = '/v1/capabilities';
 		const asrSettingsUrl = '/v1/asr/settings';
+		const musicAnalysisSettingsUrl = '/v1/music-analysis/settings';
+		const musicAnalysisSetupUrl = '/v1/music-analysis/setup';
 		const relaySettingsUrl = '/v1/relay/settings';
 		const relayTestUrl = '/v1/relay/test';
 		const jobEventsUrl = '/v1/status/events';
 		let currentStatus = {};
 		let currentCapabilities = {};
 		let currentAsrSettings = null;
+		let currentMusicAnalysisSettings = null;
 		let settingsLoaded = false;
 		let fallbackPollTimer = null;
 		let providerRefreshPollTimer = null;
@@ -764,6 +781,13 @@ function statusPageHtml() {
 			refreshRelayProviders: document.getElementById('refreshRelayProviders'),
 			saveRelaySettings: document.getElementById('saveRelaySettings'),
 			providerMediaTests: document.getElementById('providerMediaTests'),
+			musicAnalysisSettingsForm: document.getElementById('musicAnalysisSettingsForm'),
+			musicAnalysisSettings: document.getElementById('musicAnalysisSettings'),
+			musicAnalysisSettingsMessage: document.getElementById('musicAnalysisSettingsMessage'),
+			reloadMusicAnalysisSettings: document.getElementById('reloadMusicAnalysisSettings'),
+			refreshMusicAnalysisRuntime: document.getElementById('refreshMusicAnalysisRuntime'),
+			setupMusicAnalysis: document.getElementById('setupMusicAnalysis'),
+			saveMusicAnalysisSettings: document.getElementById('saveMusicAnalysisSettings'),
 			asrDetails: document.getElementById('asrDetails'),
 			asrSettingsForm: document.getElementById('asrSettingsForm'),
 			asrGeneralSettings: document.getElementById('asrGeneralSettings'),
@@ -807,6 +831,7 @@ function statusPageHtml() {
 			if (nextButton.id === 'tab-settings' && !settingsLoaded) {
 				settingsLoaded = true;
 				loadAsrSettings();
+				loadMusicAnalysisSettings();
 				loadRelaySettings();
 			}
 		}
@@ -1263,6 +1288,7 @@ function statusPageHtml() {
 			const features = currentCapabilities.features || {};
 			const video = currentCapabilities.video || {};
 			const mediaAnalysis = currentCapabilities.media_analysis || {};
+			const musicAnalysis = currentCapabilities.music_analysis || {};
 			fields.codexCliVersion.textContent = text(codex.version);
 			fields.codexBinary.textContent = text(codex.binary);
 			fields.detectedFeatures.innerHTML = [
@@ -1275,6 +1301,8 @@ function statusPageHtml() {
 				featurePill('Local ASR ready', currentCapabilities.asr && currentCapabilities.asr.ready),
 				featurePill('Media analysis route', mediaAnalysis.enabled),
 				featurePill('ffmpeg frame extraction', mediaAnalysis.ffmpeg_available),
+				featurePill('Local music analysis', musicAnalysis.enabled),
+				featurePill('Music analysis ready', musicAnalysis.ready),
 				featurePill('OpenAI video route', video.enabled),
 				featurePill('Video API configured', video.configured),
 			].join('');
@@ -1297,10 +1325,10 @@ function statusPageHtml() {
 				const diagnostic = backend.diagnostic && backend.diagnostic !== 'Ready.' && backend.diagnostic !== 'Authentication not checked yet.' ? '<br><small class="muted">' + escapeHtml(backend.diagnostic) + '</small>' : '';
 				return '<div class="feature-pill ' + (backend.ready ? 'enabled' : 'disabled') + '"><span class="name"><strong>' + escapeHtml(backend.label || backend.id) + '</strong><br><small class="muted">' + escapeHtml(detail) + '</small>' + diagnostic + '</span><span class="state">' + escapeHtml(status) + '</span></div>';
 			}).join('') || '<div class="muted">No provider metadata reported</div>';
-			const labels = { chat: 'Chat and coding', images: 'Image generation', videos: 'Video generation', transcribe: 'Transcription', 'media.analyze': 'Media analysis' };
+			const labels = { chat: 'Chat and coding', images: 'Image generation', videos: 'Video generation', transcribe: 'Transcription', 'media.analyze': 'Media analysis', 'music.analyze': 'Music analysis' };
 			fields.relayDefaultSettings.innerHTML = Object.keys(labels).map((jobType) => {
 				const current = defaults[jobType] || '';
-				const expectedType = (jobType === 'chat' || jobType === 'media.analyze') ? 'text' : ({ images: 'image', videos: 'video', transcribe: 'audio' }[jobType]);
+				const expectedType = (jobType === 'chat' || jobType === 'media.analyze') ? 'text' : ({ images: 'image', videos: 'video', transcribe: 'audio', 'music.analyze': 'audio' }[jobType]);
 				const compatible = models.filter((model) => {
 					const backend = backendById.get(model.backend);
 					return model.type === expectedType && model.ready !== false && backend && backend.ready === true && Array.isArray(backend.job_types) && backend.job_types.includes(jobType);
@@ -1325,19 +1353,25 @@ function statusPageHtml() {
 			const tests = [
 				...readyMediaModels(models, backends, 'images', 'image').map((model) => ({ model, jobType: 'images', title: 'Image generation', prompt: 'Create a polished abstract AI Model Relay icon on a dark background.' })),
 				...readyMediaModels(models, backends, 'videos', 'video').map((model) => ({ model, jobType: 'videos', title: 'Video generation', prompt: 'Create a short, subtle cinematic motion from the supplied reference image.' })),
+				...readyMediaModels(models, backends, 'transcribe', 'audio').map((model) => ({ model, jobType: 'transcribe', title: model.backend === 'xai-api' ? 'xAI Speech-to-Text (cloud)' : 'Audio transcription', prompt: '' })),
+				...readyMediaModels(models, backends, 'music.analyze', 'audio').map((model) => ({ model, jobType: 'music.analyze', title: 'Local music analysis', prompt: '' })),
 			];
 			if (!tests.length) {
-				fields.providerMediaTests.innerHTML = '<div class="muted">No ready image or video providers are available for testing.</div>';
+				fields.providerMediaTests.innerHTML = '<div class="muted">No ready image, video, transcription, or music-analysis providers are available for testing.</div>';
 				return;
 			}
 			fields.providerMediaTests.innerHTML = tests.map(({ model, jobType, title, prompt }) => {
 				const isVideo = jobType === 'videos';
+				const isAudio = jobType === 'transcribe' || jobType === 'music.analyze';
 				const reference = '<label class="field"><span>Reference image (optional)</span><input type="file" accept="image/png,image/jpeg,image/webp" data-test-reference></label>';
+				const audio = '<label class="field"><span>Audio file</span><input type="file" accept="audio/*,.mp3,.wav,.m4a,.flac,.ogg,.webm" data-test-audio></label>';
+				const promptField = isAudio ? '' : '<label class="field"><span>Test prompt</span><input type="text" data-test-prompt value="' + escapeHtml(prompt) + '"></label>';
+				const testLabel = isAudio ? (jobType === 'transcribe' ? 'transcription' : 'music analysis') : (isVideo ? 'video' : 'image');
 				return '<article class="provider-media-test" data-provider-media-test>' +
 					'<div class="provider-media-test-heading"><span>' + escapeHtml(title) + '</span><code>' + escapeHtml(model.id) + '</code></div>' +
-					'<label class="field"><span>Test prompt</span><input type="text" data-test-prompt value="' + escapeHtml(prompt) + '"></label>' +
-					reference +
-					'<button type="button" data-provider-test="' + jobType + '" data-model="' + escapeHtml(model.id) + '">Run ' + (isVideo ? 'video' : 'image') + ' test</button>' +
+					promptField +
+					(isAudio ? audio : reference) +
+					'<button type="button" data-provider-test="' + jobType + '" data-model="' + escapeHtml(model.id) + '">Run ' + testLabel + ' test</button>' +
 					'<small class="muted" data-test-message>Ready to test ' + escapeHtml(model.id) + '.</small>' +
 				'</article>';
 			}).join('');
@@ -1347,7 +1381,7 @@ function statusPageHtml() {
 			return new Promise((resolve, reject) => {
 				const reader = new FileReader();
 				reader.onload = () => resolve(String(reader.result || ''));
-				reader.onerror = () => reject(new Error('The reference image could not be read.'));
+				reader.onerror = () => reject(new Error('The selected file could not be read.'));
 				reader.readAsDataURL(file);
 			});
 		}
@@ -1358,6 +1392,7 @@ function statusPageHtml() {
 			const jobType = button.dataset.providerTest;
 			const prompt = card && card.querySelector('[data-test-prompt]');
 			const reference = card && card.querySelector('[data-test-reference]');
+			const audio = card && card.querySelector('[data-test-audio]');
 			const original = button.textContent;
 			try {
 				button.disabled = true;
@@ -1368,10 +1403,21 @@ function statusPageHtml() {
 				if (file) {
 					body.input_reference_data_url = await fileAsDataUrl(file);
 				}
+				const audioFile = audio && audio.files && audio.files[0];
+				if ((jobType === 'transcribe' || jobType === 'music.analyze') && !audioFile) {
+					throw new Error('Choose an audio file before running this test.');
+				}
+				if (audioFile) {
+					const dataUrl = await fileAsDataUrl(audioFile);
+					const match = /^data:([^;]+);base64,([A-Za-z0-9+/=\s]+)$/i.exec(dataUrl);
+					if (!match) throw new Error('The selected audio file is not a supported base64 upload.');
+					body.audio_base64 = match[2].replace(/\s+/g, '');
+					body.audio_format = audioFile.type || (audioFile.name.split('.').pop() || '');
+				}
 				const response = await fetch(relayTestUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 				const payload = await response.json().catch(() => ({}));
 				if (!response.ok || !payload.success) throw new Error(payload.message || 'Provider test failed.');
-				if (message) message.textContent = 'Completed. Open Live to inspect output and generated media.';
+				if (message) message.textContent = 'Completed. Open Live to inspect output.';
 			} catch (error) {
 				if (message) message.textContent = error.message || 'Provider test failed.';
 			} finally {
@@ -1388,6 +1434,73 @@ function statusPageHtml() {
 		async function saveRelaySettings() {
 			const defaults = {}; fields.relayDefaultSettings.querySelectorAll('[data-relay-job]').forEach((select) => { defaults[select.getAttribute('data-relay-job')] = select.value; });
 			try { const response = await fetch(relaySettingsUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ settings: { defaults } }) }); const payload = await response.json(); if (!response.ok) throw new Error(payload.message || 'Routing settings save failed'); renderRelaySettings(payload); fields.relaySettingsMessage.textContent = 'Routing settings saved'; } catch (error) { fields.relaySettingsMessage.textContent = error.message || 'Routing settings save failed'; }
+		}
+
+		function renderMusicAnalysisSettings(settings) {
+			currentMusicAnalysisSettings = settings || {};
+			fields.musicAnalysisSettings.innerHTML = [
+				'<label class="field"><span>Python path</span><input id="musicAnalysisPythonPath" value="' + escapeHtml(currentMusicAnalysisSettings.python_path || '') + '" placeholder="Auto-detect Python 3.10+"></label>',
+				'<label class="field"><span>Virtual environment path</span><input id="musicAnalysisVenvPath" value="' + escapeHtml(currentMusicAnalysisSettings.venv_path || '') + '"></label>',
+				'<label class="field"><span>Analysis sample rate</span><input id="musicAnalysisSampleRate" type="number" min="8000" max="96000" value="' + escapeHtml(currentMusicAnalysisSettings.sample_rate || 22050) + '"></label>',
+				'<label class="field"><span>Maximum sections</span><input id="musicAnalysisMaxSections" type="number" min="2" max="24" value="' + escapeHtml(currentMusicAnalysisSettings.max_sections || 12) + '"></label>',
+			].join('');
+		}
+
+		function serializeMusicAnalysisSettings() {
+			return {
+				python_path: document.getElementById('musicAnalysisPythonPath').value.trim(),
+				venv_path: document.getElementById('musicAnalysisVenvPath').value.trim(),
+				sample_rate: numberValue(document.getElementById('musicAnalysisSampleRate').value, 22050),
+				max_sections: numberValue(document.getElementById('musicAnalysisMaxSections').value, 12),
+			};
+		}
+
+		async function loadMusicAnalysisSettings(options = {}) {
+			const refreshRuntime = !!options.refreshRuntime;
+			fields.musicAnalysisSettingsMessage.textContent = refreshRuntime ? 'Checking runtime' : 'Loading settings';
+			try {
+				const response = await fetch(musicAnalysisSettingsUrl + (refreshRuntime ? '?refresh=1' : ''), { cache: 'no-store' });
+				const payload = await response.json();
+				if (!response.ok || payload.success === false) throw new Error(payload.message || 'Music analysis settings unavailable');
+				renderMusicAnalysisSettings(payload.settings || {});
+				fields.musicAnalysisSettingsMessage.textContent = refreshRuntime ? 'Runtime checked' : 'Settings loaded';
+			} catch (error) {
+				fields.musicAnalysisSettingsMessage.textContent = error.message || 'Music analysis settings load failed';
+			}
+		}
+
+		async function saveMusicAnalysisSettings() {
+			const settings = serializeMusicAnalysisSettings();
+			fields.musicAnalysisSettingsMessage.textContent = 'Saving';
+			try {
+				const response = await fetch(musicAnalysisSettingsUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ settings }) });
+				const payload = await response.json();
+				if (!response.ok || payload.success === false) throw new Error(payload.message || 'Save failed');
+				renderMusicAnalysisSettings(payload.settings || settings);
+				fields.musicAnalysisSettingsMessage.textContent = 'Saved';
+				await Promise.all([refresh().catch(() => {}), loadRelaySettings().catch(() => {})]);
+			} catch (error) {
+				fields.musicAnalysisSettingsMessage.textContent = error.message || 'Save failed';
+			}
+		}
+
+		async function setupMusicAnalysis() {
+			const original = fields.setupMusicAnalysis.textContent;
+			try {
+				fields.setupMusicAnalysis.disabled = true;
+				fields.setupMusicAnalysis.textContent = 'Setting up...';
+				fields.musicAnalysisSettingsMessage.textContent = 'Creating venv and downloading local packages...';
+				const response = await fetch(musicAnalysisSetupUrl, { method: 'POST' });
+				const payload = await response.json();
+				if (!response.ok || payload.success === false) throw new Error(payload.message || 'Music analysis setup failed');
+				fields.musicAnalysisSettingsMessage.textContent = 'Local music analysis is ready';
+				await Promise.all([loadMusicAnalysisSettings({ refreshRuntime: true }), refresh().catch(() => {}), loadRelaySettings().catch(() => {})]);
+			} catch (error) {
+				fields.musicAnalysisSettingsMessage.textContent = error.message || 'Music analysis setup failed';
+			} finally {
+				fields.setupMusicAnalysis.disabled = false;
+				fields.setupMusicAnalysis.textContent = original;
+			}
 		}
 
 		function checkedAttr(value) {
@@ -1889,6 +2002,11 @@ function statusPageHtml() {
 		fields.saveAsrSettings.addEventListener('click', saveAsrSettings);
 		fields.applyAsrSettingsJson.addEventListener('click', applyAsrSettingsJson);
 		fields.addAsrModel.addEventListener('click', addAsrModel);
+		fields.musicAnalysisSettingsForm.addEventListener('submit', (event) => { event.preventDefault(); saveMusicAnalysisSettings(); });
+		fields.reloadMusicAnalysisSettings.addEventListener('click', loadMusicAnalysisSettings);
+		fields.refreshMusicAnalysisRuntime.addEventListener('click', () => loadMusicAnalysisSettings({ refreshRuntime: true }));
+		fields.saveMusicAnalysisSettings.addEventListener('click', saveMusicAnalysisSettings);
+		fields.setupMusicAnalysis.addEventListener('click', setupMusicAnalysis);
 		fields.relaySettingsForm.addEventListener('submit', (event) => { event.preventDefault(); saveRelaySettings(); });
 		fields.saveRelaySettings.addEventListener('click', saveRelaySettings);
 		fields.refreshRelayProviders.addEventListener('click', refreshProviderDetection);

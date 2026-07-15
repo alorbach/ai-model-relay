@@ -7,6 +7,7 @@ const codex = require('./codex');
 const { attachDebugHelp } = require('./debug-help');
 const { JobManager, clampMaxConcurrent } = require('./job-manager');
 const mediaAnalysis = require('./media-analysis');
+const musicAnalysis = require('./music-analysis');
 const security = require('./security');
 const { statusPageHtml } = require('./status-page');
 const { resetTempDebugLogs } = require('./temp-debug-logs');
@@ -257,7 +258,7 @@ function modelFromPayload(payload, fallback) {
 
 function capabilitiesPayload(context) {
 	if (context.statusCache) {
-		return { ...context.statusCache.capabilities(), product: { name: PRODUCT_NAME, short_name: SHORT_NAME, legacy_name: LEGACY_PRODUCT_NAME }, bridge: { version: packageInfo.version }, frontend_interfaces: { legacy_v1: true, relay_v1: true, legacy_routes: ['/v1/status', '/v1/capabilities', '/v1/models', '/v1/chat', '/v1/images', '/v1/transcribe', '/v1/videos', '/v1/media/analyze'], relay_routes: ['/v1/relay/status', '/v1/relay/capabilities', '/v1/relay/models', '/v1/relay/jobs/chat', '/v1/relay/jobs/images', '/v1/relay/jobs/transcribe', '/v1/relay/jobs/videos', '/v1/relay/jobs/media/analyze'], local_status_test_route: '/v1/relay/test' } };
+		return { ...context.statusCache.capabilities(), product: { name: PRODUCT_NAME, short_name: SHORT_NAME, legacy_name: LEGACY_PRODUCT_NAME }, bridge: { version: packageInfo.version }, frontend_interfaces: { legacy_v1: true, relay_v1: true, legacy_routes: ['/v1/status', '/v1/capabilities', '/v1/models', '/v1/chat', '/v1/images', '/v1/transcribe', '/v1/videos', '/v1/media/analyze', '/v1/music/analyze'], relay_routes: ['/v1/relay/status', '/v1/relay/capabilities', '/v1/relay/models', '/v1/relay/jobs/chat', '/v1/relay/jobs/images', '/v1/relay/jobs/transcribe', '/v1/relay/jobs/videos', '/v1/relay/jobs/media/analyze', '/v1/relay/jobs/music/analyze'], local_status_test_route: '/v1/relay/test' } };
 	}
 	const codexCapabilities = context.codex.capabilities ? context.codex.capabilities() : { success: true, bridge_features: {} };
 	return {
@@ -277,12 +278,13 @@ function capabilitiesPayload(context) {
 		frontend_interfaces: {
 			legacy_v1: true,
 			relay_v1: true,
-			legacy_routes: ['/v1/status', '/v1/capabilities', '/v1/models', '/v1/chat', '/v1/images', '/v1/transcribe', '/v1/videos', '/v1/media/analyze'],
-			relay_routes: ['/v1/relay/status', '/v1/relay/capabilities', '/v1/relay/models', '/v1/relay/jobs/chat', '/v1/relay/jobs/images', '/v1/relay/jobs/transcribe', '/v1/relay/jobs/videos', '/v1/relay/jobs/media/analyze'],
+			legacy_routes: ['/v1/status', '/v1/capabilities', '/v1/models', '/v1/chat', '/v1/images', '/v1/transcribe', '/v1/videos', '/v1/media/analyze', '/v1/music/analyze'],
+			relay_routes: ['/v1/relay/status', '/v1/relay/capabilities', '/v1/relay/models', '/v1/relay/jobs/chat', '/v1/relay/jobs/images', '/v1/relay/jobs/transcribe', '/v1/relay/jobs/videos', '/v1/relay/jobs/media/analyze', '/v1/relay/jobs/music/analyze'],
 			local_status_test_route: '/v1/relay/test',
 		},
 		video: context.video.capabilities ? context.video.capabilities() : { enabled: false },
 		media_analysis: context.mediaAnalysis.capabilities ? context.mediaAnalysis.capabilities() : { enabled: false },
+		music_analysis: context.musicAnalysis.capabilities ? context.musicAnalysis.capabilities() : { enabled: false },
 	};
 }
 
@@ -306,6 +308,7 @@ function statusPayload(context, options = {}) {
 		...status,
 		bridge,
 		asr: context.codex.asrStatus ? context.codex.asrStatus() : {},
+		music_analysis: context.musicAnalysis.capabilities ? context.musicAnalysis.capabilities() : {},
 		jobs: context.jobManager.snapshot(),
 	};
 }
@@ -353,8 +356,10 @@ function workflowForJob(jobType, provider) {
 		'grok-cli:chat': 'Grok chat',
 		'cursor-cli:chat': 'Cursor Agent',
 		'local-asr:transcribe': 'Local ASR',
+		'music-analysis:music.analyze': 'Local music analysis',
 		'openai-videos:videos': 'OpenAI Videos API',
 		'xai-api:chat': 'xAI Chat Completions API',
+		'xai-api:transcribe': 'xAI Speech-to-Text API',
 		'api-key-chat:chat': 'Chat Completions API',
 	};
 	return workflows[key] || '';
@@ -373,6 +378,9 @@ function jobDisplayMeta(context, jobType, payload, fallbackProvider = '', fallba
 function errorStatusForResult(result) {
 	if (result && result.category === 'validation') {
 		return 400;
+	}
+	if (result && result.category === 'rate_limit') {
+		return 429;
 	}
 	if (result && result.category === 'configuration') {
 		return 503;
@@ -428,6 +436,11 @@ async function route(req, res, context) {
 
 	if (req.method === 'GET' && url.pathname === '/v1/asr/settings') {
 		const payload = context.codex.asrSettings ? context.codex.asrSettings({ refresh: url.searchParams.get('refresh') === '1' }) : { success: false, message: 'ASR settings are unavailable.' };
+		sendJson(res, payload.success === false ? 500 : 200, payload, origin || pairedOriginForCors(req, bridgeSecurity));
+		return;
+	}
+	if (req.method === 'GET' && url.pathname === '/v1/music-analysis/settings') {
+		const payload = context.musicAnalysis.publicSettings ? context.musicAnalysis.publicSettings({ refresh: url.searchParams.get('refresh') === '1' }) : { success: false, message: 'Music analysis settings are unavailable.' };
 		sendJson(res, payload.success === false ? 500 : 200, payload, origin || pairedOriginForCors(req, bridgeSecurity));
 		return;
 	}
@@ -527,6 +540,34 @@ async function route(req, res, context) {
 		sendJson(res, 200, { success: true, settings, capabilities: payload.capabilities }, origin);
 		return;
 	}
+	if (url.pathname === '/v1/music-analysis/settings') {
+		if (!context.musicAnalysis.saveSettings || !context.musicAnalysis.publicSettings) {
+			sendErrorJson(req, res, 500, { success: false, message: 'Music analysis settings are unavailable.' }, origin);
+			return;
+		}
+		const settings = context.musicAnalysis.saveSettings(body.settings || body || {});
+		const payload = context.musicAnalysis.publicSettings();
+		context.statusEvents.broadcast('status', statusPayload(context));
+		context.statusEvents.broadcast('capabilities', capabilitiesPayload(context));
+		sendJson(res, 200, { success: true, settings, capabilities: payload.capabilities }, origin);
+		return;
+	}
+	if (url.pathname === '/v1/music-analysis/setup') {
+		if (!context.musicAnalysis.setup) {
+			sendErrorJson(req, res, 500, { success: false, message: 'Music analysis setup is unavailable.' }, origin);
+			return;
+		}
+		const result = await context.musicAnalysis.setup();
+		context.statusCache.sync();
+		context.statusEvents.broadcast('status', statusPayload(context));
+		context.statusEvents.broadcast('capabilities', capabilitiesPayload(context));
+		if (!result.success) {
+			sendErrorJson(req, res, errorStatusForResult(result), result, origin, { route: url.pathname });
+			return;
+		}
+		sendJson(res, 200, result, origin);
+		return;
+	}
 	if (url.pathname === '/v1/relay/settings') {
 		const settings = context.relaySettings.saveSettings(body.settings || body || {});
 		context.statusEvents.broadcast('capabilities', capabilitiesPayload(context));
@@ -542,8 +583,8 @@ async function route(req, res, context) {
 	if (url.pathname === '/v1/relay/test') {
 		const jobType = String(body.job_type || '').trim();
 		const model = String(body.model || '').trim();
-		if (jobType !== 'images' && jobType !== 'videos') {
-			sendErrorJson(req, res, 400, { success: false, category: 'validation', message: 'Provider tests support only images or videos.' }, origin);
+		if (!['images', 'videos', 'transcribe', 'music.analyze'].includes(jobType)) {
+			sendErrorJson(req, res, 400, { success: false, category: 'validation', message: 'Provider tests support images, videos, transcription, or music analysis.' }, origin);
 			return;
 		}
 		if (!model) {
@@ -558,6 +599,9 @@ async function route(req, res, context) {
 		};
 		if (body.input_reference_data_url) {
 			requestedPayload.input_reference_data_url = String(body.input_reference_data_url);
+		}
+		for (const key of ['audio_base64', 'audio_format', 'language', 'locale', 'xai_options']) {
+			if (body[key] !== undefined) requestedPayload[key] = body[key];
 		}
 		const resolved = relayPayloadFor(context, jobType, requestedPayload);
 		if (resolved.error) {
@@ -680,6 +724,24 @@ async function route(req, res, context) {
 		sendJson(res, 200, result, pairedOrigin);
 		return;
 	}
+	if (url.pathname === '/v1/music/analyze' || url.pathname === '/v1/relay/jobs/music/analyze') {
+		const isRelayRoute = url.pathname === '/v1/relay/jobs/music/analyze';
+		const resolved = isRelayRoute ? relayPayloadFor(context, 'music.analyze', body.payload || {}) : { payload: body.payload || {} };
+		if (resolved.error) { sendErrorJson(req, res, 503, resolved.error, pairedOrigin, { requestId: body.request_id, route: url.pathname }); return; }
+		const display = isRelayRoute ? jobDisplayMeta(context, 'music.analyze', resolved.payload, '', '', resolved.resolved) : { provider: 'music-analysis', providerLabel: 'Local Music Analysis', workflow: workflowForJob('music.analyze', 'music-analysis') };
+		const result = await jobManager.run({
+			requestId: body.request_id,
+			type: 'music_analysis',
+			model: modelFromPayload(resolved.payload, 'model-relay:music-analysis:core'),
+			...display,
+		}, (session) => isRelayRoute ? context.backends.run('music.analyze', resolved.payload, session) : context.musicAnalysis.analyze(resolved.payload, session));
+		if (!result.success) {
+			sendErrorJson(req, res, errorStatusForResult(result), result, pairedOrigin, { requestId: body.request_id, route: url.pathname });
+			return;
+		}
+		sendJson(res, 200, result, pairedOrigin);
+		return;
+	}
 	sendErrorJson(req, res, 404, { success: false, message: 'Unknown local bridge route.' }, pairedOrigin, { requestId: body.request_id });
 }
 
@@ -696,6 +758,7 @@ function createServer(options = {}) {
 	const context = {
 		codex: options.codex || codex,
 		mediaAnalysis: options.mediaAnalysis || mediaAnalysis,
+		musicAnalysis: options.musicAnalysis || musicAnalysis,
 		security: options.security || security,
 		video: options.video || video,
 		jobManager: options.jobManager || createJobManager({ ...options, onJobState }),
@@ -705,6 +768,7 @@ function createServer(options = {}) {
 	context.backends = options.backends || createBackendRegistry({
 		codex: context.codex,
 		video: context.video,
+		musicAnalysis: context.musicAnalysis,
 		xai: options.xai,
 		cli: options.cli,
 		apiKeyChat: options.apiKeyChat,
