@@ -1,0 +1,90 @@
+src/backend-registry.js
+  s_f0564985df7b0b::t_e97c11d00b1fb6 135
+  s_db2abca2e9e532::t_859b8bb098a7e4 833,849,866,924
+  s_db2abca2e9e532::t_bfc0280e6efdd0 134,515-543,691
+  s_db2abca2e9e532::t_c6acecdb04576a 12,63-65,107-133
+  s_db2abca2e9e532::t_09389c1753ab53 657-664,671
+  s_db2abca2e9e532::t_bae9764e30c378 136-141,580,625,668,685
+  s_db2abca2e9e532::t_3ba4802939ef4c 251,589-590,593,630-656,665-667,669-670,672-684,686-690
+README.md
+  s_db2abca2e9e532::t_50f839689b6a25 23-24,50,71-72,145-146,156-157,180,256-261,266
+package.json
+  s_161b613f45f6f3::t_d54c81d36280b0 13
+  s_db2abca2e9e532::t_b7dd8287e17602 38-39
+  s_db2abca2e9e532::t_20815fe77d047d 12
+src/status-cache.js
+  s_db2abca2e9e532::t_03141a6a088afd 9-10,15,34-35
+test/relay-routes.test.js
+  s_db2abca2e9e532::t_e77706267fb50f 89-90,92,123-129,131,144,151-152,221-228
+  s_db2abca2e9e532::t_ff97ef901e0376 158-163,229-231
+src/server.js
+  s_db2abca2e9e532::t_09389c1753ab53 382-384
+  s_db2abca2e9e532::t_dc8a712171ab6c 442-446,543-570,586-587,603-605,727-744,761,771
+  s_db2abca2e9e532::t_f3e6f0bda7b76c 10,261,281-282,287,311,359,362
+src/music-analysis-runner.py
+  s_db2abca2e9e532::t_a8a614e7430b11 1-142
+src/music-analysis.js
+  s_db2abca2e9e532::t_a8a614e7430b11 1-376
+docs/local-bridge-api.md
+  s_db2abca2e9e532::t_f0a8a6d544008c 499
+  s_db2abca2e9e532::t_0c43aab3bda560 659-696
+  s_db2abca2e9e532::t_91269733fb06d5 235-236,259,275,286
+  s_161b613f45f6f3::t_8d071a7ab3a05c 34,98
+  s_161b613f45f6f3::t_a7200e5a75f497 99
+  s_db2abca2e9e532::t_75ee7753404187 488,490,498
+  s_db2abca2e9e532::t_4283b48bda5e02 367-390
+.github/workflows/ci.yml
+  s_161b613f45f6f3::t_d54c81d36280b0 1-29
+src/status-page.js
+  s_db2abca2e9e532::t_667c1d40a9b405 660-676,749-750,757,784-790,834
+  s_db2abca2e9e532::t_59c1686c3a8fb9 1439-1505
+  s_db2abca2e9e532::t_0a6860b1aa56a7 1291,1304-1305,1328,1331,1356-1357,1360,1365,1367-1369,1372-1374,1384,1395,1406-1416,1420
+  s_db2abca2e9e532::t_4aa6858df250d7 2005-2009
+test/asr.test.js
+  s_db2abca2e9e532::t_20815fe77d047d 25
+test/status-page.test.js
+  s_db2abca2e9e532::t_90ca6bfc33ce08 12-15,19,21-22
+test/music-analysis.test.js
+  s_db2abca2e9e532::t_20815fe77d047d 1-45
+.github/workflows/release.yml
+  s_161b613f45f6f3::t_d54c81d36280b0 94
+test/backend-registry.test.js
+  s_db2abca2e9e532::t_09389c1753ab53 152,158-161
+  s_db2abca2e9e532::t_8f8253e59a67af 44-48,75,80,88-89,103-104,119-151,153
+  s_db2abca2e9e532::t_bae9764e30c378 154-157,167-168
+  s_db2abca2e9e532::t_984c952c738d0b 162
+src/relay-settings.js
+  s_db2abca2e9e532::t_e79f7ef6c544f1 11
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "759e4ff53092b1c09fb103c84d5f0a6f6ba883fe",
+  "prompts": {},
+  "sessions": {
+    "s_161b613f45f6f3": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f65cc-8689-7032-b3d3-298775690a3c",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_db2abca2e9e532": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f65a2-68ff-73e0-ab0a-0cff620fbbe0",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_f0564985df7b0b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f65be-4429-7660-94ee-8a3aa5fad9a7",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
