@@ -1,0 +1,19 @@
+package.json
+  s_2077bbaf58fb50::t_999e09b47bab4d 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "a2d32433d1583c0b9c94b29a9f1395b19ebbd2e6",
+  "prompts": {},
+  "sessions": {
+    "s_2077bbaf58fb50": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f704e-f745-7192-997f-8a8f2cddffc7",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
