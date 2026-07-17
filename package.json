@@ -1,6 +1,6 @@
 {
   "name": "alorbach-ai-model-relay",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "Windows tray companion for Alorbach AI Gateway that exposes a secure localhost relay for local and API-backed AI model drivers, formerly named Codex Local Bridge.",
   "private": true,
   "main": "src/main.js",
