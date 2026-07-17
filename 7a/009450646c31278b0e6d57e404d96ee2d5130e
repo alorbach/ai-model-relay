@@ -1,0 +1,20 @@
+build/installer.nsh
+  s_a24a52784f4f7d::t_79061e8f4abbd2 15,31
+  s_a24a52784f4f7d::t_e48dd040ef0dc5 1-14,16-30
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "7a009450646c31278b0e6d57e404d96ee2d5130e",
+  "prompts": {},
+  "sessions": {
+    "s_a24a52784f4f7d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f532f-e127-77d2-af95-cf138999bbde",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
