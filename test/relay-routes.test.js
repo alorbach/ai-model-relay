@@ -92,6 +92,9 @@ function createMockSecurity() {
 		getDriver: () => ({ id: 'codex-cli', job_types: ['chat', 'images', 'videos', 'transcribe', 'media.analyze', 'music.analyze'], checkStatus: () => ({ success: true, message: 'ready', details: {} }), capabilities: () => ({ ready: true }) }),
 		run: (type, payload) => {
 			calls.push({ route: `relay-${type}`, payload });
+			if (payload.prompt === 'rate limited') {
+				return Promise.resolve({ success: false, category: 'rate_limit', code: 'provider_quota_exhausted', message: 'Provider quota is exhausted.', retryable: true });
+			}
 			return Promise.resolve({
 				success: true,
 				response: {
@@ -205,14 +208,23 @@ function createMockSecurity() {
 		assert.strictEqual(calls[calls.length - 1].route, 'relay-images');
 
 		const refreshesBeforeImageTest = backendRefreshes;
-                const localImageTest = await requestJson(port, 'POST', '/v1/relay/test', { job_type: 'images', model: 'model-relay:codex:image', prompt: 'test image', size: '1536x1024', quality: 'high' });
+		const localTestRequestId = 'status-test-ui-route-image';
+                const localImageTest = await requestJson(port, 'POST', '/v1/relay/test', { job_type: 'images', model: 'model-relay:codex:image', prompt: 'test image', size: '1536x1024', quality: 'high', test_request_id: localTestRequestId });
 		assert.strictEqual(localImageTest.statusCode, 200);
 		assert.strictEqual(localImageTest.body.success, true);
+		assert.strictEqual(localImageTest.body.request_id, localTestRequestId);
 		assert.ok(backendRefreshes > refreshesBeforeImageTest, 'provider test should refresh detection before model preflight');
                 assert.strictEqual(calls[calls.length - 1].route, 'relay-images');
                 assert.strictEqual(calls[calls.length - 1].payload.prompt, 'test image');
                 assert.strictEqual(calls[calls.length - 1].payload.size, '1536x1024');
-                assert.strictEqual(calls[calls.length - 1].payload.quality, 'high');
+		assert.strictEqual(calls[calls.length - 1].payload.quality, 'high');
+		const rateLimitedImageTest = await requestJson(port, 'POST', '/v1/relay/test', { job_type: 'images', model: 'model-relay:codex:image', prompt: 'rate limited' });
+		assert.strictEqual(rateLimitedImageTest.statusCode, 429);
+		assert.strictEqual(rateLimitedImageTest.body.category, 'rate_limit');
+		assert.strictEqual(rateLimitedImageTest.body.code, 'provider_quota_exhausted');
+		const invalidTestRequestId = await requestJson(port, 'POST', '/v1/relay/test', { job_type: 'images', model: 'model-relay:codex:image', prompt: 'test image', test_request_id: 'invalid value' });
+		assert.strictEqual(invalidTestRequestId.statusCode, 400);
+		assert.match(invalidTestRequestId.body.message, /request IDs must start with status-test/i);
 
                 const localVideoTest = await requestJson(port, 'POST', '/v1/relay/test', { job_type: 'videos', model: 'model-relay:openai-videos:sora-2', prompt: 'test video', input_reference_data_url: 'data:image/png;base64,AA==', size: '1280x720', seconds: '8' });
 		assert.strictEqual(localVideoTest.statusCode, 200);
@@ -220,6 +232,10 @@ function createMockSecurity() {
                 assert.strictEqual(calls[calls.length - 1].payload.input_reference_data_url, 'data:image/png;base64,AA==');
                 assert.strictEqual(calls[calls.length - 1].payload.size, '1280x720');
                 assert.strictEqual(calls[calls.length - 1].payload.seconds, '8');
+		const localGrokOptionsTest = await requestJson(port, 'POST', '/v1/relay/test', { job_type: 'images', model: 'model-relay:codex:image', prompt: 'test image guidance', aspect_ratio: '16:9', resolution: '2k' });
+		assert.strictEqual(localGrokOptionsTest.statusCode, 200);
+		assert.strictEqual(calls[calls.length - 1].payload.aspect_ratio, '16:9');
+		assert.strictEqual(calls[calls.length - 1].payload.resolution, '2k');
 		const localMediaTest = await requestJson(port, 'POST', '/v1/relay/test', { job_type: 'media.analyze', model: 'model-relay:codex:auto', prompt: 'test media', media_data_url: `data:video/mp4;base64,${Buffer.from('mp4').toString('base64')}` });
 		assert.strictEqual(localMediaTest.statusCode, 200);
 		assert.strictEqual(calls[calls.length - 1].route, 'relay-media.analyze');

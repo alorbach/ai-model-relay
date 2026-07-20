@@ -140,8 +140,8 @@ function deferredRunner(label, started, resolvers, result = { success: true }) {
 		const started = [];
 		const resolvers = {};
 		const manager = new JobManager({ maxConcurrent: 2 });
-		const imageOne = manager.run({ requestId: 'image-1', type: 'images' }, deferredRunner('image-one', started, resolvers));
-		const imageTwo = manager.run({ requestId: 'image-2', type: 'images' }, deferredRunner('image-two', started, resolvers));
+		const imageOne = manager.run({ requestId: 'image-1', type: 'images', model: 'model-relay:codex:image', provider: 'codex-cli' }, deferredRunner('image-one', started, resolvers));
+		const imageTwo = manager.run({ requestId: 'image-2', type: 'images', model: 'model-relay:codex:image', provider: 'codex-cli' }, deferredRunner('image-two', started, resolvers));
 		await tick();
 		assert.deepStrictEqual(started, ['image-one']);
 		assert.strictEqual(manager.snapshot().running_count, 1);
@@ -153,6 +153,22 @@ function deferredRunner(label, started, resolvers, result = { success: true }) {
 		assert.deepStrictEqual(started, ['image-one', 'image-two']);
 		resolvers['image-two']();
 		await imageTwo;
+		assert.strictEqual(manager.snapshot().running_count, 0);
+	}
+
+	{
+		const started = [];
+		const resolvers = {};
+		const manager = new JobManager({ maxConcurrent: 2 });
+		const codexImage = manager.run({ requestId: 'image-codex', type: 'images', model: 'model-relay:codex:image', provider: 'codex-cli' }, deferredRunner('image-codex', started, resolvers));
+		const antigravityImage = manager.run({ requestId: 'image-antigravity', type: 'images', model: 'model-relay:antigravity-cli:image', provider: 'antigravity-cli' }, deferredRunner('image-antigravity', started, resolvers));
+		await tick();
+		assert.deepStrictEqual(started, ['image-codex', 'image-antigravity']);
+		assert.strictEqual(manager.snapshot().running_count, 2);
+		assert.strictEqual(manager.snapshot().queued_count, 0);
+		resolvers['image-codex']();
+		resolvers['image-antigravity']();
+		await Promise.all([codexImage, antigravityImage]);
 		assert.strictEqual(manager.snapshot().running_count, 0);
 	}
 

@@ -193,16 +193,77 @@ function normalizeChatResponse(provider, model, parsed, fallbackText = '') {
 }
 
 function generationPreferences(payload = {}, kind) {
-        const safeValue = (value, maxLength = 64) => String(value || '').trim().replace(/[\r\n]+/g, ' ').slice(0, maxLength);
-        const preferences = [];
-        const size = safeValue(payload.size);
-        const quality = safeValue(payload.quality);
-        const seconds = Number(payload.seconds);
-        if (size) preferences.push(`Requested output resolution: ${size}.`);
-        if (kind === 'videos' && Number.isFinite(seconds) && seconds > 0 && seconds <= 120) preferences.push(`Requested clip length: ${seconds} seconds.`);
-        if (quality) preferences.push(`Preferred quality: ${quality}.`);
-        return preferences.join(' ');
+	const safeValue = (value, maxLength = 64) => String(value || '').trim().replace(/[\r\n]+/g, ' ').slice(0, maxLength);
+	const preferences = [];
+	const size = safeValue(payload.size);
+	const quality = safeValue(payload.quality);
+	const aspectRatio = safeValue(payload.aspect_ratio);
+	const resolution = safeValue(payload.resolution);
+	const seconds = Number(payload.seconds);
+	if (size) preferences.push(`Requested output resolution: ${size}.`);
+	if (aspectRatio) preferences.push(`Requested aspect ratio: ${aspectRatio}.`);
+	if (resolution) preferences.push(`Requested resolution tier: ${resolution}.`);
+	if (kind === 'videos' && Number.isFinite(seconds) && seconds > 0 && seconds <= 120) preferences.push(`Requested clip length: ${seconds} seconds.`);
+	if (quality) preferences.push(`Preferred quality: ${quality}.`);
+	return preferences.join(' ');
 }
+
+function testOption(key, label, delivery, choices) {
+	return { key, label, delivery, choices };
+}
+
+const CODEX_IMAGE_SIZE_CHOICES = [
+	{ value: 'auto', label: 'Auto · provider chooses' },
+	{ value: '1024x1024', label: 'Square · 1024 × 1024' },
+	{ value: '1536x1024', label: 'Landscape · 1536 × 1024' },
+	{ value: '1024x1536', label: 'Portrait · 1024 × 1536' },
+	{ value: '2048x2048', label: '2K square · 2048 × 2048' },
+	{ value: '2560x1440', label: '2K landscape · 2560 × 1440' },
+	{ value: '1440x2560', label: '2K portrait · 1440 × 2560' },
+	{ value: '3840x2160', label: '4K landscape · 3840 × 2160' },
+	{ value: '2160x3840', label: '4K portrait · 2160 × 3840' },
+];
+
+const CODEX_IMAGE_TEST_OPTIONS = [
+	testOption('size', 'Resolution', 'guidance', CODEX_IMAGE_SIZE_CHOICES),
+	testOption('quality', 'Quality', 'guidance', [
+		{ value: 'auto', label: 'Auto · provider chooses' },
+		{ value: 'low', label: 'Low' },
+		{ value: 'medium', label: 'Medium' },
+		{ value: 'high', label: 'High' },
+	]),
+];
+
+const ANTIGRAVITY_IMAGE_SIZE_CHOICES = [
+	...CODEX_IMAGE_SIZE_CHOICES,
+];
+
+const ANTIGRAVITY_IMAGE_TEST_OPTIONS = [
+	testOption('size', 'Resolution', 'guidance', ANTIGRAVITY_IMAGE_SIZE_CHOICES),
+];
+
+const GROK_IMAGE_TEST_OPTIONS = [
+	testOption('aspect_ratio', 'Aspect ratio', 'guidance', [
+		{ value: 'auto', label: 'Auto · provider chooses' },
+		{ value: '1:1', label: 'Square · 1:1' },
+		{ value: '16:9', label: 'Landscape · 16:9' },
+		{ value: '9:16', label: 'Portrait · 9:16' },
+		{ value: '4:3', label: 'Landscape · 4:3' },
+		{ value: '3:4', label: 'Portrait · 3:4' },
+		{ value: '3:2', label: 'Landscape · 3:2' },
+		{ value: '2:3', label: 'Portrait · 2:3' },
+		{ value: '2:1', label: 'Wide · 2:1' },
+		{ value: '1:2', label: 'Tall · 1:2' },
+		{ value: '19.5:9', label: 'Phone wide · 19.5:9' },
+		{ value: '9:19.5', label: 'Phone tall · 9:19.5' },
+		{ value: '20:9', label: 'Ultra-wide · 20:9' },
+		{ value: '9:20', label: 'Ultra-tall · 9:20' },
+	]),
+	testOption('resolution', 'Resolution', 'guidance', [
+		{ value: '1k', label: '1K' },
+		{ value: '2k', label: '2K' },
+	]),
+];
 
 function createCodexCliDriver(codex, mediaAnalysis) {
 	const jobTypes = ['chat', 'images', ...(mediaAnalysis && typeof mediaAnalysis.analyze === 'function' ? ['media.analyze'] : [])];
@@ -231,7 +292,7 @@ function createCodexCliDriver(codex, mediaAnalysis) {
 			const models = payload.models || {};
 			return [
 				...(models.text || []).map((id) => ({ id: relayModel('codex', id), legacy_id: id, type: 'text', backend: 'codex-cli', job_types: ['chat', ...(jobTypes.includes('media.analyze') ? ['media.analyze'] : [])] })),
-				...(models.image || []).map((id) => ({ id: relayModel('codex', id.replace(/^codex-local:/, '')), legacy_id: id, type: 'image', backend: 'codex-cli', job_types: ['images'] })),
+				...(models.image || []).map((id) => ({ id: relayModel('codex', id.replace(/^codex-local:/, '')), legacy_id: id, type: 'image', backend: 'codex-cli', job_types: ['images'], test_options: CODEX_IMAGE_TEST_OPTIONS })),
 			];
 		},
 		chat: (payload, session) => codex.chat({ ...payload, model: codexModelFromRelay(payload.model) }, session),
@@ -457,7 +518,7 @@ function createGrokCliDriver(options = {}) {
 		const base = baseModels();
 		const state = baseCapabilities();
 		if (!state.ready || !imagine.images) return base;
-		return [...base, { id: 'model-relay:grok-cli:image', type: 'image', backend: 'grok-cli', ready: true }, ...(imagine.videos ? [{ id: 'model-relay:grok-cli:video', type: 'video', backend: 'grok-cli', ready: true, experimental: true, verified: imagine.video_verified }] : [])];
+		return [...base, { id: 'model-relay:grok-cli:image', type: 'image', backend: 'grok-cli', ready: true, test_options: GROK_IMAGE_TEST_OPTIONS }, ...(imagine.videos ? [{ id: 'model-relay:grok-cli:video', type: 'video', backend: 'grok-cli', ready: true, experimental: true, verified: imagine.video_verified }] : [])];
 	};
 	driver.refresh = async (refreshOptions = {}) => {
 		const state = await baseRefresh();
@@ -620,6 +681,24 @@ function createAntigravityCliDriver(mediaAnalysis, options = {}) {
 	}
 
 	function resultFailure(result, operation) {
+		const details = result && result.details && typeof result.details === 'object' ? result.details : {};
+		const output = [result && result.message, result && result.text, result && result.stdout, result && result.stderr, details.message, details.stdout, details.stderr]
+			.filter((value) => typeof value === 'string' && value.trim())
+			.join('\n');
+		const quotaExhausted = /(?:quota|usage|capacity|credits?).{0,120}(?:exhausted|depleted|exceeded)|(?:exhausted|depleted).{0,120}(?:quota|usage|capacity|credits?)/i.test(output);
+		const rateLimited = /\b429\b|too many requests|rate limit|quota exhaustion/i.test(output);
+		if (quotaExhausted || rateLimited) {
+			return {
+				success: false,
+				category: 'rate_limit',
+				code: quotaExhausted ? 'antigravity_quota_exhausted' : 'antigravity_rate_limited',
+				message: quotaExhausted
+					? `Antigravity ${operation} quota is exhausted. Wait for the quota to reset, then retry.`
+					: `Antigravity ${operation} rate limit reached. Wait a moment, then retry.`,
+				retryable: true,
+				details: { provider: 'antigravity-cli', upstream_status: /\b429\b/.test(output) ? 429 : undefined },
+			};
+		}
 		if (result && result.success) {
 			snapshot = { ...snapshot, authenticated: true, state: 'ready', diagnostic: 'Ready.' };
 			return null;
@@ -650,11 +729,11 @@ function createAntigravityCliDriver(mediaAnalysis, options = {}) {
 		return '';
 	}
 
-	async function runPrompt(workspace, prompt, timeoutMs, session) {
+	async function runPrompt(workspace, prompt, timeoutMs, session, operation = 'CLI request') {
 		const args = ['-p', prompt];
 		if (snapshot.print_json_supported) args.push('-o', 'json');
 		const result = await commandRunner(snapshot.command, args, '', session, { ...options, cwd: workspace, timeoutMs });
-		return resultFailure(result, 'request') || result;
+		return resultFailure(result, operation) || result;
 	}
 
 	const driver = {
@@ -674,7 +753,7 @@ function createAntigravityCliDriver(mediaAnalysis, options = {}) {
 		}),
 		models: () => snapshot.ready ? [
 			{ id: 'model-relay:antigravity-cli:auto', type: 'text', backend: definition.id, ready: true, job_types: ['chat'] },
-			{ id: 'model-relay:antigravity-cli:image', type: 'image', backend: definition.id, ready: true, job_types: ['images'] },
+			{ id: 'model-relay:antigravity-cli:image', type: 'image', backend: definition.id, ready: true, job_types: ['images'], test_options: ANTIGRAVITY_IMAGE_TEST_OPTIONS },
 			{ id: 'model-relay:antigravity-cli:media', type: 'text', backend: definition.id, ready: true, job_types: ['media.analyze'] },
 		] : [],
 		async refresh() {
@@ -700,7 +779,7 @@ function createAntigravityCliDriver(mediaAnalysis, options = {}) {
 			const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-model-relay-antigravity-'));
 			try {
 				const prompt = String(messagesToText(payload) || '').trim().slice(0, 24000);
-				const result = await runPrompt(workspace, prompt || 'Respond concisely to the user request.', chatTimeoutMs, session);
+				const result = await runPrompt(workspace, prompt || 'Respond concisely to the user request.', chatTimeoutMs, session, 'chat');
 				if (!result.success) return result;
 				let parsed = null;
 				try { parsed = JSON.parse(result.text); } catch (error) {}
@@ -721,7 +800,7 @@ function createAntigravityCliDriver(mediaAnalysis, options = {}) {
                                 const preferences = generationPreferences(payload, 'images');
                                 const prompt = `Call generate_image exactly once with ImageName ${JSON.stringify(imageName)}.${referenceInstruction} Do not call shell, file, browser, subagent, or any other tools.${preferences ? ` ${preferences}` : ''} User image request: ${String(payload.prompt || '').trim().slice(0, 24000)}`;
 				const startedAt = Date.now();
-				const result = await runPrompt(workspace, prompt, imageTimeoutMs, session);
+				const result = await runPrompt(workspace, prompt, imageTimeoutMs, session, 'image-generation');
 				if (!result.success) return result;
 				const images = findGeneratedImages(imageName, startedAt);
 				if (!images.length) return { success: false, category: 'output_detection', code: 'antigravity_image_artifact_missing', message: 'Antigravity CLI completed without creating the requested image artifact.' };
@@ -758,7 +837,7 @@ function createAntigravityCliDriver(mediaAnalysis, options = {}) {
 				}
 				if (!attachments.length) return { success: false, category: 'validation', code: 'media_frames_required', message: 'Provide bounded image frames, an HTTPS media URL, or a bounded video data URL for Antigravity analysis.' };
 				const prompt = `Analyze the attached media ${attachments.join(' ')}. Do not call shell, file, browser, subagent, or any other tools. Return a concise, factual answer focused on the user request: ${String(payload.prompt || 'Analyze the visual content, visible text, timing, and user-facing issues.').trim().slice(0, 24000)}`;
-				const result = await runPrompt(workspace, prompt, mediaTimeoutMs, session);
+				const result = await runPrompt(workspace, prompt, mediaTimeoutMs, session, 'media-analysis');
 				if (!result.success) return result;
 				let parsed = null;
 				try { parsed = JSON.parse(result.text); } catch (error) {}
@@ -860,7 +939,22 @@ function createOpenAiVideosDriver(video) {
 		},
 		models: () => {
 			const caps = video.capabilities ? video.capabilities() : { models: [] };
-			return (caps.models || []).map((id) => ({ id: relayModel('openai-videos', id), legacy_id: `openai-video:${id}`, type: 'video', backend: 'openai-videos' }));
+			const models = (caps.models || []).map((id) => ({ id: relayModel('openai-videos', id), legacy_id: `openai-video:${id}`, type: 'video', backend: 'openai-videos' }));
+			const testOptions = [
+				testOption('size', 'Resolution', 'direct', [
+					{ value: '1280x720', label: 'Landscape · 1280 × 720' },
+					{ value: '720x1280', label: 'Portrait · 720 × 1280' },
+					{ value: '1792x1024', label: 'Wide · 1792 × 1024' },
+					{ value: '1024x1792', label: 'Tall · 1024 × 1792' },
+				]),
+				testOption('seconds', 'Clip length', 'direct', [
+					{ value: '4', label: '4 seconds' },
+					{ value: '8', label: '8 seconds' },
+					{ value: '12', label: '12 seconds' },
+				]),
+				testOption('model', 'Quality', 'direct', models.map((entry) => ({ value: entry.id, label: /pro/i.test(entry.id) ? 'Pro · Sora 2 Pro' : 'Standard · Sora 2' }))),
+			];
+			return models.map((model) => ({ ...model, test_options: testOptions }));
 		},
 		videos: (payload, session) => video.run(payload, session),
 	};

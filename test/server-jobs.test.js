@@ -167,9 +167,26 @@ function createMockSecurity() {
 		}),
 		images: () => Promise.resolve({ success: true, response: { data: [] } }),
 	};
-	const server = createServer({
+	let server;
+	const statusCache = {
+		status: () => ({
+			success: true,
+			message: 'ready',
+			details: {},
+			bridge: {},
+			asr: codex.asrStatus(),
+			music_analysis: {},
+			jobs: server ? server.jobManager.snapshot() : {},
+			checking: false,
+		}),
+		capabilities: () => ({ success: true, codex: {}, asr: codex.asrStatus(), music_analysis: {}, features: {}, backends: {}, video: {}, media_analysis: {}, checking: false }),
+		refresh: async () => {},
+		sync: () => {},
+	};
+	server = createServer({
 		backgroundRefresh: false,
 		codex,
+		statusCache,
 		security: createMockSecurity(),
 		maxConcurrent: 2,
 		onJobState: (snapshot) => stateUpdates.push(JSON.parse(JSON.stringify(snapshot))),
@@ -367,6 +384,7 @@ function createMockSecurity() {
 		assert.ok(failedStatus.body.jobs.recent[0].session_output.includes('STDERR:\nmock failure'));
 		assert.ok(!JSON.stringify(failedStatus.body.jobs).includes('secret prompt'));
 	} finally {
+		if (typeof server.closeAllConnections === 'function') server.closeAllConnections();
 		await new Promise((resolve) => server.close(resolve));
 	}
 

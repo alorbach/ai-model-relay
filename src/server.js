@@ -346,6 +346,12 @@ function relayPayloadFor(context, jobType, payload = {}) {
 	return { payload: resolvedPayload, resolved };
 }
 
+function validLocalTestRequestId(value) {
+	const requestId = String(value || '').trim();
+	if (!requestId) return '';
+	return /^status-test-[a-z0-9][a-z0-9-]{7,127}$/i.test(requestId) ? requestId : null;
+}
+
 function workflowForJob(jobType, provider) {
 	const key = `${provider || ''}:${jobType}`;
 	const workflows = {
@@ -602,6 +608,11 @@ async function route(req, res, context) {
 			sendErrorJson(req, res, 400, { success: false, category: 'validation', message: 'Choose a specific provider model to run a media test.' }, origin);
 			return;
 		}
+		const suppliedRequestId = validLocalTestRequestId(body.test_request_id);
+		if (body.test_request_id !== undefined && suppliedRequestId === null) {
+			sendErrorJson(req, res, 400, { success: false, category: 'validation', message: 'Provider test request IDs must start with status-test- and contain only letters, numbers, and hyphens.' }, origin);
+			return;
+		}
 		await context.statusCache.refresh();
 		const requestedPayload = {
 			...(body.payload && typeof body.payload === 'object' ? body.payload : {}),
@@ -611,7 +622,7 @@ async function route(req, res, context) {
 		if (body.input_reference_data_url) {
 			requestedPayload.input_reference_data_url = String(body.input_reference_data_url);
 		}
-                for (const key of ['audio_base64', 'audio_format', 'language', 'locale', 'xai_options', 'media_data_url', 'media_url', 'frames', 'size', 'quality', 'seconds']) {
+		for (const key of ['audio_base64', 'audio_format', 'language', 'locale', 'xai_options', 'media_data_url', 'media_url', 'frames', 'size', 'quality', 'seconds', 'aspect_ratio', 'resolution']) {
 			if (body[key] !== undefined) requestedPayload[key] = body[key];
 		}
 		const resolved = relayPayloadFor(context, jobType, requestedPayload);
@@ -620,7 +631,7 @@ async function route(req, res, context) {
 			return;
 		}
 		const display = jobDisplayMeta(context, jobType, resolved.payload, '', '', resolved.resolved);
-		const requestId = `status-test-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
+		const requestId = suppliedRequestId || `status-test-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
 		const result = await jobManager.run({
 			requestId,
 			type: jobType,
@@ -632,7 +643,7 @@ async function route(req, res, context) {
 			sendErrorJson(req, res, errorStatusForResult(result), result, origin, { requestId, route: url.pathname });
 			return;
 		}
-		sendJson(res, 200, result, origin);
+		sendJson(res, 200, { ...result, request_id: requestId }, origin);
 		return;
 	}
 
