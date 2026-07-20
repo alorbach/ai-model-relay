@@ -29,6 +29,12 @@ function safeJobMetadata(value, maxLength = 120) {
 	return normalizeDiagnosticText(value).replace(/[\r\n]+/g, ' ').trim().slice(0, maxLength);
 }
 
+function imageConcurrencyKey(job) {
+	const provider = safeJobMetadata(job && job.provider, 120).toLowerCase();
+	if (provider) return `provider:${provider}`;
+	return `model:${safeJobMetadata(job && job.model, 160).toLowerCase()}`;
+}
+
 function extractRuntimeMetadata(text) {
 	const source = String(text || '');
 	const workflowMatch = source.match(/\b(?:using|use)\s+(?:the\s+)?([a-z0-9][a-z0-9 _-]{1,80}?)\s+workflow\b/i);
@@ -175,11 +181,9 @@ class JobManager {
 		if (this.running.size >= this.maxConcurrent) {
 			return false;
 		}
-		const hasRunningImage = Array.from(this.running.values()).some((runningJob) => runningJob.type === 'images');
-		if (job.type === 'images') {
-			return !hasRunningImage;
-		}
-		return true;
+		if (job.type !== 'images') return true;
+		const key = imageConcurrencyKey(job);
+		return !Array.from(this.running.values()).some((runningJob) => runningJob.type === 'images' && imageConcurrencyKey(runningJob) === key);
 	}
 
 	drain() {

@@ -93,6 +93,15 @@ const mediaAnalysis = require('../src/media-analysis');
 	assert.ok(models.some((model) => model.id === 'model-relay:xai:stt' && model.type === 'audio'));
 	assert.ok(models.some((model) => model.id === 'model-relay:music-analysis:core' && model.type === 'audio'));
 	assert.ok(models.some((model) => model.id === 'model-relay:openai-videos:sora-2'));
+	const codexImageModel = models.find((model) => model.id === 'model-relay:codex:image');
+	assert.deepStrictEqual(codexImageModel.test_options.map((option) => option.key), ['size', 'quality']);
+	assert.deepStrictEqual(codexImageModel.test_options[0].choices.map((choice) => choice.value), ['auto', '1024x1024', '1536x1024', '1024x1536', '2048x2048', '2560x1440', '1440x2560', '3840x2160', '2160x3840']);
+	assert.deepStrictEqual(codexImageModel.test_options[1].choices.map((choice) => choice.value), ['auto', 'low', 'medium', 'high']);
+	assert.ok(codexImageModel.test_options.every((option) => option.delivery === 'guidance'));
+	const openAiVideoModel = models.find((model) => model.id === 'model-relay:openai-videos:sora-2');
+	assert.deepStrictEqual(openAiVideoModel.test_options.map((option) => option.key), ['size', 'seconds', 'model']);
+	assert.ok(openAiVideoModel.test_options.every((option) => option.delivery === 'direct'));
+	assert.ok(!models.some((model) => model.backend === 'cursor-cli' && model.type === 'image'));
 
 	const codexResult = await registry.run('chat', { model: 'model-relay:codex:gpt-5', messages: [{ role: 'user', content: 'hi' }] });
 	assert.strictEqual(codexResult.response.model, 'codex-local:gpt-5');
@@ -242,6 +251,10 @@ const mediaAnalysis = require('../src/media-analysis');
 		if (process.platform === 'win32') assert.ok(antigravityCandidates.includes(path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'agy', 'bin', 'agy.exe')));
 		assert.strictEqual(antigravity.capabilities().ready, true);
 		assert.deepStrictEqual(antigravity.models().map((model) => model.id), ['model-relay:antigravity-cli:auto', 'model-relay:antigravity-cli:image', 'model-relay:antigravity-cli:media']);
+		const antigravityImageModel = antigravity.models().find((model) => model.id === 'model-relay:antigravity-cli:image');
+		assert.deepStrictEqual(antigravityImageModel.test_options.map((option) => option.key), ['size']);
+		assert.deepStrictEqual(antigravityImageModel.test_options[0].choices.map((choice) => choice.value), ['auto', '1024x1024', '1536x1024', '1024x1536', '2048x2048', '2560x1440', '1440x2560', '3840x2160', '2160x3840']);
+		assert.strictEqual(antigravityImageModel.test_options[0].delivery, 'guidance');
 		const antigravityChat = await antigravity.chat({ prompt: 'hello from Antigravity' });
 		assert.strictEqual(antigravityChat.response.choices[0].message.content, 'Antigravity answer');
                 const antigravityImage = await antigravity.images({
@@ -275,6 +288,17 @@ const mediaAnalysis = require('../src/media-analysis');
 		});
 		const missingArtifactResult = await missingArtifact.images({ prompt: 'missing artifact' });
 		assert.strictEqual(missingArtifactResult.code, 'antigravity_image_artifact_missing');
+		const quotaExhausted = createAntigravityCliDriver(mediaAnalysis, {
+			...antigravityOptions,
+			runTextCommand: async (command, args) => args[0] === '--help'
+				? { success: true, text: '', stderr: 'Usage: agy.exe --print PROMPT\n  -p  Short alias for --print' }
+				: { success: true, text: JSON.stringify({ text: 'The image generation service returned a quota exhaustion error (429 Too Many Requests). The capacity for this model has been exhausted.' }) },
+		});
+		const quotaExhaustedResult = await quotaExhausted.images({ prompt: 'quota test' });
+		assert.strictEqual(quotaExhaustedResult.category, 'rate_limit');
+		assert.strictEqual(quotaExhaustedResult.code, 'antigravity_quota_exhausted');
+		assert.strictEqual(quotaExhaustedResult.retryable, true);
+		assert.match(quotaExhaustedResult.message, /quota is exhausted/i);
 
 		const antigravityRegistry = createBackendRegistry({
 			codex,

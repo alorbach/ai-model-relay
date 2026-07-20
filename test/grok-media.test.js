@@ -62,13 +62,18 @@ function createFakeGrok(options = {}) {
 	const fixture = createFakeGrok();
 	try {
 		await fixture.driver.refresh();
-		assert.ok(fixture.driver.models().some((model) => model.id === 'model-relay:grok-cli:image'));
+		const grokImageModel = fixture.driver.models().find((model) => model.id === 'model-relay:grok-cli:image');
+		assert.ok(grokImageModel);
+		assert.deepStrictEqual(grokImageModel.test_options.map((option) => option.key), ['aspect_ratio', 'resolution']);
+		assert.ok(grokImageModel.test_options.every((option) => option.delivery === 'guidance'));
 		assert.ok(fixture.driver.models().some((model) => model.id === 'model-relay:grok-cli:video'));
 
-		const image = await fixture.driver.images({ prompt: 'edit', reference_images: [{ b64_json: Buffer.from('input image').toString('base64'), mime_type: 'image/png' }] });
+		const image = await fixture.driver.images({ prompt: 'edit', aspect_ratio: '16:9', resolution: '2k', reference_images: [{ b64_json: Buffer.from('input image').toString('base64'), mime_type: 'image/png' }] });
 		assert.strictEqual(image.success, true);
 		assert.strictEqual(Buffer.from(image.response.data[0].b64_json, 'base64').toString(), 'generated image');
 		assert.ok(fixture.calls.some((args) => toolForArgs(args) === 'image_edit'));
+		assert.ok(fixture.calls.some((args) => toolForArgs(args) === 'image_edit' && args[args.indexOf('--single') + 1].includes('Requested aspect ratio: 16:9.')));
+		assert.ok(fixture.calls.some((args) => toolForArgs(args) === 'image_edit' && args[args.indexOf('--single') + 1].includes('Requested resolution tier: 2k.')));
 
 		const noReference = await fixture.driver.videos({ prompt: 'animate' });
 		assert.strictEqual(noReference.success, true);

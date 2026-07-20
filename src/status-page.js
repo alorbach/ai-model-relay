@@ -230,7 +230,8 @@ function statusPageHtml() {
 			background: rgba(4, 8, 14, 0.88);
 		}
 		.image-lightbox[hidden] { display: none; }
-		.image-lightbox img {
+		.image-lightbox img,
+		.image-lightbox video {
 			display: block;
 			max-width: min(1100px, 94vw);
 			max-height: 84vh;
@@ -239,6 +240,8 @@ function statusPageHtml() {
 			background: #070b10;
 			object-fit: contain;
 		}
+		.image-lightbox img[hidden],
+		.image-lightbox video[hidden] { display: none; }
 		.image-lightbox-close {
 			position: absolute;
 			top: 18px;
@@ -525,6 +528,64 @@ function statusPageHtml() {
 			cursor: progress;
 			opacity: 0.7;
 		}
+		.provider-test-status {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			gap: 10px;
+			min-width: 0;
+		}
+		.provider-test-progress {
+			color: var(--info);
+			font-variant-numeric: tabular-nums;
+			text-align: right;
+		}
+		.provider-test-activity {
+			height: 4px;
+			overflow: hidden;
+			background: var(--line);
+			border-radius: 999px;
+		}
+		.provider-test-activity[hidden] { display: none; }
+		.provider-test-activity span {
+			display: block;
+			width: 42%;
+			height: 100%;
+			border-radius: inherit;
+			background: linear-gradient(90deg, transparent, var(--info), var(--accent), transparent);
+			animation: provider-test-activity 1.15s ease-in-out infinite;
+		}
+		@keyframes provider-test-activity {
+			from { transform: translateX(-120%); }
+			to { transform: translateX(260%); }
+		}
+		.provider-test-result:empty { display: none; }
+		.provider-test-result {
+			display: flex;
+			flex-wrap: wrap;
+			gap: 10px;
+		}
+		.provider-media-test .provider-test-artifact {
+			display: grid;
+			gap: 6px;
+			width: min(280px, 100%);
+			padding: 0;
+			border: 0;
+			background: transparent;
+			color: var(--accent);
+			cursor: zoom-in;
+			font-size: 12px;
+			text-align: left;
+		}
+		.provider-media-test .provider-test-artifact img,
+		.provider-media-test .provider-test-artifact video {
+			width: 100%;
+			max-height: 220px;
+			object-fit: contain;
+			background: #070b10;
+			border: 1px solid var(--line);
+			border-radius: 8px;
+		}
 		.tabs {
 			display: flex;
 			align-items: center;
@@ -667,26 +728,21 @@ function statusPageHtml() {
 			<div class="panel span-12">
 				<div class="label">Provider media and audio tests</div>
 				<p class="muted">Runs a real request against the selected ready provider. Provider usage or API charges may apply. Selecting xAI Speech-to-Text uploads the chosen audio to xAI; Local ASR and Local Music Analysis stay on this computer.</p>
-                                <div class="tabs provider-test-tabs" role="tablist" aria-label="Provider test types">
-                                        <button class="tab-button" type="button" role="tab" id="provider-test-tab-media" data-provider-test-tab aria-controls="provider-test-panel-media" aria-selected="true">Media</button>
-                                        <button class="tab-button" type="button" role="tab" id="provider-test-tab-audio" data-provider-test-tab aria-controls="provider-test-panel-audio" aria-selected="false" tabindex="-1">Audio</button>
-                                </div>
-                                <div class="provider-test-panel" id="provider-test-panel-media" role="tabpanel" aria-labelledby="provider-test-tab-media">
-                                        <div class="tabs provider-test-tabs provider-media-kind-tabs" role="tablist" aria-label="Provider media test types">
-                                                <button class="tab-button" type="button" role="tab" id="provider-media-tab-images" data-provider-media-tab aria-controls="provider-media-panel-images" aria-selected="true">Image</button>
-                                                <button class="tab-button" type="button" role="tab" id="provider-media-tab-videos" data-provider-media-tab aria-controls="provider-media-panel-videos" aria-selected="false" tabindex="-1">Video</button>
-                                                <button class="tab-button" type="button" role="tab" id="provider-media-tab-analysis" data-provider-media-tab aria-controls="provider-media-panel-analysis" aria-selected="false" tabindex="-1">Video analysis</button>
-                                        </div>
-                                        <div class="provider-media-kind-panel" id="provider-media-panel-images" role="tabpanel" aria-labelledby="provider-media-tab-images">
-                                                <div class="provider-media-tests" id="providerImageTests">Load routing settings to see ready image providers.</div>
-                                        </div>
-                                        <div class="provider-media-kind-panel" id="provider-media-panel-videos" role="tabpanel" aria-labelledby="provider-media-tab-videos" hidden>
-                                                <div class="provider-media-tests" id="providerVideoTests">Load routing settings to see ready video providers.</div>
-                                        </div>
-                                        <div class="provider-media-kind-panel" id="provider-media-panel-analysis" role="tabpanel" aria-labelledby="provider-media-tab-analysis" hidden>
-                                                <div class="provider-media-tests" id="providerAnalysisTests">Load routing settings to see ready video-analysis providers.</div>
-                                        </div>
-                                </div>
+				<div class="tabs provider-test-tabs" role="tablist" aria-label="Provider test types">
+					<button class="tab-button" type="button" role="tab" id="provider-test-tab-images" data-provider-test-tab aria-controls="provider-test-panel-images" aria-selected="true">Image</button>
+					<button class="tab-button" type="button" role="tab" id="provider-test-tab-videos" data-provider-test-tab aria-controls="provider-test-panel-videos" aria-selected="false" tabindex="-1">Video</button>
+					<button class="tab-button" type="button" role="tab" id="provider-test-tab-analysis" data-provider-test-tab aria-controls="provider-test-panel-analysis" aria-selected="false" tabindex="-1">Video analysis</button>
+					<button class="tab-button" type="button" role="tab" id="provider-test-tab-audio" data-provider-test-tab aria-controls="provider-test-panel-audio" aria-selected="false" tabindex="-1">Audio</button>
+				</div>
+				<div class="provider-test-panel" id="provider-test-panel-images" role="tabpanel" aria-labelledby="provider-test-tab-images">
+					<div class="provider-media-tests" id="providerImageTests">Load routing settings to see ready image providers.</div>
+				</div>
+				<div class="provider-test-panel" id="provider-test-panel-videos" role="tabpanel" aria-labelledby="provider-test-tab-videos" hidden>
+					<div class="provider-media-tests" id="providerVideoTests">Load routing settings to see ready video providers.</div>
+				</div>
+				<div class="provider-test-panel" id="provider-test-panel-analysis" role="tabpanel" aria-labelledby="provider-test-tab-analysis" hidden>
+					<div class="provider-media-tests" id="providerAnalysisTests">Load routing settings to see ready video-analysis providers.</div>
+				</div>
 				<div class="provider-test-panel" id="provider-test-panel-audio" role="tabpanel" aria-labelledby="provider-test-tab-audio" hidden>
 					<div class="provider-media-tests" id="providerAudioTests">Load routing settings to see ready transcription and music-analysis providers.</div>
 				</div>
@@ -768,9 +824,10 @@ function statusPageHtml() {
 			</details>
 		</section>
 	</main>
-	<div class="image-lightbox" id="imageLightbox" role="dialog" aria-modal="true" aria-label="Generated image preview" hidden>
+	<div class="image-lightbox" id="imageLightbox" role="dialog" aria-modal="true" aria-label="Generated media preview" hidden>
 		<button type="button" class="copy-session-output image-lightbox-close" id="closeImageLightbox">Close</button>
 		<img id="imageLightboxContent" alt="Generated image full preview">
+		<video id="mediaLightboxVideo" controls preload="metadata" playsinline hidden></video>
 	</div>
 	<script>
 		const statusUrl = '/v1/status';
@@ -817,8 +874,6 @@ function statusPageHtml() {
                         providerAudioTests: document.getElementById('providerAudioTests'),
                         providerTestTabButtons: Array.from(document.querySelectorAll('[data-provider-test-tab]')),
                         providerTestTabPanels: Array.from(document.querySelectorAll('.provider-test-panel[role="tabpanel"]')),
-                        providerMediaTabButtons: Array.from(document.querySelectorAll('[data-provider-media-tab]')),
-                        providerMediaTabPanels: Array.from(document.querySelectorAll('.provider-media-kind-panel[role="tabpanel"]')),
 			musicAnalysisSettingsForm: document.getElementById('musicAnalysisSettingsForm'),
 			musicAnalysisSettings: document.getElementById('musicAnalysisSettings'),
 			musicAnalysisSettingsMessage: document.getElementById('musicAnalysisSettingsMessage'),
@@ -846,6 +901,7 @@ function statusPageHtml() {
 			copyRawStatus: document.getElementById('copyRawStatus'),
 			imageLightbox: document.getElementById('imageLightbox'),
 			imageLightboxContent: document.getElementById('imageLightboxContent'),
+			mediaLightboxVideo: document.getElementById('mediaLightboxVideo'),
 			closeImageLightbox: document.getElementById('closeImageLightbox'),
 		};
 
@@ -923,37 +979,8 @@ function statusPageHtml() {
 					selectProviderTestTab(fields.providerTestTabButtons[nextIndex].id, { focus: true });
 				});
 			});
-                        selectProviderTestTab('provider-test-tab-media');
-                }
-
-                function selectProviderMediaTab(tabId, options = {}) {
-                        const nextButton = fields.providerMediaTabButtons.find((button) => button.id === tabId) || fields.providerMediaTabButtons[0];
-                        if (!nextButton) return;
-                        const nextPanelId = nextButton.getAttribute('aria-controls');
-                        for (const button of fields.providerMediaTabButtons) {
-                                const selected = button === nextButton;
-                                button.setAttribute('aria-selected', selected ? 'true' : 'false');
-                                button.tabIndex = selected ? 0 : -1;
-                        }
-                        for (const panel of fields.providerMediaTabPanels) panel.hidden = panel.id !== nextPanelId;
-                        if (options.focus) nextButton.focus();
-                }
-
-                function initProviderMediaTabs() {
-                        fields.providerMediaTabButtons.forEach((button, index) => {
-                                button.addEventListener('click', () => selectProviderMediaTab(button.id));
-                                button.addEventListener('keydown', (event) => {
-                                        if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
-                                        event.preventDefault();
-                                        let nextIndex = index;
-                                        if (event.key === 'Home') nextIndex = 0;
-                                        else if (event.key === 'End') nextIndex = fields.providerMediaTabButtons.length - 1;
-                                        else nextIndex = (index + (event.key === 'ArrowRight' ? 1 : -1) + fields.providerMediaTabButtons.length) % fields.providerMediaTabButtons.length;
-                                        selectProviderMediaTab(fields.providerMediaTabButtons[nextIndex].id, { focus: true });
-                                });
-                        });
-                        selectProviderMediaTab('provider-media-tab-images');
-                }
+			selectProviderTestTab('provider-test-tab-images');
+		}
 
 		function text(value, fallback = '-') {
 			const normalized = String(value ?? '').trim();
@@ -1065,10 +1092,10 @@ function statusPageHtml() {
 				const url = text(artifact && artifact.url, '');
 				const mimeType = text(artifact && artifact.mime_type, '');
 				if (!/^\\/v1\\/status\\/jobs\\/\\d+\\/artifacts\\/\\d+$/.test(url)) return '';
-				if (/^video\\//.test(mimeType)) return '<div class="job-artifact-preview video"><video src="' + escapeHtml(url) + '" controls preload="metadata" playsinline></video><span>Generated video ' + (index + 1) + '</span></div>';
+				if (/^video\\//.test(mimeType)) return '<button type="button" class="job-artifact-preview" data-media-preview="' + escapeHtml(url) + '" data-media-mime="' + escapeHtml(mimeType) + '" title="Open generated video ' + (index + 1) + '"><video src="' + escapeHtml(url) + '" muted preload="metadata" playsinline></video><span>Open generated video ' + (index + 1) + '</span></button>';
 				if (!/^image\\//.test(mimeType)) return '';
 				const label = 'Open generated image ' + (index + 1);
-				return '<button type="button" class="job-artifact-preview" data-image-preview="' + escapeHtml(url) + '" title="' + escapeHtml(label) + '"><img src="' + escapeHtml(url) + '" alt="Generated image preview ' + (index + 1) + '" loading="lazy"><span>' + escapeHtml(label) + '</span></button>';
+				return '<button type="button" class="job-artifact-preview" data-media-preview="' + escapeHtml(url) + '" data-media-mime="' + escapeHtml(mimeType) + '" title="' + escapeHtml(label) + '"><img src="' + escapeHtml(url) + '" alt="Generated image preview ' + (index + 1) + '" loading="lazy"><span>' + escapeHtml(label) + '</span></button>';
 			}).filter(Boolean);
 			return previews.length ? '<div class="job-artifacts">' + previews.join('') + '</div>' : '';
 		}
@@ -1443,7 +1470,9 @@ function statusPageHtml() {
 				const options = unavailable.concat(compatible.map((model) => '<option value="' + escapeHtml(model.id) + '"' + optionAttr(model.id, current) + '>' + escapeHtml(model.id) + (model.experimental ? ' (experimental)' : '') + '</option>'));
 				return '<label class="field"><span>' + labels[jobType] + '</span><select data-relay-job="' + jobType + '">' + options.join('') + '</select></label>';
 			}).join('');
-			renderProviderMediaTests(models, backends);
+			if (!document.querySelector('[data-provider-media-test][data-test-request-id]')) {
+				renderProviderMediaTests(models, backends);
+			}
 		}
 
 		function readyMediaModels(models, backends, jobType, type) {
@@ -1454,8 +1483,28 @@ function statusPageHtml() {
 			});
 		}
 
+                function providerTestControls(model, jobType) {
+                        const options = Array.isArray(model.test_options) ? model.test_options.filter((entry) => entry && entry.key && Array.isArray(entry.choices) && entry.choices.length) : [];
+                        if (!options.length) {
+                                return jobType === 'images' && model.backend === 'antigravity-cli'
+                                        ? '<small class="muted">Antigravity generate_image does not expose CLI resolution or quality options.</small>'
+                                        : '';
+                        }
+                        const controls = options.map((entry) => {
+                                const key = String(entry.key || '').trim();
+                                const choices = entry.choices.filter((choice) => choice && choice.value !== undefined);
+                                if (!key || !choices.length) return '';
+                                const selected = key === 'model' ? model.id : String(choices[0].value);
+                                const selectOptions = choices.map((choice) => '<option value="' + escapeHtml(choice.value) + '"' + (String(choice.value) === selected ? ' selected' : '') + '>' + escapeHtml(choice.label || choice.value) + '</option>').join('');
+                                const delivery = entry.delivery === 'direct' ? 'sent directly' : 'generation guidance';
+                                return '<label class="field"><span>' + escapeHtml(entry.label || key) + ' · ' + delivery + '</span><select data-test-option="' + escapeHtml(key) + '">' + selectOptions + '</select></label>';
+                        }).filter(Boolean).join('');
+                        const deliveries = Array.from(new Set(options.map((entry) => entry.delivery === 'direct' ? 'directly to the provider' : 'as generation guidance')));
+                        return controls ? '<div class="settings-grid provider-generation-options">' + controls + '</div><small class="muted">Selected values are sent ' + escapeHtml(deliveries.join(' and ')) + '.</small>' : '';
+                }
+
                 function renderProviderMediaTests(models, backends) {
-                        const imageTests = readyMediaModels(models, backends, 'images', 'image').map((model) => ({ model, jobType: 'images', title: 'Image generation', prompt: 'Create a polished abstract AI Model Relay icon on a dark background.' }));
+			const imageTests = readyMediaModels(models, backends, 'images', 'image').map((model) => ({ model, jobType: 'images', title: 'Image generation', prompt: 'Ultrarealistic scene Cool Kungfu Cat' }));
                         const videoModels = readyMediaModels(models, backends, 'videos', 'video');
                         const renderedVideoBackends = new Set();
                         const videoTests = videoModels.filter((model) => {
@@ -1469,42 +1518,6 @@ function statusPageHtml() {
                                 ...readyMediaModels(models, backends, 'transcribe', 'audio').map((model) => ({ model, jobType: 'transcribe', title: model.backend === 'xai-api' ? 'xAI Speech-to-Text (cloud)' : 'Audio transcription', prompt: '' })),
                                 ...readyMediaModels(models, backends, 'music.analyze', 'audio').map((model) => ({ model, jobType: 'music.analyze', title: 'Local music analysis', prompt: '' })),
                         ];
-                        const option = (value, label, selected) => '<option value="' + escapeHtml(value) + '"' + (value === selected ? ' selected' : '') + '>' + escapeHtml(label) + '</option>';
-                        const imageOptions = (model) => {
-                                const guidance = model.backend === 'codex-cli'
-                                        ? 'These values are sent directly with the image request.'
-                                        : 'These values are passed to this CLI as generation guidance; the provider may choose the nearest supported output.';
-                                return '<div class="settings-grid provider-generation-options">' +
-                                        '<label class="field"><span>Resolution</span><select data-test-size>' +
-                                                option('1024x1024', 'Square · 1024 × 1024', '1024x1024') +
-                                                option('1536x1024', 'Landscape · 1536 × 1024', '1024x1024') +
-                                                option('1024x1536', 'Portrait · 1024 × 1536', '1024x1024') +
-                                        '</select></label>' +
-                                        '<label class="field"><span>Quality</span><select data-test-quality>' +
-                                                option('standard', 'Standard', 'high') +
-                                                option('high', 'High', 'high') +
-                                        '</select></label>' +
-                                '</div><small class="muted">' + guidance + '</small>';
-                        };
-                        const videoOptions = (model) => {
-                                const isOpenAi = model.backend === 'openai-videos';
-                                const qualityModelOptions = isOpenAi
-                                        ? videoModels.filter((entry) => entry.backend === 'openai-videos').map((entry) => option(entry.id, /pro/i.test(entry.id) ? 'Pro · Sora 2 Pro' : 'Standard · Sora 2', model.id)).join('')
-                                        : '';
-                                const resolutionOptions = isOpenAi
-                                        ? option('1280x720', 'Landscape · 1280 × 720', '1280x720') + option('720x1280', 'Portrait · 720 × 1280', '1280x720') + option('1792x1024', 'Wide · 1792 × 1024', '1280x720') + option('1024x1792', 'Tall · 1024 × 1792', '1280x720')
-                                        : option('1280x720', 'Landscape · 1280 × 720', '1280x720') + option('720x1280', 'Portrait · 720 × 1280', '1280x720');
-                                const guidance = isOpenAi
-                                        ? 'Resolution and clip length are sent directly to the OpenAI Videos API. Quality selects the Sora model tier.'
-                                        : 'Resolution, clip length, and quality are passed to this CLI as generation guidance; the provider may choose the nearest supported output.';
-                                return '<div class="settings-grid provider-generation-options">' +
-                                        '<label class="field"><span>Resolution</span><select data-test-size>' + resolutionOptions + '</select></label>' +
-                                        '<label class="field"><span>Clip length</span><select data-test-seconds>' + option('4', '4 seconds', '4') + option('8', '8 seconds', '4') + option('12', '12 seconds', '4') + '</select></label>' +
-                                        (isOpenAi
-                                                ? '<label class="field"><span>Quality</span><select data-test-model>' + qualityModelOptions + '</select></label>'
-                                                : '<label class="field"><span>Quality</span><select data-test-quality>' + option('standard', 'Standard', 'high') + option('high', 'High', 'high') + '</select></label>') +
-                                '</div><small class="muted">' + guidance + '</small>';
-                        };
                         const renderCards = (items, emptyMessage) => items.length ? items.map(({ model, jobType, title, prompt }) => {
                                 const isVideo = jobType === 'videos';
                                 const isMediaAnalysis = jobType === 'media.analyze';
@@ -1518,10 +1531,12 @@ function statusPageHtml() {
                                         '<div class="provider-media-test-heading"><span>' + escapeHtml(title) + '</span><code>' + escapeHtml(model.id) + '</code></div>' +
                                         promptField +
                                         (isAudio ? audio : (isMediaAnalysis ? media : reference)) +
-                                        (jobType === 'images' ? imageOptions(model) : (isVideo ? videoOptions(model) : '')) +
+                                        providerTestControls(model, jobType) +
                                         (isMediaAnalysis && model.backend === 'antigravity-cli' ? '<small class="muted">The selected video is sent to your authenticated Antigravity CLI; it is not a local-only analysis path.</small>' : '') +
 					'<button type="button" data-provider-test="' + jobType + '" data-model="' + escapeHtml(model.id) + '">Run ' + testLabel + ' test</button>' +
-					'<small class="muted" data-test-message>Ready to test ' + escapeHtml(model.id) + '.</small>' +
+                                        '<div class="provider-test-status"><small class="muted" data-test-message>Ready to test ' + escapeHtml(model.id) + '.</small><small class="provider-test-progress" data-test-progress aria-live="polite">Idle</small></div>' +
+                                        '<div class="provider-test-activity" data-test-progress-bar role="progressbar" aria-label="Provider test activity" aria-valuetext="Idle" hidden><span></span></div>' +
+                                        '<div class="provider-test-result" data-test-result></div>' +
 				'</article>';
 			}).join('') : '<div class="muted">' + escapeHtml(emptyMessage) + '</div>';
                         fields.providerImageTests.innerHTML = renderCards(imageTests, 'No ready image providers are available for testing.');
@@ -1539,42 +1554,132 @@ function statusPageHtml() {
 			});
 		}
 
+		function createProviderTestRequestId() {
+			return 'status-test-ui-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+		}
+
+		function providerTestJob(requestId) {
+			const jobs = currentStatus && currentStatus.jobs || {};
+			return [...(Array.isArray(jobs.active) ? jobs.active : []), ...(Array.isArray(jobs.queued) ? jobs.queued : []), ...(Array.isArray(jobs.recent) ? jobs.recent : [])]
+				.find((job) => String(job && job.request_id || '') === String(requestId || '')) || null;
+		}
+
+		function setProviderTestActivity(card, active, state) {
+			const activity = card && card.querySelector('[data-test-progress-bar]');
+			if (!activity) return;
+			activity.hidden = !active;
+			activity.setAttribute('aria-valuetext', state || (active ? 'Working' : 'Idle'));
+		}
+
+		function restoreProviderTestButton(card) {
+			const button = card && card.querySelector('[data-provider-test]');
+			if (!button) return;
+			button.disabled = false;
+			button.textContent = card.dataset.testButtonLabel || button.textContent;
+			delete card.dataset.testButtonLabel;
+		}
+
+		function settleProviderTestCard(card, job) {
+			const message = card && card.querySelector('[data-test-message]');
+			const progress = card && card.querySelector('[data-test-progress]');
+			const state = String(job && job.status || '').toLowerCase();
+			if (state === 'completed') {
+				renderProviderTestResult(card, job);
+				if (message) message.textContent = 'Completed. Click the result to preview it.';
+				if (progress) progress.textContent = 'Completed · ' + elapsed(Number(job.elapsed_ms || 0));
+			} else if (state === 'failed') {
+				if (message) message.textContent = String(job.error_message || 'Provider test failed.');
+				if (progress) progress.textContent = 'Failed · ' + elapsed(Number(job.elapsed_ms || 0));
+			} else {
+				return false;
+			}
+			setProviderTestActivity(card, false, state);
+			delete card.dataset.testRequestId;
+			delete card.dataset.testStartedAt;
+			restoreProviderTestButton(card);
+			return true;
+		}
+
+		function updateProviderTestProgress() {
+			document.querySelectorAll('[data-provider-media-test][data-test-request-id]').forEach((card) => {
+				const progress = card.querySelector('[data-test-progress]');
+				const message = card.querySelector('[data-test-message]');
+				if (!progress) return;
+				const job = providerTestJob(card.dataset.testRequestId);
+				const startedAt = Number(card.dataset.testStartedAt || Date.now());
+				if (!job) {
+					progress.textContent = 'Submitting · ' + elapsed(Math.max(0, Date.now() - startedAt));
+					if (message) message.textContent = 'Submitting provider test. This card will follow the matching Live job.';
+					setProviderTestActivity(card, true, 'Submitting');
+					return;
+				}
+				const duration = Number(job.elapsed_ms || Math.max(0, Date.now() - startedAt));
+				const state = String(job.status || 'running').toLowerCase();
+				if (settleProviderTestCard(card, job)) return;
+				const detail = String(job.session_output || '').trim().replace(/\s+/g, ' ').slice(-180);
+				progress.textContent = (state === 'queued' ? 'Queued' : (state === 'running' ? 'Running' : state)) + ' · ' + elapsed(duration) + (detail ? ' · ' + detail : '');
+				if (message) message.textContent = (state === 'queued' ? 'Queued' : 'Running') + '. This card is following the matching Live job.';
+				if (detail) progress.title = String(job.session_output).slice(-500);
+				setProviderTestActivity(card, state === 'queued' || state === 'running', state);
+			});
+		}
+
+		function renderProviderTestResult(card, job) {
+			const result = card && card.querySelector('[data-test-result]');
+			if (!result) return;
+			const artifacts = Array.isArray(job && job.artifacts) ? job.artifacts : [];
+			const artifact = artifacts.find((entry) => entry && /^\\/(?:v1)\\/status\\/jobs\\/\d+\\/artifacts\\/\d+$/.test(String(entry.url || '')) && /^(image|video)\\//.test(String(entry.mime_type || '')));
+			if (!artifact) {
+				result.innerHTML = '<button type="button" data-open-live>Open completed result in Live</button>';
+				return;
+			}
+			const url = escapeHtml(artifact.url);
+			const mimeType = String(artifact.mime_type || '');
+			const isVideo = /^video\\//.test(mimeType);
+			const label = isVideo ? 'Open generated video' : 'Open generated image';
+			const media = isVideo
+				? '<video src="' + url + '" muted preload="metadata" playsinline></video>'
+				: '<img src="' + url + '" alt="Generated image preview" loading="lazy">';
+			result.innerHTML = '<button type="button" class="provider-test-artifact" data-media-preview="' + url + '" data-media-mime="' + escapeHtml(mimeType) + '" title="' + escapeHtml(label) + '">' + media + '<span>' + escapeHtml(label) + '</span></button>';
+		}
+
 		async function runProviderMediaTest(button) {
 			const card = button.closest('[data-provider-media-test]');
 			const message = card && card.querySelector('[data-test-message]');
+			const progress = card && card.querySelector('[data-test-progress]');
+			const result = card && card.querySelector('[data-test-result]');
 			const jobType = button.dataset.providerTest;
 			const prompt = card && card.querySelector('[data-test-prompt]');
 			const reference = card && card.querySelector('[data-test-reference]');
-                        const media = card && card.querySelector('[data-test-media]');
-                        const audio = card && card.querySelector('[data-test-audio]');
-                        const selectedModel = card && card.querySelector('[data-test-model]');
-                        const size = card && card.querySelector('[data-test-size]');
-                        const quality = card && card.querySelector('[data-test-quality]');
-                        const seconds = card && card.querySelector('[data-test-seconds]');
+			const media = card && card.querySelector('[data-test-media]');
+			const audio = card && card.querySelector('[data-test-audio]');
 			const original = button.textContent;
+			const requestId = createProviderTestRequestId();
+			let completed = false;
+			let continuingTrackedJob = false;
 			try {
 				button.disabled = true;
 				button.textContent = 'Running...';
-				if (message) message.textContent = 'Starting provider test. Follow progress in Live.';
-                                const body = { job_type: jobType, model: selectedModel ? selectedModel.value : (button.dataset.model || ''), prompt: prompt ? prompt.value.trim() : '' };
-                                if (size && size.value) body.size = size.value;
-                                if (quality && quality.value) body.quality = quality.value;
-                                if (seconds && seconds.value) body.seconds = seconds.value;
+				card.dataset.testButtonLabel = original;
+				card.dataset.testRequestId = requestId;
+				card.dataset.testStartedAt = String(Date.now());
+				if (result) result.innerHTML = '';
+				if (message) message.textContent = 'Starting provider test.';
+				updateProviderTestProgress();
+				const body = { job_type: jobType, model: button.dataset.model || '', prompt: prompt ? prompt.value.trim() : '', test_request_id: requestId };
+				Array.from(card.querySelectorAll('[data-test-option]')).forEach((field) => {
+					const key = String(field.dataset.testOption || '').trim();
+					if (!key || !field.value) return;
+					if (key === 'model') body.model = field.value;
+					else body[key] = field.value;
+				});
 				const file = reference && reference.files && reference.files[0];
-				if (file) {
-					body.input_reference_data_url = await fileAsDataUrl(file);
-				}
+				if (file) body.input_reference_data_url = await fileAsDataUrl(file);
 				const mediaFile = media && media.files && media.files[0];
-				if (jobType === 'media.analyze' && !mediaFile) {
-					throw new Error('Choose a small video file before running this test.');
-				}
-				if (mediaFile) {
-					body.media_data_url = await fileAsDataUrl(mediaFile);
-				}
+				if (jobType === 'media.analyze' && !mediaFile) throw new Error('Choose a small video file before running this test.');
+				if (mediaFile) body.media_data_url = await fileAsDataUrl(mediaFile);
 				const audioFile = audio && audio.files && audio.files[0];
-				if ((jobType === 'transcribe' || jobType === 'music.analyze') && !audioFile) {
-					throw new Error('Choose an audio file before running this test.');
-				}
+				if ((jobType === 'transcribe' || jobType === 'music.analyze') && !audioFile) throw new Error('Choose an audio file before running this test.');
 				if (audioFile) {
 					const dataUrl = await fileAsDataUrl(audioFile);
 					const match = /^data:([^;]+);base64,([A-Za-z0-9+/=\s]+)$/i.exec(dataUrl);
@@ -1585,13 +1690,37 @@ function statusPageHtml() {
 				const response = await fetch(relayTestUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 				const payload = await response.json().catch(() => ({}));
 				if (!response.ok || !payload.success) throw new Error(payload.message || 'Provider test failed.');
-				if (message) message.textContent = 'Completed. Open Live to inspect output.';
+				completed = true;
 			} catch (error) {
-				if (message) message.textContent = error.message || 'Provider test failed.';
+				await refresh().catch(() => {});
+				const job = providerTestJob(requestId);
+				const state = String(job && job.status || '').toLowerCase();
+				if (job && (state === 'queued' || state === 'running')) {
+					continuingTrackedJob = true;
+					if (message) message.textContent = 'The test request connection ended, but the provider job is still ' + state + '. Continuing to follow it here.';
+					updateProviderTestProgress();
+				} else {
+					if (message) message.textContent = error.message || 'Provider test failed.';
+					if (progress) progress.textContent = 'Failed · ' + elapsed(Math.max(0, Date.now() - Number(card.dataset.testStartedAt || Date.now())));
+					setProviderTestActivity(card, false, 'Failed');
+				}
 			} finally {
-				await Promise.all([refresh().catch(() => {}), loadRelaySettings().catch(() => {})]);
-				button.disabled = false;
-				button.textContent = original;
+				await refresh().catch(() => {});
+				const job = providerTestJob(requestId);
+				const state = String(job && job.status || '').toLowerCase();
+				if (continuingTrackedJob && job && (state === 'queued' || state === 'running')) {
+					return;
+				}
+				if (completed && job) {
+					settleProviderTestCard(card, job);
+				} else if (completed && message) {
+					message.textContent = 'Completed. Open Live to inspect the result.';
+					if (progress) progress.textContent = 'Completed';
+				}
+				delete card.dataset.testRequestId;
+				delete card.dataset.testStartedAt;
+				setProviderTestActivity(card, false, completed ? 'Completed' : 'Failed');
+				restoreProviderTestButton(card);
 			}
 		}
 
@@ -1942,11 +2071,29 @@ function statusPageHtml() {
 
 		function closeImageLightbox() {
 			fields.imageLightbox.hidden = true;
+			fields.mediaLightboxVideo.pause();
+			fields.mediaLightboxVideo.hidden = true;
+			fields.mediaLightboxVideo.removeAttribute('src');
 			fields.imageLightboxContent.removeAttribute('src');
+			fields.imageLightboxContent.hidden = true;
 		}
 
 		function openImageLightbox(url) {
-			fields.imageLightboxContent.src = url;
+			openMediaLightbox(url, 'image/png');
+		}
+
+		function openMediaLightbox(url, mimeType) {
+			const video = /^video\\//i.test(String(mimeType || ''));
+			fields.imageLightboxContent.hidden = video;
+			fields.mediaLightboxVideo.hidden = !video;
+			if (video) {
+				fields.imageLightboxContent.removeAttribute('src');
+				fields.mediaLightboxVideo.src = url;
+			} else {
+				fields.mediaLightboxVideo.pause();
+				fields.mediaLightboxVideo.removeAttribute('src');
+				fields.imageLightboxContent.src = url;
+			}
 			fields.imageLightbox.hidden = false;
 			fields.closeImageLightbox.focus();
 		}
@@ -1958,10 +2105,22 @@ function statusPageHtml() {
 				await runProviderMediaTest(providerTest);
 				return;
 			}
+			const mediaPreview = event.target.closest('[data-media-preview]');
+			if (mediaPreview) {
+				event.preventDefault();
+				openMediaLightbox(mediaPreview.dataset.mediaPreview, mediaPreview.dataset.mediaMime);
+				return;
+			}
 			const imagePreview = event.target.closest('[data-image-preview]');
 			if (imagePreview) {
 				event.preventDefault();
 				openImageLightbox(imagePreview.dataset.imagePreview);
+				return;
+			}
+			const openLive = event.target.closest('[data-open-live]');
+			if (openLive) {
+				event.preventDefault();
+				selectTab('tab-live', { focus: true });
 				return;
 			}
 			if (event.target === fields.closeImageLightbox || event.target === fields.imageLightbox) {
@@ -2016,6 +2175,7 @@ function statusPageHtml() {
 			renderQueuedJobs(Array.isArray(jobs.queued) ? jobs.queued : []);
 			renderRecentActivity(Array.isArray(jobs.recent) ? jobs.recent : []);
 			currentStatus.jobs = jobs;
+			updateProviderTestProgress();
 			fields.rawStatus.textContent = JSON.stringify(currentStatus, null, 2);
 			fields.updated.textContent = 'Live updates on - updated ' + new Date().toLocaleTimeString();
 			queueRestoreSessionOutputScrolls(scrollStates);
@@ -2027,6 +2187,7 @@ function statusPageHtml() {
 				const captured = Number(cell.dataset.elapsedCaptured || Date.now());
 				cell.textContent = elapsed(base + Math.max(0, Date.now() - captured));
 			});
+			updateProviderTestProgress();
 		}
 
 		function renderStatus(payload, ok) {
@@ -2178,10 +2339,9 @@ function statusPageHtml() {
 			};
 		}
 
-                initTabs();
-                initProviderTestTabs();
-                initProviderMediaTabs();
-                setInterval(tickElapsedCells, 1000);
+		initTabs();
+		initProviderTestTabs();
+		setInterval(tickElapsedCells, 1000);
 		fields.asrSettingsForm.addEventListener('submit', (event) => {
 			event.preventDefault();
 			saveAsrSettings();

@@ -830,6 +830,7 @@ function imagePrompt(payload, attachments = []) {
 	const prompt = String(payload.prompt || '').trim();
 	const size = String(payload.size || '1024x1024').trim();
 	const quality = String(payload.quality || 'high').trim();
+	const outputFormat = String(payload.output_format || 'image/png').trim();
 	const lines = [
 		'Generate exactly one image using your built-in image generation tool.',
 		'Do not access unrelated local files or modify anything except generated image output.',
@@ -850,6 +851,7 @@ function imagePrompt(payload, attachments = []) {
 		`User prompt: ${prompt}`,
 		`Requested size: ${size}`,
 		`Preferred quality: ${quality}`,
+		`Requested output format: ${outputFormat}. Produce this exact file format.`,
 		'After the image has been generated, reply with a short plain-text confirmation only.',
 	);
 	return lines.join('\n');
@@ -937,10 +939,14 @@ async function images(payload, session = {}) {
 		return failure;
 	}
 	const bytes = fs.readFileSync(newImages[0].path);
+	const mimeType = mimeFromImagePath(newImages[0].path);
+	if (!['image/png', 'image/jpeg', 'image/webp'].includes(mimeType)) {
+		return { success: false, code: 'codex_image_output_format_invalid', category: 'codex_cli', message: 'Codex CLI returned an unsupported image file format.', details: { debug_log_dir: debugLog && debugLog.dir || '' } };
+	}
 	return {
 		success: true,
 		response: {
-			data: [{ b64_json: bytes.toString('base64') }],
+			data: [{ b64_json: bytes.toString('base64'), mime_type: mimeType }],
 			usage: parseUsage(stdout, stderr, run.structured),
 			provider_details: {
 				image_path: newImages[0].path,
