@@ -14,6 +14,7 @@ const { resetTempDebugLogs } = require('./temp-debug-logs');
 const video = require('./video');
 const { PRODUCT_NAME, SHORT_NAME, LEGACY_PRODUCT_NAME } = require('./brand');
 const { createBackendRegistry } = require('./backend-registry');
+const { expandWindowsEnvironmentVariables } = require('./local-cli');
 const relaySettings = require('./relay-settings');
 const { createStatusCache } = require('./status-cache');
 const packageInfo = require('../package.json');
@@ -354,6 +355,9 @@ function workflowForJob(jobType, provider) {
 		'grok-cli:images': 'Grok Imagine: image_gen',
 		'grok-cli:videos': 'Grok Imagine: image_to_video',
 		'grok-cli:chat': 'Grok chat',
+		'antigravity-cli:images': 'Antigravity: generate_image',
+		'antigravity-cli:media.analyze': 'Antigravity media analysis',
+		'antigravity-cli:chat': 'Antigravity chat',
 		'cursor-cli:chat': 'Cursor Agent',
 		'local-asr:transcribe': 'Local ASR',
 		'music-analysis:music.analyze': 'Local music analysis',
@@ -569,12 +573,19 @@ async function route(req, res, context) {
 		return;
 	}
 	if (url.pathname === '/v1/relay/settings') {
+		const previous = context.relaySettings.settings();
 		const settings = context.relaySettings.saveSettings(body.settings || body || {});
+		const cliPathsChanged = JSON.stringify(previous && previous.cli_paths || {}) !== JSON.stringify(settings && settings.cli_paths || {});
+		context.rebuildBackends();
+		context.statusCache.sync();
+		if (cliPathsChanged) context.statusCache.refresh();
+		context.statusEvents.broadcast('status', statusPayload(context));
 		context.statusEvents.broadcast('capabilities', capabilitiesPayload(context));
-		sendJson(res, 200, { success: true, settings, models: context.backends.models() }, origin || pairedOriginForCors(req, bridgeSecurity));
+		sendJson(res, 200, { success: true, settings, models: context.backends.models(), backends: context.backends.capabilities(), refresh_started: cliPathsChanged, refresh: context.statusCache.status().refresh || null }, origin || pairedOriginForCors(req, bridgeSecurity));
 		return;
 	}
 	if (url.pathname === '/v1/relay/refresh') {
+		context.rebuildBackends();
 		context.statusCache.refresh();
 		const current = context.statusCache.status();
 		sendJson(res, 202, { success: true, checking: true, refresh: current.refresh || null }, origin || pairedOriginForCors(req, bridgeSecurity));
@@ -583,8 +594,8 @@ async function route(req, res, context) {
 	if (url.pathname === '/v1/relay/test') {
 		const jobType = String(body.job_type || '').trim();
 		const model = String(body.model || '').trim();
-		if (!['images', 'videos', 'transcribe', 'music.analyze'].includes(jobType)) {
-			sendErrorJson(req, res, 400, { success: false, category: 'validation', message: 'Provider tests support images, videos, transcription, or music analysis.' }, origin);
+		if (!['images', 'videos', 'transcribe', 'media.analyze', 'music.analyze'].includes(jobType)) {
+			sendErrorJson(req, res, 400, { success: false, category: 'validation', message: 'Provider tests support images, videos, media analysis, transcription, or music analysis.' }, origin);
 			return;
 		}
 		if (!model) {
@@ -600,7 +611,7 @@ async function route(req, res, context) {
 		if (body.input_reference_data_url) {
 			requestedPayload.input_reference_data_url = String(body.input_reference_data_url);
 		}
-		for (const key of ['audio_base64', 'audio_format', 'language', 'locale', 'xai_options']) {
+                for (const key of ['audio_base64', 'audio_format', 'language', 'locale', 'xai_options', 'media_data_url', 'media_url', 'frames', 'size', 'quality', 'seconds']) {
 			if (body[key] !== undefined) requestedPayload[key] = body[key];
 		}
 		const resolved = relayPayloadFor(context, jobType, requestedPayload);
@@ -716,7 +727,7 @@ async function route(req, res, context) {
 			type: 'media_analysis',
 			model: modelFromPayload(resolved.payload, 'codex-local:auto'),
 			...display,
-		}, (session) => context.mediaAnalysis.analyze(resolved.payload, codexAdapter, session));
+		}, (session) => isRelayRoute ? context.backends.run('media.analyze', resolved.payload, session) : context.mediaAnalysis.analyze(resolved.payload, codexAdapter, session));
 		if (!result.success) {
 			sendErrorJson(req, res, errorStatusForResult(result), result, pairedOrigin, { requestId: body.request_id, route: url.pathname });
 			return;
@@ -745,6 +756,20 @@ async function route(req, res, context) {
 	sendErrorJson(req, res, 404, { success: false, message: 'Unknown local bridge route.' }, pairedOrigin, { requestId: body.request_id });
 }
 
+function configuredRelayCliPaths(context) {
+	const settings = context.relaySettings && context.relaySettings.settings ? context.relaySettings.settings() : {};
+	const saved = settings && settings.cli_paths && typeof settings.cli_paths === 'object' ? settings.cli_paths : {};
+	return Object.fromEntries(Object.entries(saved).map(([key, value]) => [key, expandWindowsEnvironmentVariables(value)]));
+}
+
+function applyRelayCliPaths(context) {
+	const cliPaths = configuredRelayCliPaths(context);
+	if (context.codex && typeof context.codex.setCodexBinary === 'function') {
+		context.codex.setCodexBinary(cliPaths['codex-cli'] || '');
+	}
+	return cliPaths;
+}
+
 function createServer(options = {}) {
 	const statusEvents = createStatusEvents();
 	const onJobState = (snapshot) => {
@@ -765,14 +790,27 @@ function createServer(options = {}) {
 		statusEvents,
 		relaySettings: options.relaySettings || relaySettings,
 	};
-	context.backends = options.backends || createBackendRegistry({
-		codex: context.codex,
-		video: context.video,
-		musicAnalysis: context.musicAnalysis,
-		xai: options.xai,
-		cli: options.cli,
-		apiKeyChat: options.apiKeyChat,
-	});
+	context.usesProvidedBackends = !!options.backends;
+	context.rebuildBackends = () => {
+		const cliPaths = applyRelayCliPaths(context);
+		if (context.usesProvidedBackends) return context.backends;
+		context.backends = createBackendRegistry({
+			codex: context.codex,
+			mediaAnalysis: context.mediaAnalysis,
+			video: context.video,
+			musicAnalysis: context.musicAnalysis,
+			grok: options.grok,
+			cursor: options.cursor,
+			antigravity: options.antigravity,
+			xai: options.xai,
+			cli: options.cli,
+			apiKeyChat: options.apiKeyChat,
+			cliPaths,
+		});
+		return context.backends;
+	};
+	context.backends = options.backends || null;
+	context.rebuildBackends();
 	context.statusCache = options.statusCache || createStatusCache(context, (status, capabilities) => { context.statusEvents.broadcast('status', statusPayload(context)); context.statusEvents.broadcast('capabilities', capabilitiesPayload(context)); });
 	if (options.backgroundRefresh !== false) {
 		const initialRefreshTimer = setTimeout(() => context.statusCache.refresh(), 1000);

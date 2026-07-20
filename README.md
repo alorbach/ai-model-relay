@@ -22,10 +22,10 @@ Windows tray companion for Alorbach AI Subscription Gateway. It exposes a secure
 - Executes signed Gateway image jobs and returns normalized base64 image data.
 - Executes signed Gateway audio transcription jobs through private local ASR runtimes with per-word timestamps, or through explicitly selected xAI Speech-to-Text.
 - Optionally runs a separate local music-analysis pipeline for acoustic album metrics; it does not infer lyrics or send audio to a cloud provider.
-- Routes provider-neutral relay jobs through backend drivers for Codex CLI, local ASR, Grok/xAI, configurable CLI processes, API-key chat providers, and OpenAI video.
+- Routes provider-neutral relay jobs through backend drivers for Codex CLI, Antigravity CLI, local ASR, Grok/xAI, configurable CLI processes, API-key chat providers, and OpenAI video.
 - Reports local bridge multimodal capabilities, including structured Codex event support and optional video/media features.
 - Optionally executes signed OpenAI Videos API jobs when explicitly configured with an API key and enable flag.
-- Optionally analyzes bounded media frames or HTTPS media URLs through local Codex vision prompts.
+- Optionally analyzes bounded media frames, HTTPS media URLs, or small video data URLs through local Codex vision prompts or Antigravity CLI.
 - Runs local Codex jobs with bounded parallelism and queues overflow requests.
 - Shows bridge status, Codex login status, paired sites, diagnostics, restart, and unpair actions in the tray menu.
 - Opens a minimal local status page on tray icon double-click.
@@ -152,7 +152,7 @@ Routes:
 - `POST /v1/images`: run a signed image job.
 - `POST /v1/transcribe`: run a signed local ASR transcription job.
 - `POST /v1/videos`: optionally run a signed OpenAI Videos API job.
-- `POST /v1/media/analyze`: analyze bounded media frames or an HTTPS media URL.
+- `POST /v1/media/analyze`: analyze bounded media frames, an HTTPS media URL, or a bounded MP4/MOV/WebM/AVI data URL.
 - `POST /v1/music/analyze`: analyze a local audio payload with the separate local music-analysis pipeline.
 - `POST /v1/relay/jobs/chat`, `/images`, `/transcribe`, `/videos`, `/media/analyze`, and `/music/analyze`: provider-neutral job aliases using the same signed envelope and response shapes.
 
@@ -177,7 +177,7 @@ Execution routes require a JSON envelope containing:
 
 In production, these values come from WordPress Gateway. The relay checks that they are present, executes the selected backend driver, and returns the result to the browser. WordPress validates the one-time token and request hash when the browser completes the job.
 
-Legacy requests can keep using `codex-local:auto` and `codex-local:image`. New provider-neutral requests may use IDs such as `model-relay:codex:auto`, `model-relay:xai:grok-4.3`, `model-relay:xai:stt`, `model-relay:local-asr:qwen3-asr-0.6b`, and `model-relay:music-analysis:core`, or set `payload.provider` / `payload.backend`. Local ASR models now use `local-asr:*` IDs (e.g. `local-asr:whisper-large-v3`, `local-asr:qwen3-asr-0.6b`). `model-relay:xai:stt` deliberately uploads the supplied audio to xAI; Local ASR and music analysis stay local.
+Legacy requests can keep using `codex-local:auto` and `codex-local:image`. New provider-neutral requests may use IDs such as `model-relay:codex:auto`, `model-relay:antigravity-cli:auto`, `model-relay:antigravity-cli:image`, `model-relay:antigravity-cli:media`, `model-relay:xai:grok-4.3`, `model-relay:xai:stt`, `model-relay:local-asr:qwen3-asr-0.6b`, and `model-relay:music-analysis:core`, or set `payload.provider` / `payload.backend`. Local ASR models now use `local-asr:*` IDs (e.g. `local-asr:whisper-large-v3`, `local-asr:qwen3-asr-0.6b`). `model-relay:xai:stt` deliberately uploads the supplied audio to xAI; Local ASR and music analysis stay local.
 
 `GET /v1/status` also includes current local job activity:
 
@@ -269,6 +269,11 @@ for await (const chunk of response.body.pipeThrough(new TextDecoderStream())) {
 - `AI_MODEL_RELAY_CLI_COMMAND`: enables the generic CLI process chat backend.
 - `AI_MODEL_RELAY_CLI_ARGS`: optional arguments for the CLI process backend. The prompt is sent on stdin.
 - `AI_MODEL_RELAY_CLI_TIMEOUT_MS`: CLI process timeout. Default: `600000`.
+- `AI_MODEL_RELAY_ANTIGRAVITY_BINARY`: explicit path to the authenticated `agy` executable. If unset, the bridge looks for `agy` on PATH; it never installs or logs in to Antigravity.
+- The local **Settings → Providers and Model Routing** panel can persist an executable path for Codex CLI, Grok CLI, Antigravity CLI, Cursor Agent, or the generic CLI Process. **Save paths & routing** automatically re-probes the CLI providers when any path changed; **Refresh detection** always forces a probe. Neither changes Windows PATH nor requires a bridge restart. Blank fields retain the environment-variable/PATH lookup.
+- Antigravity CLI 1.1.4 exposes non-interactive `-p`/`--print`, but not JSON-output flags. The relay accepts that supported print mode and normalizes its text result locally; newer CLI builds that advertise `-o` or `--output-format` use JSON output automatically.
+- `AI_MODEL_RELAY_ANTIGRAVITY_STATE_DIR`: Antigravity CLI artifact state root. Default: `%USERPROFILE%\.gemini\antigravity-cli`.
+- `AI_MODEL_RELAY_ANTIGRAVITY_CHAT_TIMEOUT_MS`, `AI_MODEL_RELAY_ANTIGRAVITY_IMAGE_TIMEOUT_MS`, `AI_MODEL_RELAY_ANTIGRAVITY_MEDIA_TIMEOUT_MS`: Antigravity CLI timeouts. Defaults: `600000`, `1800000`, and `600000` ms.
 - `AI_MODEL_RELAY_CHAT_API_KEY`, `AI_MODEL_RELAY_CHAT_BASE_URL`, and `AI_MODEL_RELAY_CHAT_MODEL`: optional OpenAI-compatible API-key chat backend profile for Cursor-style or other provider keys.
 
 If Windows resolves `codex` to a problematic `.cmd` shim, set `ALORBACH_CODEX_BINARY` to the real executable path before starting the bridge.

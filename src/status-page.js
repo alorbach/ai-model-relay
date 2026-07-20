@@ -481,6 +481,12 @@ function statusPageHtml() {
 			grid-template-columns: repeat(2, minmax(0, 1fr));
 			gap: 10px;
 		}
+		.provider-test-tabs {
+			margin-top: 14px;
+		}
+		.provider-test-panel[hidden] {
+			display: none;
+		}
 		.provider-media-test {
 			display: grid;
 			gap: 9px;
@@ -652,14 +658,38 @@ function statusPageHtml() {
 				<div class="label">Providers and Model Routing</div>
 				<div class="feature-grid" id="providerSettings">Loading providers</div>
 				<form class="settings-editor" id="relaySettingsForm">
+					<p class="muted">Optional executable paths are used only by this local bridge. Leave a field blank to use its configured environment variable or PATH lookup. Refresh detection saves the visible paths before probing every provider.</p>
+					<div class="settings-grid" id="relayCliPaths"></div>
 					<div class="settings-grid" id="relayDefaultSettings"></div>
-					<div class="settings-actions"><span class="muted" id="relaySettingsMessage">Loading routing settings</span><button type="button" id="refreshRelayProviders">Refresh detection</button><button type="button" id="saveRelaySettings">Save routing</button></div>
+					<div class="settings-actions"><span class="muted" id="relaySettingsMessage">Loading routing settings</span><button type="button" id="refreshRelayProviders">Refresh detection</button><button type="button" id="saveRelaySettings">Save paths &amp; routing</button></div>
 				</form>
 			</div>
 			<div class="panel span-12">
 				<div class="label">Provider media and audio tests</div>
 				<p class="muted">Runs a real request against the selected ready provider. Provider usage or API charges may apply. Selecting xAI Speech-to-Text uploads the chosen audio to xAI; Local ASR and Local Music Analysis stay on this computer.</p>
-				<div class="provider-media-tests" id="providerMediaTests">Load routing settings to see ready image, video, and audio providers.</div>
+                                <div class="tabs provider-test-tabs" role="tablist" aria-label="Provider test types">
+                                        <button class="tab-button" type="button" role="tab" id="provider-test-tab-media" data-provider-test-tab aria-controls="provider-test-panel-media" aria-selected="true">Media</button>
+                                        <button class="tab-button" type="button" role="tab" id="provider-test-tab-audio" data-provider-test-tab aria-controls="provider-test-panel-audio" aria-selected="false" tabindex="-1">Audio</button>
+                                </div>
+                                <div class="provider-test-panel" id="provider-test-panel-media" role="tabpanel" aria-labelledby="provider-test-tab-media">
+                                        <div class="tabs provider-test-tabs provider-media-kind-tabs" role="tablist" aria-label="Provider media test types">
+                                                <button class="tab-button" type="button" role="tab" id="provider-media-tab-images" data-provider-media-tab aria-controls="provider-media-panel-images" aria-selected="true">Image</button>
+                                                <button class="tab-button" type="button" role="tab" id="provider-media-tab-videos" data-provider-media-tab aria-controls="provider-media-panel-videos" aria-selected="false" tabindex="-1">Video</button>
+                                                <button class="tab-button" type="button" role="tab" id="provider-media-tab-analysis" data-provider-media-tab aria-controls="provider-media-panel-analysis" aria-selected="false" tabindex="-1">Video analysis</button>
+                                        </div>
+                                        <div class="provider-media-kind-panel" id="provider-media-panel-images" role="tabpanel" aria-labelledby="provider-media-tab-images">
+                                                <div class="provider-media-tests" id="providerImageTests">Load routing settings to see ready image providers.</div>
+                                        </div>
+                                        <div class="provider-media-kind-panel" id="provider-media-panel-videos" role="tabpanel" aria-labelledby="provider-media-tab-videos" hidden>
+                                                <div class="provider-media-tests" id="providerVideoTests">Load routing settings to see ready video providers.</div>
+                                        </div>
+                                        <div class="provider-media-kind-panel" id="provider-media-panel-analysis" role="tabpanel" aria-labelledby="provider-media-tab-analysis" hidden>
+                                                <div class="provider-media-tests" id="providerAnalysisTests">Load routing settings to see ready video-analysis providers.</div>
+                                        </div>
+                                </div>
+				<div class="provider-test-panel" id="provider-test-panel-audio" role="tabpanel" aria-labelledby="provider-test-tab-audio" hidden>
+					<div class="provider-media-tests" id="providerAudioTests">Load routing settings to see ready transcription and music-analysis providers.</div>
+				</div>
 			</div>
 			<div class="panel span-12">
 				<div class="label">Local Music Analysis Settings</div>
@@ -760,8 +790,8 @@ function statusPageHtml() {
 		let providerRefreshPollTimer = null;
 		let jobEvents = null;
 		const fields = {
-			tabButtons: Array.from(document.querySelectorAll('[role="tab"]')),
-			tabPanels: Array.from(document.querySelectorAll('[role="tabpanel"]')),
+			tabButtons: Array.from(document.querySelectorAll('nav.tabs[role="tablist"] [role="tab"]')),
+			tabPanels: Array.from(document.querySelectorAll('main > .tab-panel[role="tabpanel"]')),
 			updated: document.getElementById('updated'),
 			lastEvent: document.getElementById('lastEvent'),
 			connectionPill: document.getElementById('connectionPill'),
@@ -776,11 +806,19 @@ function statusPageHtml() {
 			backendDrivers: document.getElementById('backendDrivers'),
 			providerSettings: document.getElementById('providerSettings'),
 			relaySettingsForm: document.getElementById('relaySettingsForm'),
+			relayCliPaths: document.getElementById('relayCliPaths'),
 			relayDefaultSettings: document.getElementById('relayDefaultSettings'),
 			relaySettingsMessage: document.getElementById('relaySettingsMessage'),
 			refreshRelayProviders: document.getElementById('refreshRelayProviders'),
 			saveRelaySettings: document.getElementById('saveRelaySettings'),
-			providerMediaTests: document.getElementById('providerMediaTests'),
+                        providerImageTests: document.getElementById('providerImageTests'),
+                        providerVideoTests: document.getElementById('providerVideoTests'),
+                        providerAnalysisTests: document.getElementById('providerAnalysisTests'),
+                        providerAudioTests: document.getElementById('providerAudioTests'),
+                        providerTestTabButtons: Array.from(document.querySelectorAll('[data-provider-test-tab]')),
+                        providerTestTabPanels: Array.from(document.querySelectorAll('.provider-test-panel[role="tabpanel"]')),
+                        providerMediaTabButtons: Array.from(document.querySelectorAll('[data-provider-media-tab]')),
+                        providerMediaTabPanels: Array.from(document.querySelectorAll('.provider-media-kind-panel[role="tabpanel"]')),
 			musicAnalysisSettingsForm: document.getElementById('musicAnalysisSettingsForm'),
 			musicAnalysisSettings: document.getElementById('musicAnalysisSettings'),
 			musicAnalysisSettingsMessage: document.getElementById('musicAnalysisSettingsMessage'),
@@ -858,6 +896,64 @@ function statusPageHtml() {
 			});
 			selectTab('tab-overview');
 		}
+
+		function selectProviderTestTab(tabId, options = {}) {
+			const nextButton = fields.providerTestTabButtons.find((button) => button.id === tabId) || fields.providerTestTabButtons[0];
+			if (!nextButton) return;
+			const nextPanelId = nextButton.getAttribute('aria-controls');
+			for (const button of fields.providerTestTabButtons) {
+				const selected = button === nextButton;
+				button.setAttribute('aria-selected', selected ? 'true' : 'false');
+				button.tabIndex = selected ? 0 : -1;
+			}
+			for (const panel of fields.providerTestTabPanels) panel.hidden = panel.id !== nextPanelId;
+			if (options.focus) nextButton.focus();
+		}
+
+                function initProviderTestTabs() {
+			fields.providerTestTabButtons.forEach((button, index) => {
+				button.addEventListener('click', () => selectProviderTestTab(button.id));
+				button.addEventListener('keydown', (event) => {
+					if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+					event.preventDefault();
+					let nextIndex = index;
+					if (event.key === 'Home') nextIndex = 0;
+					else if (event.key === 'End') nextIndex = fields.providerTestTabButtons.length - 1;
+					else nextIndex = (index + (event.key === 'ArrowRight' ? 1 : -1) + fields.providerTestTabButtons.length) % fields.providerTestTabButtons.length;
+					selectProviderTestTab(fields.providerTestTabButtons[nextIndex].id, { focus: true });
+				});
+			});
+                        selectProviderTestTab('provider-test-tab-media');
+                }
+
+                function selectProviderMediaTab(tabId, options = {}) {
+                        const nextButton = fields.providerMediaTabButtons.find((button) => button.id === tabId) || fields.providerMediaTabButtons[0];
+                        if (!nextButton) return;
+                        const nextPanelId = nextButton.getAttribute('aria-controls');
+                        for (const button of fields.providerMediaTabButtons) {
+                                const selected = button === nextButton;
+                                button.setAttribute('aria-selected', selected ? 'true' : 'false');
+                                button.tabIndex = selected ? 0 : -1;
+                        }
+                        for (const panel of fields.providerMediaTabPanels) panel.hidden = panel.id !== nextPanelId;
+                        if (options.focus) nextButton.focus();
+                }
+
+                function initProviderMediaTabs() {
+                        fields.providerMediaTabButtons.forEach((button, index) => {
+                                button.addEventListener('click', () => selectProviderMediaTab(button.id));
+                                button.addEventListener('keydown', (event) => {
+                                        if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+                                        event.preventDefault();
+                                        let nextIndex = index;
+                                        if (event.key === 'Home') nextIndex = 0;
+                                        else if (event.key === 'End') nextIndex = fields.providerMediaTabButtons.length - 1;
+                                        else nextIndex = (index + (event.key === 'ArrowRight' ? 1 : -1) + fields.providerMediaTabButtons.length) % fields.providerMediaTabButtons.length;
+                                        selectProviderMediaTab(fields.providerMediaTabButtons[nextIndex].id, { focus: true });
+                                });
+                        });
+                        selectProviderMediaTab('provider-media-tab-images');
+                }
 
 		function text(value, fallback = '-') {
 			const normalized = String(value ?? '').trim();
@@ -1315,23 +1411,32 @@ function statusPageHtml() {
 		function renderRelaySettings(payload) {
 			const settings = payload && payload.settings || {};
 			const defaults = settings.defaults || {};
+			const cliPaths = settings.cli_paths || {};
 			const models = Array.isArray(payload && payload.models) ? payload.models : [];
 			const backends = Array.isArray(payload && payload.backends) ? payload.backends : (currentCapabilities.backends || []);
 			const backendById = new Map(backends.map((backend) => [backend.id, backend]));
 			fields.providerSettings.innerHTML = backends.map((backend) => {
-				const status = backend.ready ? 'Ready' : (backend.state === 'not_authenticated' ? 'Not authenticated' : (backend.state === 'installed' ? 'Authentication unchecked' : (backend.installed === false ? 'Not installed' : 'Unavailable')));
+			const status = backend.ready ? 'Ready' : (backend.state === 'not_authenticated' ? 'Not authenticated' : (backend.state === 'unsupported' ? 'Unsupported CLI' : (backend.state === 'installed' ? 'Authentication unchecked' : (backend.installed === false ? 'Not installed' : 'Unavailable'))));
 				const features = Object.keys(backend.features || {}).filter((key) => backend.features[key]).join(', ') || (backend.job_types || []).join(', ') || 'No supported jobs';
 				const detail = backend.version || backend.command || features;
 				const diagnostic = backend.diagnostic && backend.diagnostic !== 'Ready.' && backend.diagnostic !== 'Authentication not checked yet.' ? '<br><small class="muted">' + escapeHtml(backend.diagnostic) + '</small>' : '';
 				return '<div class="feature-pill ' + (backend.ready ? 'enabled' : 'disabled') + '"><span class="name"><strong>' + escapeHtml(backend.label || backend.id) + '</strong><br><small class="muted">' + escapeHtml(detail) + '</small>' + diagnostic + '</span><span class="state">' + escapeHtml(status) + '</span></div>';
 			}).join('') || '<div class="muted">No provider metadata reported</div>';
+			const cliPathFields = [
+				{ id: 'codex-cli', label: 'Codex CLI executable', placeholder: 'codex or C:\\Tools\\codex.exe' },
+				{ id: 'grok-cli', label: 'Grok CLI executable', placeholder: 'grok or C:\\Tools\\grok.exe' },
+				{ id: 'antigravity-cli', label: 'Antigravity CLI executable', placeholder: 'agy or C:\\Tools\\agy.exe', hint: 'Windows auto-detects %LOCALAPPDATA%\\agy\\bin\\agy.exe; enter another path here to override it.' },
+				{ id: 'cursor-cli', label: 'Cursor Agent executable', placeholder: 'cursor-agent or C:\\Tools\\cursor-agent.exe' },
+				{ id: 'cli-process', label: 'CLI Process executable', placeholder: 'Optional generic command path' },
+			];
+			fields.relayCliPaths.innerHTML = cliPathFields.map((entry) => '<label class="field"><span>' + escapeHtml(entry.label) + '</span><input type="text" autocomplete="off" spellcheck="false" data-relay-cli-path="' + escapeHtml(entry.id) + '" value="' + escapeHtml(cliPaths[entry.id] || '') + '" placeholder="' + escapeHtml(entry.placeholder) + '">' + (entry.hint ? '<small class="muted">' + escapeHtml(entry.hint) + '</small>' : '') + '</label>').join('');
 			const labels = { chat: 'Chat and coding', images: 'Image generation', videos: 'Video generation', transcribe: 'Transcription', 'media.analyze': 'Media analysis', 'music.analyze': 'Music analysis' };
 			fields.relayDefaultSettings.innerHTML = Object.keys(labels).map((jobType) => {
 				const current = defaults[jobType] || '';
 				const expectedType = (jobType === 'chat' || jobType === 'media.analyze') ? 'text' : ({ images: 'image', videos: 'video', transcribe: 'audio', 'music.analyze': 'audio' }[jobType]);
 				const compatible = models.filter((model) => {
 					const backend = backendById.get(model.backend);
-					return model.type === expectedType && model.ready !== false && backend && backend.ready === true && Array.isArray(backend.job_types) && backend.job_types.includes(jobType);
+					return model.type === expectedType && model.ready !== false && backend && backend.ready === true && Array.isArray(backend.job_types) && backend.job_types.includes(jobType) && (!Array.isArray(model.job_types) || !model.job_types.length || model.job_types.includes(jobType));
 				});
 				const selectedKnown = compatible.some((model) => model.id === current);
 				const unavailable = current && !selectedKnown ? ['<option value="' + escapeHtml(current) + '" selected disabled>Unavailable saved selection: ' + escapeHtml(current) + '</option>'] : [];
@@ -1345,37 +1450,85 @@ function statusPageHtml() {
 			const backendById = new Map(backends.map((backend) => [backend.id, backend]));
 			return models.filter((model) => {
 				const backend = backendById.get(model.backend);
-				return model.type === type && model.ready !== false && backend && backend.ready === true && Array.isArray(backend.job_types) && backend.job_types.includes(jobType);
+				return model.type === type && model.ready !== false && backend && backend.ready === true && Array.isArray(backend.job_types) && backend.job_types.includes(jobType) && (!Array.isArray(model.job_types) || !model.job_types.length || model.job_types.includes(jobType));
 			});
 		}
 
-		function renderProviderMediaTests(models, backends) {
-			const tests = [
-				...readyMediaModels(models, backends, 'images', 'image').map((model) => ({ model, jobType: 'images', title: 'Image generation', prompt: 'Create a polished abstract AI Model Relay icon on a dark background.' })),
-				...readyMediaModels(models, backends, 'videos', 'video').map((model) => ({ model, jobType: 'videos', title: 'Video generation', prompt: 'Create a short, subtle cinematic motion from the supplied reference image.' })),
-				...readyMediaModels(models, backends, 'transcribe', 'audio').map((model) => ({ model, jobType: 'transcribe', title: model.backend === 'xai-api' ? 'xAI Speech-to-Text (cloud)' : 'Audio transcription', prompt: '' })),
-				...readyMediaModels(models, backends, 'music.analyze', 'audio').map((model) => ({ model, jobType: 'music.analyze', title: 'Local music analysis', prompt: '' })),
-			];
-			if (!tests.length) {
-				fields.providerMediaTests.innerHTML = '<div class="muted">No ready image, video, transcription, or music-analysis providers are available for testing.</div>';
-				return;
-			}
-			fields.providerMediaTests.innerHTML = tests.map(({ model, jobType, title, prompt }) => {
-				const isVideo = jobType === 'videos';
-				const isAudio = jobType === 'transcribe' || jobType === 'music.analyze';
+                function renderProviderMediaTests(models, backends) {
+                        const imageTests = readyMediaModels(models, backends, 'images', 'image').map((model) => ({ model, jobType: 'images', title: 'Image generation', prompt: 'Create a polished abstract AI Model Relay icon on a dark background.' }));
+                        const videoModels = readyMediaModels(models, backends, 'videos', 'video');
+                        const renderedVideoBackends = new Set();
+                        const videoTests = videoModels.filter((model) => {
+                                if (model.backend !== 'openai-videos') return true;
+                                if (renderedVideoBackends.has(model.backend)) return false;
+                                renderedVideoBackends.add(model.backend);
+                                return true;
+                        }).map((model) => ({ model, jobType: 'videos', title: 'Video generation', prompt: 'Create a short, subtle cinematic motion from the supplied reference image.' }));
+                        const analysisTests = readyMediaModels(models, backends, 'media.analyze', 'text').map((model) => ({ model, jobType: 'media.analyze', title: 'Video analysis', prompt: 'Summarize the visible action, text, timing, and user-facing issues in this video.' }));
+                        const audioTests = [
+                                ...readyMediaModels(models, backends, 'transcribe', 'audio').map((model) => ({ model, jobType: 'transcribe', title: model.backend === 'xai-api' ? 'xAI Speech-to-Text (cloud)' : 'Audio transcription', prompt: '' })),
+                                ...readyMediaModels(models, backends, 'music.analyze', 'audio').map((model) => ({ model, jobType: 'music.analyze', title: 'Local music analysis', prompt: '' })),
+                        ];
+                        const option = (value, label, selected) => '<option value="' + escapeHtml(value) + '"' + (value === selected ? ' selected' : '') + '>' + escapeHtml(label) + '</option>';
+                        const imageOptions = (model) => {
+                                const guidance = model.backend === 'codex-cli'
+                                        ? 'These values are sent directly with the image request.'
+                                        : 'These values are passed to this CLI as generation guidance; the provider may choose the nearest supported output.';
+                                return '<div class="settings-grid provider-generation-options">' +
+                                        '<label class="field"><span>Resolution</span><select data-test-size>' +
+                                                option('1024x1024', 'Square · 1024 × 1024', '1024x1024') +
+                                                option('1536x1024', 'Landscape · 1536 × 1024', '1024x1024') +
+                                                option('1024x1536', 'Portrait · 1024 × 1536', '1024x1024') +
+                                        '</select></label>' +
+                                        '<label class="field"><span>Quality</span><select data-test-quality>' +
+                                                option('standard', 'Standard', 'high') +
+                                                option('high', 'High', 'high') +
+                                        '</select></label>' +
+                                '</div><small class="muted">' + guidance + '</small>';
+                        };
+                        const videoOptions = (model) => {
+                                const isOpenAi = model.backend === 'openai-videos';
+                                const qualityModelOptions = isOpenAi
+                                        ? videoModels.filter((entry) => entry.backend === 'openai-videos').map((entry) => option(entry.id, /pro/i.test(entry.id) ? 'Pro · Sora 2 Pro' : 'Standard · Sora 2', model.id)).join('')
+                                        : '';
+                                const resolutionOptions = isOpenAi
+                                        ? option('1280x720', 'Landscape · 1280 × 720', '1280x720') + option('720x1280', 'Portrait · 720 × 1280', '1280x720') + option('1792x1024', 'Wide · 1792 × 1024', '1280x720') + option('1024x1792', 'Tall · 1024 × 1792', '1280x720')
+                                        : option('1280x720', 'Landscape · 1280 × 720', '1280x720') + option('720x1280', 'Portrait · 720 × 1280', '1280x720');
+                                const guidance = isOpenAi
+                                        ? 'Resolution and clip length are sent directly to the OpenAI Videos API. Quality selects the Sora model tier.'
+                                        : 'Resolution, clip length, and quality are passed to this CLI as generation guidance; the provider may choose the nearest supported output.';
+                                return '<div class="settings-grid provider-generation-options">' +
+                                        '<label class="field"><span>Resolution</span><select data-test-size>' + resolutionOptions + '</select></label>' +
+                                        '<label class="field"><span>Clip length</span><select data-test-seconds>' + option('4', '4 seconds', '4') + option('8', '8 seconds', '4') + option('12', '12 seconds', '4') + '</select></label>' +
+                                        (isOpenAi
+                                                ? '<label class="field"><span>Quality</span><select data-test-model>' + qualityModelOptions + '</select></label>'
+                                                : '<label class="field"><span>Quality</span><select data-test-quality>' + option('standard', 'Standard', 'high') + option('high', 'High', 'high') + '</select></label>') +
+                                '</div><small class="muted">' + guidance + '</small>';
+                        };
+                        const renderCards = (items, emptyMessage) => items.length ? items.map(({ model, jobType, title, prompt }) => {
+                                const isVideo = jobType === 'videos';
+                                const isMediaAnalysis = jobType === 'media.analyze';
+                                const isAudio = jobType === 'transcribe' || jobType === 'music.analyze';
 				const reference = '<label class="field"><span>Reference image (optional)</span><input type="file" accept="image/png,image/jpeg,image/webp" data-test-reference></label>';
+				const media = '<label class="field"><span>Video file (MP4, MOV, WebM, or AVI; small test file)</span><input type="file" accept="video/mp4,video/quicktime,video/webm,video/x-msvideo,.mp4,.mov,.webm,.avi" data-test-media></label>';
 				const audio = '<label class="field"><span>Audio file</span><input type="file" accept="audio/*,.mp3,.wav,.m4a,.flac,.ogg,.webm" data-test-audio></label>';
 				const promptField = isAudio ? '' : '<label class="field"><span>Test prompt</span><input type="text" data-test-prompt value="' + escapeHtml(prompt) + '"></label>';
-				const testLabel = isAudio ? (jobType === 'transcribe' ? 'transcription' : 'music analysis') : (isVideo ? 'video' : 'image');
+				const testLabel = isAudio ? (jobType === 'transcribe' ? 'transcription' : 'music analysis') : (isMediaAnalysis ? 'video analysis' : (isVideo ? 'video' : 'image'));
 				return '<article class="provider-media-test" data-provider-media-test>' +
-					'<div class="provider-media-test-heading"><span>' + escapeHtml(title) + '</span><code>' + escapeHtml(model.id) + '</code></div>' +
-					promptField +
-					(isAudio ? audio : reference) +
+                                        '<div class="provider-media-test-heading"><span>' + escapeHtml(title) + '</span><code>' + escapeHtml(model.id) + '</code></div>' +
+                                        promptField +
+                                        (isAudio ? audio : (isMediaAnalysis ? media : reference)) +
+                                        (jobType === 'images' ? imageOptions(model) : (isVideo ? videoOptions(model) : '')) +
+                                        (isMediaAnalysis && model.backend === 'antigravity-cli' ? '<small class="muted">The selected video is sent to your authenticated Antigravity CLI; it is not a local-only analysis path.</small>' : '') +
 					'<button type="button" data-provider-test="' + jobType + '" data-model="' + escapeHtml(model.id) + '">Run ' + testLabel + ' test</button>' +
 					'<small class="muted" data-test-message>Ready to test ' + escapeHtml(model.id) + '.</small>' +
 				'</article>';
-			}).join('');
-		}
+			}).join('') : '<div class="muted">' + escapeHtml(emptyMessage) + '</div>';
+                        fields.providerImageTests.innerHTML = renderCards(imageTests, 'No ready image providers are available for testing.');
+                        fields.providerVideoTests.innerHTML = renderCards(videoTests, 'No ready video providers are available for testing.');
+                        fields.providerAnalysisTests.innerHTML = renderCards(analysisTests, 'No ready video-analysis providers are available for testing.');
+                        fields.providerAudioTests.innerHTML = renderCards(audioTests, 'No ready transcription or music-analysis providers are available for testing.');
+                }
 
 		function fileAsDataUrl(file) {
 			return new Promise((resolve, reject) => {
@@ -1392,16 +1545,31 @@ function statusPageHtml() {
 			const jobType = button.dataset.providerTest;
 			const prompt = card && card.querySelector('[data-test-prompt]');
 			const reference = card && card.querySelector('[data-test-reference]');
-			const audio = card && card.querySelector('[data-test-audio]');
+                        const media = card && card.querySelector('[data-test-media]');
+                        const audio = card && card.querySelector('[data-test-audio]');
+                        const selectedModel = card && card.querySelector('[data-test-model]');
+                        const size = card && card.querySelector('[data-test-size]');
+                        const quality = card && card.querySelector('[data-test-quality]');
+                        const seconds = card && card.querySelector('[data-test-seconds]');
 			const original = button.textContent;
 			try {
 				button.disabled = true;
 				button.textContent = 'Running...';
 				if (message) message.textContent = 'Starting provider test. Follow progress in Live.';
-				const body = { job_type: jobType, model: button.dataset.model || '', prompt: prompt ? prompt.value.trim() : '' };
+                                const body = { job_type: jobType, model: selectedModel ? selectedModel.value : (button.dataset.model || ''), prompt: prompt ? prompt.value.trim() : '' };
+                                if (size && size.value) body.size = size.value;
+                                if (quality && quality.value) body.quality = quality.value;
+                                if (seconds && seconds.value) body.seconds = seconds.value;
 				const file = reference && reference.files && reference.files[0];
 				if (file) {
 					body.input_reference_data_url = await fileAsDataUrl(file);
+				}
+				const mediaFile = media && media.files && media.files[0];
+				if (jobType === 'media.analyze' && !mediaFile) {
+					throw new Error('Choose a small video file before running this test.');
+				}
+				if (mediaFile) {
+					body.media_data_url = await fileAsDataUrl(mediaFile);
 				}
 				const audioFile = audio && audio.files && audio.files[0];
 				if ((jobType === 'transcribe' || jobType === 'music.analyze') && !audioFile) {
@@ -1431,9 +1599,36 @@ function statusPageHtml() {
 			try { const response = await fetch(relaySettingsUrl, { cache: 'no-store' }); const payload = await response.json(); if (!response.ok) throw new Error(payload.message || 'Routing settings unavailable'); renderRelaySettings(payload); if (!fields.refreshRelayProviders.disabled) fields.relaySettingsMessage.textContent = 'Routing settings loaded'; } catch (error) { if (!fields.refreshRelayProviders.disabled) fields.relaySettingsMessage.textContent = error.message || 'Routing settings load failed'; }
 		}
 
-		async function saveRelaySettings() {
-			const defaults = {}; fields.relayDefaultSettings.querySelectorAll('[data-relay-job]').forEach((select) => { defaults[select.getAttribute('data-relay-job')] = select.value; });
-			try { const response = await fetch(relaySettingsUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ settings: { defaults } }) }); const payload = await response.json(); if (!response.ok) throw new Error(payload.message || 'Routing settings save failed'); renderRelaySettings(payload); fields.relaySettingsMessage.textContent = 'Routing settings saved'; } catch (error) { fields.relaySettingsMessage.textContent = error.message || 'Routing settings save failed'; }
+		function followProviderRefresh(refreshState) {
+			if (!refreshState || !refreshState.active) return false;
+			fields.refreshRelayProviders.disabled = true;
+			fields.refreshRelayProviders.textContent = 'Checking…';
+			fields.refreshRelayProviders.dataset.refreshId = String(refreshState.id || '');
+			fields.relaySettingsMessage.textContent = 'CLI paths saved; checking providers in background…';
+			clearInterval(providerRefreshPollTimer);
+			providerRefreshPollTimer = setInterval(pollProviderRefresh, 1000);
+			pollProviderRefresh();
+			return true;
+		}
+
+		async function saveRelaySettings(options = {}) {
+			const defaults = {};
+			const cli_paths = {};
+			fields.relayDefaultSettings.querySelectorAll('[data-relay-job]').forEach((select) => { defaults[select.getAttribute('data-relay-job')] = select.value; });
+			fields.relayCliPaths.querySelectorAll('[data-relay-cli-path]').forEach((input) => { cli_paths[input.getAttribute('data-relay-cli-path')] = input.value.trim(); });
+			try {
+				const response = await fetch(relaySettingsUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ settings: { defaults, cli_paths } }) });
+				const payload = await response.json();
+				if (!response.ok) throw new Error(payload.message || 'Routing settings save failed');
+				renderRelaySettings(payload);
+				const refreshStarted = payload.refresh_started === true && followProviderRefresh(payload.refresh);
+				if (!options.quiet && !refreshStarted) fields.relaySettingsMessage.textContent = 'CLI paths and routing saved';
+				return { success: true, payload, refreshStarted };
+			} catch (error) {
+				const message = error.message || 'Routing settings save failed';
+				if (!options.quiet) fields.relaySettingsMessage.textContent = message;
+				return { success: false, message };
+			}
 		}
 
 		function renderMusicAnalysisSettings(settings) {
@@ -1891,8 +2086,12 @@ function statusPageHtml() {
 			if (fields.refreshRelayProviders.disabled) return;
 			fields.refreshRelayProviders.disabled = true;
 			fields.refreshRelayProviders.textContent = 'Checking…';
-			fields.relaySettingsMessage.textContent = 'Starting provider detection…';
+			fields.relaySettingsMessage.textContent = 'Saving executable paths…';
 			try {
+				const saved = await saveRelaySettings({ quiet: true });
+				if (!saved.success) throw new Error(saved.message || 'CLI path settings could not be saved');
+				if (saved.refreshStarted) return;
+				fields.relaySettingsMessage.textContent = 'Starting provider detection…';
 				const response = await fetch('/v1/relay/refresh', { method: 'POST' });
 				const payload = await response.json();
 				if (!response.ok) throw new Error(payload.message || 'Detection refresh could not be started');
@@ -1979,8 +2178,10 @@ function statusPageHtml() {
 			};
 		}
 
-		initTabs();
-		setInterval(tickElapsedCells, 1000);
+                initTabs();
+                initProviderTestTabs();
+                initProviderMediaTabs();
+                setInterval(tickElapsedCells, 1000);
 		fields.asrSettingsForm.addEventListener('submit', (event) => {
 			event.preventDefault();
 			saveAsrSettings();

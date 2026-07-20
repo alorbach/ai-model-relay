@@ -493,6 +493,10 @@ If the selected/default provider is unknown, disabled, unauthenticated, or does 
 
 `model-relay:grok-cli:auto` is Grok CLI chat/coding. `model-relay:grok-cli:image` runs the detected Imagine image workflow. `model-relay:grok-cli:video` runs the experimental Imagine image-to-video/reference-to-video workflow. Image references may be data URLs, `{ b64_json, mime_type }` objects, `referenced_image_paths`, or `frames`; the bridge validates and materializes them only in the per-request workspace. With one supplied image, Grok runs image-to-video; with multiple, it runs reference-to-video. Without one, the relay first generates a temporary source image and then runs image-to-video. The bridge collects only final artifacts from that workspace's output directory and fails explicitly if Imagine tooling, generated artifacts, moderation, or the bounded process run fails.
 
+`model-relay:antigravity-cli:auto` runs non-interactive Antigravity CLI chat. `model-relay:antigravity-cli:image` instructs the documented `generate_image` tool exactly once, with a request-unique image name; the bridge imports only a matching, newly-created PNG/JPEG/WebP artifact from the configured Antigravity CLI state root. `model-relay:antigravity-cli:media` analyzes a locally materialized video attachment or bounded visual frames and returns a normal chat-style answer. Configure `AI_MODEL_RELAY_ANTIGRAVITY_BINARY`, use the local Settings panel's **Antigravity CLI executable** field, or install authenticated `agy` on PATH; saving a changed executable path automatically re-probes every CLI provider, and **Refresh detection** always forces a probe. Neither modifies Windows PATH nor restarts the bridge. The bridge never installs it, authenticates it, changes its settings, or falls back to another provider. Antigravity analysis is not local-only: supplied media is handled by the authenticated Antigravity CLI under its Google account and policy.
+
+Antigravity CLI 1.1.4 documents non-interactive `-p`/`--print`, but not `-o` or `--output-format`. The Relay therefore accepts print mode and normalizes plain-text output locally. If a later CLI advertises `-o` or `--output-format`, the Relay requests JSON output automatically.
+
 Audio model IDs are configured by Local ASR settings. When a transcription request omits `payload.model` or uses `local-asr`, the bridge first uses `settings.default_model` if it is set. Otherwise `local-asr` auto-selects the best enabled ready local transcription model. Qwen3 ASR 1.7B is preferred when `Qwen/Qwen3-ASR-1.7B` and `Qwen/Qwen3-ForcedAligner-0.6B` are cached or explicitly downloadable and CUDA has enough free VRAM; `Qwen/Qwen3-ASR-0.6B` is the lower-VRAM Qwen ASR fallback. When `allow_qwen_cpu_offload` is enabled, explicit/default Qwen selections can use mixed GPU/CPU loading and report `device: "cuda+cpu"` with `device_map: "auto"`. The Qwen runner pre-chunks timestamped ASR locally using `qwen_chunk_seconds` and caps implausibly stretched single-word spans using `qwen_max_word_duration_seconds`, reporting any caps in provider metadata. The ForcedAligner is used only for Qwen timestamps and is not exposed as a normal audio model. If faster-whisper CUDA fails at execution time, the bridge retries on CPU/int8 when a CPU model path is available.
 
 `model-relay:xai:stt` is opt-in and never selected by the Local ASR fallback. It sends `audio_base64`/`audio_format` as a multipart file to xAI. Optional `payload.xai_options` supports `language` (or `locale`), `format`, `diarize`, `filler_words`, `multichannel`, `channels`, and a bounded `keyterms` array; response data is normalized to `{ text, words, duration_seconds, language }`. The bridge never includes the xAI API key in an error, status, job, or diagnostic payload. Choose local ASR when the audio must remain on the machine.
@@ -722,7 +726,7 @@ Supported `action` values are `create`, `retrieve`, `download`, `remix`, and `de
 
 ## `POST /v1/media/analyze`
 
-Analyzes bounded media frames through local Codex vision prompts. The safest input is a small array of image data URLs in `payload.frames`. The bridge can also download an HTTPS `media_url` and extract frames with `ffmpeg` when available. Local file paths, non-HTTPS URLs, localhost, and private-network URLs are rejected.
+Analyzes bounded media frames through local Codex vision prompts. The safest input is a small array of image data URLs in `payload.frames`. The bridge can also download an HTTPS `media_url` and extract frames with `ffmpeg` when available. A bounded MP4, MOV, WebM, or AVI `media_data_url` is also accepted; Codex extracts its frames locally, while the Antigravity Relay backend attaches the locally materialized video directly to its CLI request. Local file paths, non-HTTPS URLs, localhost, and private-network URLs are rejected.
 
 Request:
 
@@ -737,12 +741,13 @@ Request:
     "frames": [
       "data:image/png;base64,..."
     ],
+    "media_data_url": "data:video/mp4;base64,...",
     "transcript": "Optional supplied audio transcript."
   }
 }
 ```
 
-For `media_url` analysis, `ffmpeg` must be available on PATH. This route analyzes provided visual frames and optional transcript text; use `POST /v1/transcribe` first when audio content needs local transcription.
+For Codex `media_url` or `media_data_url` analysis, `ffmpeg` must be available on PATH. This route analyzes provided visual frames and optional transcript text; use `POST /v1/transcribe` first when audio content needs local transcription. Antigravity video analysis does not add an audio-transcription or audio-analysis operation.
 
 ## Error Shape
 

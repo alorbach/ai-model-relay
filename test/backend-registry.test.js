@@ -1,13 +1,18 @@
 'use strict';
 
 const assert = require('assert');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const process = require('process');
 const {
+	createAntigravityCliDriver,
 	createBackendRegistry,
 	createCliProcessDriver,
 	createXaiApiDriver,
 	providerFromPayload,
 } = require('../src/backend-registry');
+const mediaAnalysis = require('../src/media-analysis');
 
 (async () => {
 	const codex = {
@@ -102,6 +107,25 @@ const {
 	assert.strictEqual(legacyAsrResult.response.model, 'local-asr:whisper-large-v3');
 	const musicResult = await registry.run('music.analyze', { model: 'model-relay:music-analysis:core' });
 	assert.strictEqual(musicResult.response.model, 'model-relay:music-analysis:core');
+	let codexMediaPayload = null;
+	const codexMediaRegistry = createBackendRegistry({
+		codex,
+		video,
+		mediaAnalysis: {
+			analyze: (payload) => {
+				codexMediaPayload = payload;
+				return Promise.resolve({ success: true, response: { model: payload.model } });
+			},
+		},
+		musicAnalysis: {
+			MODEL_ID: 'model-relay:music-analysis:core',
+			capabilities: () => ({ enabled: true, ready: true, models: ['model-relay:music-analysis:core'] }),
+			analyze: () => Promise.resolve({ success: true, response: {} }),
+		},
+	});
+	const codexMediaResult = await codexMediaRegistry.run('media.analyze', { model: 'model-relay:codex:auto', frames: [] });
+	assert.strictEqual(codexMediaResult.success, true);
+	assert.strictEqual(codexMediaPayload.model, 'codex-local:auto');
 
 	const unknownProvider = await registry.run('chat', { provider: 'not-a-provider', prompt: 'hi' });
 	assert.strictEqual(unknownProvider.code, 'backend_unknown');
@@ -185,6 +209,113 @@ const {
 	assert.strictEqual(failedCliResult.success, false);
 	assert.strictEqual(failedCliResult.code, 'cli_process_failed');
 	assert.strictEqual(failedCliResult.details.stderr, 'boom');
+
+		const antigravityRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-model-relay-antigravity-test-'));
+		const antigravityPrompts = [];
+		const antigravityCommands = [];
+	let antigravityCandidates = [];
+	const antigravityOptions = {
+		stateRoot: antigravityRoot,
+		detectCliAsync: async (definition) => {
+			antigravityCandidates = definition.candidates;
+			return { id: 'antigravity-cli', label: 'Antigravity CLI', command: 'agy', installed: true, ready: false, state: 'installed', diagnostic: 'Authentication not checked yet.' };
+		},
+			runTextCommand: async (command, args) => {
+				if (args[0] === '--help') return { success: true, text: '', stderr: 'Usage: agy.exe --print PROMPT\n  -p  Short alias for --print' };
+				antigravityCommands.push(args);
+			const prompt = args[1];
+			antigravityPrompts.push(prompt);
+			const name = /ImageName\s+("[^"]+")/.exec(prompt);
+			if (name) {
+				const imageName = JSON.parse(name[1]);
+				const artifactDir = path.join(antigravityRoot, 'brain', 'test-artifacts');
+				fs.mkdirSync(artifactDir, { recursive: true });
+				fs.writeFileSync(path.join(artifactDir, `${imageName.replace(/-/g, '_')}_${Date.now()}.png`), Buffer.from('generated image'));
+				return { success: true, text: JSON.stringify({ text: 'image created' }) };
+			}
+			return { success: true, text: JSON.stringify({ text: 'Antigravity answer' }) };
+		},
+	};
+	try {
+		const antigravity = createAntigravityCliDriver(mediaAnalysis, antigravityOptions);
+		await antigravity.refresh();
+		if (process.platform === 'win32') assert.ok(antigravityCandidates.includes(path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'agy', 'bin', 'agy.exe')));
+		assert.strictEqual(antigravity.capabilities().ready, true);
+		assert.deepStrictEqual(antigravity.models().map((model) => model.id), ['model-relay:antigravity-cli:auto', 'model-relay:antigravity-cli:image', 'model-relay:antigravity-cli:media']);
+		const antigravityChat = await antigravity.chat({ prompt: 'hello from Antigravity' });
+		assert.strictEqual(antigravityChat.response.choices[0].message.content, 'Antigravity answer');
+                const antigravityImage = await antigravity.images({
+                        prompt: 'make a relay icon',
+                        size: '1536x1024',
+                        quality: 'high',
+                        reference_images: [{ b64_json: Buffer.from('reference image').toString('base64'), mime_type: 'image/png' }],
+                });
+		assert.strictEqual(antigravityImage.success, true);
+		assert.strictEqual(antigravityImage.response.data[0].mime_type, 'image/png');
+                                assert.strictEqual(antigravityImage.response.provider_details.tool, 'generate_image');
+                                assert.ok(antigravityPrompts.some((prompt) => prompt.includes('ImagePaths')));
+                                assert.ok(antigravityPrompts.some((prompt) => prompt.includes('Requested output resolution: 1536x1024.')));
+                                assert.ok(antigravityPrompts.some((prompt) => prompt.includes('Preferred quality: high.')));
+				assert.ok(antigravityCommands.some((args) => args[0] === '-p' && !args.includes('-o') && !args.includes('--output-format')));
+		const antigravityMedia = await antigravity['media.analyze']({
+			prompt: 'describe this test video',
+			media_data_url: `data:video/mp4;base64,${Buffer.from('mp4 test video').toString('base64')}`,
+		});
+		assert.strictEqual(antigravityMedia.success, true);
+		assert.strictEqual(antigravityMedia.response.provider_details.media_analysis.video_attached, true);
+		assert.ok(antigravityPrompts.some((prompt) => /@.*input-media\.mp4/.test(prompt)));
+		const invalidAntigravityMedia = await antigravity['media.analyze']({ media_data_url: 'data:video/mpeg;base64,AAAA' });
+		assert.strictEqual(invalidAntigravityMedia.code, 'antigravity_media_invalid');
+
+		const missingArtifact = createAntigravityCliDriver(mediaAnalysis, {
+			...antigravityOptions,
+			runTextCommand: async (command, args) => args[0] === '--help'
+				? { success: true, text: '', stderr: 'Usage: agy.exe --print PROMPT\n  -p  Short alias for --print' }
+				: { success: true, text: JSON.stringify({ text: 'no artifact' }) },
+		});
+		const missingArtifactResult = await missingArtifact.images({ prompt: 'missing artifact' });
+		assert.strictEqual(missingArtifactResult.code, 'antigravity_image_artifact_missing');
+
+		const antigravityRegistry = createBackendRegistry({
+			codex,
+			video,
+			mediaAnalysis,
+			musicAnalysis: {
+				MODEL_ID: 'model-relay:music-analysis:core',
+				capabilities: () => ({ enabled: true, ready: true, models: ['model-relay:music-analysis:core'] }),
+				analyze: () => Promise.resolve({ success: true, response: {} }),
+			},
+			antigravity: antigravityOptions,
+		});
+			await antigravityRegistry.list().find((driver) => driver.id === 'antigravity-cli').refresh();
+			assert.strictEqual(providerFromPayload({ model: 'model-relay:antigravity-cli:image' }), 'antigravity-cli');
+			const wrongAntigravityOperation = await antigravityRegistry.run('media.analyze', { model: 'model-relay:antigravity-cli:auto' });
+			assert.strictEqual(wrongAntigravityOperation.code, 'backend_model_incompatible');
+
+			let configuredCandidates = [];
+			const configuredPathRegistry = createBackendRegistry({
+				codex,
+				video,
+				mediaAnalysis,
+				musicAnalysis: {
+					MODEL_ID: 'model-relay:music-analysis:core',
+					capabilities: () => ({ enabled: true, ready: true, models: ['model-relay:music-analysis:core'] }),
+					analyze: () => Promise.resolve({ success: true, response: {} }),
+				},
+				antigravity: {
+					...antigravityOptions,
+					detectCliAsync: async (definition) => {
+						configuredCandidates = definition.candidates.slice();
+						return { id: 'antigravity-cli', label: 'Antigravity CLI', command: definition.candidates[0], installed: true, ready: false, state: 'installed', diagnostic: 'Authentication not checked yet.' };
+					},
+				},
+				cliPaths: { 'antigravity-cli': 'C:\\Tools\\agy.exe' },
+			});
+			await configuredPathRegistry.list().find((driver) => driver.id === 'antigravity-cli').refresh();
+			assert.strictEqual(configuredCandidates[0], 'C:\\Tools\\agy.exe');
+		} finally {
+		fs.rmSync(antigravityRoot, { recursive: true, force: true });
+	}
 
 	console.log('backend registry tests passed');
 })().catch((error) => {

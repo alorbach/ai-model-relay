@@ -39,6 +39,9 @@ function createFakeGrok(options = {}) {
 			if (options.upstreamTimeout === tool) {
 				child.stdout.emit('data', JSON.stringify({ text: 'Video generation did not complete within 300s.', requestId: 'upstream-timeout-id' })); child.emit('close', 0); return;
 			}
+			if (options.usageExhausted === tool) {
+				child.stderr.emit('data', 'Error: Internal error: {"message":"Abort (status 402 Payment Required): Grok Build usage balance exhausted\\n\\nRequest URL: https://cli-chat-proxy.grok.com/v1/responses", "http_status":402}'); child.emit('close', 1); return;
+			}
 			if (options.hangTool === tool) return;
 			const workspace = args[args.indexOf('--cwd') + 1];
 			const sessionId = '11111111-2222-4333-8444-555555555555';
@@ -125,6 +128,20 @@ function createFakeGrok(options = {}) {
 		assert.strictEqual(result.details.upstream_request_id, 'upstream-timeout-id');
 	} finally {
 		fs.rmSync(upstreamTimeout.root, { recursive: true, force: true });
+	}
+
+	const usageExhausted = createFakeGrok({ usageExhausted: 'image_gen' });
+	try {
+		const result = await usageExhausted.driver.images({ prompt: 'generate an image' });
+		assert.strictEqual(result.success, false);
+		assert.strictEqual(result.category, 'rate_limit');
+		assert.strictEqual(result.code, 'grok_usage_exhausted');
+		assert.strictEqual(result.message, 'Grok usage balance is exhausted. Add or renew Grok usage, then retry this request.');
+		assert.strictEqual(result.retryable, true);
+		assert.strictEqual(result.details.upstream_status, 402);
+		assert.ok(!JSON.stringify(result).includes('cli-chat-proxy.grok.com'));
+	} finally {
+		fs.rmSync(usageExhausted.root, { recursive: true, force: true });
 	}
 
 	const malformed = createFakeGrok();

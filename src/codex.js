@@ -8,7 +8,8 @@ const asr = require('./asr');
 const { appendLog, createBoundedCollector, safeError } = require('./diagnostics');
 const { beginLocalModelDebugLog } = require('./temp-debug-logs');
 
-const codexBinary = process.env.ALORBACH_CODEX_BINARY || 'codex';
+const defaultCodexBinary = process.env.ALORBACH_CODEX_BINARY || 'codex';
+let configuredCodexBinary = '';
 const codexHome = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
 const authPath = path.join(codexHome, 'auth.json');
 const generatedImagesDir = path.join(codexHome, 'generated_images');
@@ -55,7 +56,12 @@ function findWindowsCodexExtensionBinary() {
 	return matches[0] || '';
 }
 
+function setCodexBinary(value) {
+	configuredCodexBinary = typeof value === 'string' ? value.trim() : '';
+}
+
 function resolveCodexBinary() {
+	const codexBinary = configuredCodexBinary || defaultCodexBinary;
 	if (process.platform !== 'win32' || /[\\/]/.test(codexBinary)) {
 		return codexBinary;
 	}
@@ -1140,4 +1146,5 @@ module.exports = {
 	asrSettings: asr.publicSettings,
 	saveAsrSettings: asr.saveSettings,
 	resolveCodexBinary,
+	setCodexBinary,
 };

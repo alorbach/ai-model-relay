@@ -19,9 +19,20 @@ function safeDiagnostic(value) {
 	return text || 'CLI is unavailable.';
 }
 
+function expandWindowsEnvironmentVariables(value, env = process.env) {
+	const input = String(value || '');
+	const keys = Object.keys(env || {});
+	return input.replace(/%([A-Za-z_][A-Za-z0-9_]*)%/g, (match, name) => {
+		const key = keys.find((candidate) => candidate.toUpperCase() === name.toUpperCase());
+		const resolved = key ? env[key] : '';
+		return typeof resolved === 'string' && resolved ? resolved : match;
+	});
+}
+
 function resolveCommand(candidates, options = {}) {
 	const lookup = options.lookup || ((name) => spawnSync(process.platform === 'win32' ? 'where.exe' : 'which', [name], { encoding: 'utf8', shell: false }));
-	for (const candidate of candidates.filter(Boolean)) {
+	for (const rawCandidate of candidates.filter(Boolean)) {
+		const candidate = process.platform === 'win32' ? expandWindowsEnvironmentVariables(rawCandidate) : rawCandidate;
 		if (/[\\/]/.test(candidate) && fs.existsSync(candidate)) return candidate;
 		const result = lookup(candidate);
 		if (result && result.status === 0) {
@@ -93,18 +104,18 @@ function runTextCommand(command, args, input, session = {}, options = {}) {
 		const out = createBoundedCollector({ maxChars: 1024 * 1024 });
 		const err = createBoundedCollector({ maxChars: 1024 * 1024 });
 		let child; let settled = false;
-		try { const invocation = commandAndArgs(command, args); child = (options.spawn || spawn)(invocation.command, invocation.args, { shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] }); } catch (error) { resolve({ success: false, category: 'configuration', code: 'cli_spawn_failed', message: safeDiagnostic(error.message) }); return; }
+		try { const invocation = commandAndArgs(command, args); child = (options.spawn || spawn)(invocation.command, invocation.args, { shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], ...(options.cwd ? { cwd: options.cwd } : {}) }); } catch (error) { resolve({ success: false, category: 'configuration', code: 'cli_spawn_failed', message: safeDiagnostic(error.message) }); return; }
 		const timeoutMs = Number(options.timeoutMs || 600000);
 		const timeoutSeconds = Math.ceil(timeoutMs / 1000);
 		const timer = setTimeout(() => { if (!settled) { settled = true; child.kill(); resolve({ success: false, category: 'timeout', code: 'cli_timeout', message: `CLI request timed out after ${timeoutSeconds} second${timeoutSeconds === 1 ? '' : 's'}.`, details: { timeout_ms: timeoutMs, stdout: out.value(), stderr: err.value() } }); } }, timeoutMs);
 		child.stdout.on('data', (chunk) => { out.append(chunk); session.appendSessionOutput && session.appendSessionOutput('stdout', String(chunk)); });
 		child.stderr.on('data', (chunk) => { err.append(chunk); session.appendSessionOutput && session.appendSessionOutput('stderr', String(chunk)); });
 		child.on('error', (error) => { if (!settled) { settled = true; clearTimeout(timer); resolve({ success: false, category: 'configuration', code: 'cli_spawn_failed', message: safeDiagnostic(error.message) }); } });
-		child.on('close', (status) => { if (settled) return; settled = true; clearTimeout(timer); if (status !== 0) { resolve({ success: false, category: 'cli_process', code: 'cli_request_failed', message: safeDiagnostic(err.value() || out.value()), details: { status } }); return; } resolve({ success: true, text: out.value().trim() }); });
+		child.on('close', (status) => { if (settled) return; settled = true; clearTimeout(timer); if (status !== 0) { resolve({ success: false, category: 'cli_process', code: 'cli_request_failed', message: safeDiagnostic(err.value() || out.value()), details: { status } }); return; } resolve({ success: true, text: out.value().trim(), stderr: err.value().trim() }); });
 		child.stdin.end(String(input || ''));
 	});
 }
 
 function messagesToText(payload = {}) { return payload.input || payload.prompt || (payload.messages || []).map((m) => `${m.role || 'user'}: ${Array.isArray(m.content) ? m.content.map((p) => p.text || p.content || '').join('\n') : m.content || ''}`).join('\n\n'); }
 
-module.exports = { detectCli, detectCliAsync, messagesToText, resolveCommand, runTextCommand, safeDiagnostic };
+module.exports = { detectCli, detectCliAsync, expandWindowsEnvironmentVariables, messagesToText, resolveCommand, runTextCommand, safeDiagnostic };

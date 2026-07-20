@@ -106,6 +106,7 @@ function createMockSecurity() {
 			});
 		},
 	};
+	let savedRelaySettingsInput = null;
 	const server = createServer({
 		backgroundRefresh: false,
 		codex,
@@ -129,7 +130,10 @@ function createMockSecurity() {
 		},
 		relaySettings: {
 			settings: () => ({ defaults: { chat: 'model-relay:codex:auto', images: 'model-relay:codex:image', videos: 'model-relay:openai-videos:sora-2', transcribe: 'model-relay:local-asr:auto', 'media.analyze': 'model-relay:codex:auto', 'music.analyze': 'model-relay:music-analysis:core' } }),
-			saveSettings: (settings) => ({ defaults: settings.defaults }),
+			saveSettings: (settings) => {
+				savedRelaySettingsInput = settings;
+				return { defaults: settings.defaults, cli_paths: settings.cli_paths || {} };
+			},
 		},
 	});
 	await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -161,8 +165,10 @@ function createMockSecurity() {
 		assert.strictEqual(savedMusicSettings.statusCode, 200);
 		const musicSetup = await requestJson(port, 'POST', '/v1/music-analysis/setup', {});
 		assert.strictEqual(musicSetup.statusCode, 200);
-		const savedRelaySettings = await requestJson(port, 'POST', '/v1/relay/settings', { settings: { defaults: { chat: 'model-relay:cursor-cli:auto' } } });
+		const savedRelaySettings = await requestJson(port, 'POST', '/v1/relay/settings', { settings: { defaults: { chat: 'model-relay:cursor-cli:auto' }, cli_paths: { 'antigravity-cli': 'C:\\Tools\\agy.exe' } } });
 		assert.strictEqual(savedRelaySettings.statusCode, 200);
+		assert.strictEqual(savedRelaySettingsInput.cli_paths['antigravity-cli'], 'C:\\Tools\\agy.exe');
+		assert.strictEqual(savedRelaySettings.body.refresh_started, true);
 		const refresh = await requestJson(port, 'POST', '/v1/relay/refresh', {});
 		assert.strictEqual(refresh.statusCode, 202);
 		assert.strictEqual(refresh.body.checking, true);
@@ -199,17 +205,25 @@ function createMockSecurity() {
 		assert.strictEqual(calls[calls.length - 1].route, 'relay-images');
 
 		const refreshesBeforeImageTest = backendRefreshes;
-		const localImageTest = await requestJson(port, 'POST', '/v1/relay/test', { job_type: 'images', model: 'model-relay:codex:image', prompt: 'test image' });
+                const localImageTest = await requestJson(port, 'POST', '/v1/relay/test', { job_type: 'images', model: 'model-relay:codex:image', prompt: 'test image', size: '1536x1024', quality: 'high' });
 		assert.strictEqual(localImageTest.statusCode, 200);
 		assert.strictEqual(localImageTest.body.success, true);
 		assert.ok(backendRefreshes > refreshesBeforeImageTest, 'provider test should refresh detection before model preflight');
-		assert.strictEqual(calls[calls.length - 1].route, 'relay-images');
-		assert.strictEqual(calls[calls.length - 1].payload.prompt, 'test image');
+                assert.strictEqual(calls[calls.length - 1].route, 'relay-images');
+                assert.strictEqual(calls[calls.length - 1].payload.prompt, 'test image');
+                assert.strictEqual(calls[calls.length - 1].payload.size, '1536x1024');
+                assert.strictEqual(calls[calls.length - 1].payload.quality, 'high');
 
-		const localVideoTest = await requestJson(port, 'POST', '/v1/relay/test', { job_type: 'videos', model: 'model-relay:openai-videos:sora-2', prompt: 'test video', input_reference_data_url: 'data:image/png;base64,AA==' });
+                const localVideoTest = await requestJson(port, 'POST', '/v1/relay/test', { job_type: 'videos', model: 'model-relay:openai-videos:sora-2', prompt: 'test video', input_reference_data_url: 'data:image/png;base64,AA==', size: '1280x720', seconds: '8' });
 		assert.strictEqual(localVideoTest.statusCode, 200);
-		assert.strictEqual(calls[calls.length - 1].route, 'relay-videos');
-		assert.strictEqual(calls[calls.length - 1].payload.input_reference_data_url, 'data:image/png;base64,AA==');
+                assert.strictEqual(calls[calls.length - 1].route, 'relay-videos');
+                assert.strictEqual(calls[calls.length - 1].payload.input_reference_data_url, 'data:image/png;base64,AA==');
+                assert.strictEqual(calls[calls.length - 1].payload.size, '1280x720');
+                assert.strictEqual(calls[calls.length - 1].payload.seconds, '8');
+		const localMediaTest = await requestJson(port, 'POST', '/v1/relay/test', { job_type: 'media.analyze', model: 'model-relay:codex:auto', prompt: 'test media', media_data_url: `data:video/mp4;base64,${Buffer.from('mp4').toString('base64')}` });
+		assert.strictEqual(localMediaTest.statusCode, 200);
+		assert.strictEqual(calls[calls.length - 1].route, 'relay-media.analyze');
+		assert.ok(String(calls[calls.length - 1].payload.media_data_url).startsWith('data:video/mp4;base64,'));
 
 		const missingTestModel = await requestJson(port, 'POST', '/v1/relay/test', { job_type: 'images', prompt: 'x' });
 		assert.strictEqual(missingTestModel.statusCode, 400);
@@ -232,7 +246,8 @@ function createMockSecurity() {
 
 		const relayMedia = await requestJson(port, 'POST', '/v1/relay/jobs/media/analyze', { ...body, payload: { model: 'model-relay:codex:auto' } });
 		assert.strictEqual(relayMedia.statusCode, 200);
-		assert.strictEqual(relayMedia.body.response.text, 'media ok');
+		assert.strictEqual(relayMedia.body.response.id, 'relay-media.analyze');
+		assert.strictEqual(calls[calls.length - 1].route, 'relay-media.analyze');
 	} finally {
 		await new Promise((resolve) => server.close(resolve));
 	}

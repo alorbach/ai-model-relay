@@ -1,7 +1,7 @@
 'use strict';
 
 const assert = require('assert');
-const { detectCli, safeDiagnostic } = require('../src/local-cli');
+const { detectCli, expandWindowsEnvironmentVariables, safeDiagnostic } = require('../src/local-cli');
 
 const definition = { id: 'grok-cli', label: 'Grok CLI', candidates: ['grok'], versionArgs: ['--version'], authArgs: ['models'], jobTypes: ['chat'], models: ['auto'] };
 
@@ -23,5 +23,7 @@ const absent = detectCli(definition, { lookup: () => ({ status: 1, stdout: '' })
 assert.strictEqual(absent.installed, false);
 assert.strictEqual(absent.state, 'unavailable');
 assert.strictEqual(safeDiagnostic('Authorization: abc123'), 'Authorization: <redacted>');
+assert.strictEqual(expandWindowsEnvironmentVariables('%LOCALAPPDATA%\\agy\\bin\\agy.exe', { LocalAppData: 'C:\\Users\\AL\\AppData\\Local' }), 'C:\\Users\\AL\\AppData\\Local\\agy\\bin\\agy.exe');
+assert.strictEqual(expandWindowsEnvironmentVariables('%UNKNOWN_VALUE%\\agy.exe', {}), '%UNKNOWN_VALUE%\\agy.exe');
 
 console.log('local cli tests passed');
