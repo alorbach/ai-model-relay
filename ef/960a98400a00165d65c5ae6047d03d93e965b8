@@ -1,0 +1,58 @@
+src/backend-registry.js
+  s_283fd6cff5aacb::t_a6136f42729fce 10,66-68,1235,1254,1272,1332
+src/server.js
+  s_283fd6cff5aacb::t_2680d9c8c96476 292,313
+  s_283fd6cff5aacb::t_7780180f590cfd 47,147,237-265
+  s_283fd6cff5aacb::t_b0c6c83847b6ec 457-458,461,464,532-558
+  s_283fd6cff5aacb::t_7ad027e0a4f609 559-560,575-587
+  s_283fd6cff5aacb::t_156853092ea0f2 266
+  s_283fd6cff5aacb::t_6606e17c61f7a1 561
+README.md
+  s_283fd6cff5aacb::t_ea7e5bde8bb060 51,74-84,170-172,293-298
+test/local-upscale.test.js
+  s_283fd6cff5aacb::t_6c75bbaef73e52 37,41-43
+  s_283fd6cff5aacb::t_654720d25aa1f6 1-36,38-40,44-52
+test/job-manager.test.js
+  s_283fd6cff5aacb::t_6d43a2f272b5b9 139,143-169
+  s_283fd6cff5aacb::t_dc1b247be2f8c4 140-142
+src/upscale-runner.py
+  s_283fd6cff5aacb::t_3a3115a887cc99 86-89
+  s_283fd6cff5aacb::t_d5633e6d10f94d 1-32,35-85,90-95,97-99,101-111
+  s_283fd6cff5aacb::t_e0ea80c5f3d177 33-34,96,100
+src/job-manager.js
+  s_283fd6cff5aacb::t_e0ea80c5f3d177 171-172,193,225,230,234-239,245-273
+  s_283fd6cff5aacb::t_a17ee841c2a179 65-68,89,190-192
+  s_283fd6cff5aacb::t_7761d35fdf0126 274
+src/status-page.js
+  s_283fd6cff5aacb::t_3a3115a887cc99 1450-1451
+test/relay-routes.test.js
+  s_283fd6cff5aacb::t_2a79cb2edae8a8 38-54,102,109,111-112,114,180,231-244
+  s_283fd6cff5aacb::t_33efa135f1b518 245
+src/local-upscale.js
+  s_283fd6cff5aacb::t_e0ea80c5f3d177 104-105,107,113
+  s_283fd6cff5aacb::t_37156cda4c5d74 99,101-103,106,110-111
+  s_283fd6cff5aacb::t_5cf14f6db9d51b 1-57,59-60,63-82,84-98,100,108-109,112,114-129
+  s_283fd6cff5aacb::t_537bb463824974 58,61-62
+  s_283fd6cff5aacb::t_3a3115a887cc99 83
+package.json
+  s_283fd6cff5aacb::t_654720d25aa1f6 12-13
+  s_283fd6cff5aacb::t_f02b3da3d1bdb9 37-40
+test/status-page.test.js
+  s_283fd6cff5aacb::t_6c75bbaef73e52 76-77
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "ef960a98400a00165d65c5ae6047d03d93e965b8",
+  "prompts": {},
+  "sessions": {
+    "s_283fd6cff5aacb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fe0c8-2012-7ae3-a5b8-7804867046e5",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
