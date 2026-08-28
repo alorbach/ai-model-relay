@@ -1,0 +1,176 @@
+test/relay-routes.test.js
+  s_3d05802ef9ac1b::t_c8f0e7cabfcd2c 55-64
+  s_3d05802ef9ac1b::t_848764db569421 261,265-266,271-273
+  s_283fd6cff5aacb::t_33efa135f1b518 276
+  s_283fd6cff5aacb::t_2a79cb2edae8a8 38-54,115,122,124-125,127,198,257-260,262-264,267-270,274-275
+  s_3d05802ef9ac1b::t_77f827d406b427 210-214
+  s_3d05802ef9ac1b::t_f85ecf097e9cdc 167-171
+  s_3d05802ef9ac1b::t_3d1a330bf00fce 94-96
+  s_3d05802ef9ac1b::t_be44591bf9fc15 215-217
+test/server-jobs.test.js
+  s_3d05802ef9ac1b::t_51ae9d87d19024 162
+package.json
+  s_283fd6cff5aacb::t_654720d25aa1f6 12-13
+  s_283fd6cff5aacb::t_f02b3da3d1bdb9 37-40
+src/upscale-runner.py
+  s_283fd6cff5aacb::t_3a3115a887cc99 86-89
+  s_3d05802ef9ac1b::t_7ebef65432ab03 97-101
+  s_283fd6cff5aacb::t_d5633e6d10f94d 1-32,35-85,90-95,102-103,105-115
+  s_283fd6cff5aacb::t_e0ea80c5f3d177 33-34,96,104
+src/codex.js
+  s_3d05802ef9ac1b::t_c317fa7776a59a 1154
+src/local-upscale.js
+  s_3d05802ef9ac1b::t_0899d714e88d86 16
+  s_3d05802ef9ac1b::t_dc212acabf6edb 207,210-211,222
+  s_3d05802ef9ac1b::t_c7a3fe163e214d 257-261,265-269
+  s_3d05802ef9ac1b::t_1220b968f3f3a8 203-206,208-209,212-221,223-225
+  s_3d05802ef9ac1b::t_db657d3fe1fdc4 353
+  s_3d05802ef9ac1b::t_853f1528d351d4 233-234
+  s_283fd6cff5aacb::t_537bb463824974 315,319
+  s_3d05802ef9ac1b::t_d618446248bd7b 387
+  s_3d05802ef9ac1b::t_8cd9f06cc31797 256
+  s_283fd6cff5aacb::t_e0ea80c5f3d177 366,369,379
+  s_3d05802ef9ac1b::t_77f83839404514 278,282
+  s_3d05802ef9ac1b::t_597b4173d3230c 4-7,11-12,18,21-24,29-46,53-119,123-136,151-202,226-232,235-245,247-251,253,270-271,273-277,279-281,283-303,334,340,395
+  s_283fd6cff5aacb::t_37156cda4c5d74 372
+  s_3d05802ef9ac1b::t_6d1d084f6fd640 356,358,362
+  s_3d05802ef9ac1b::t_25cfaca6ae6f28 246,252,254-255,262-264,272
+  s_3d05802ef9ac1b::t_2aa299f2ec4768 313,318
+  s_3d05802ef9ac1b::t_57ce61d196bad1 305-312
+  s_3d05802ef9ac1b::t_2deea3b02b1e3a 359-361,363-365,367-368,373-377
+  s_283fd6cff5aacb::t_5cf14f6db9d51b 1-3,8-10,13-15,17,19-20,25-28,47-52,120-122,137-150,304,314,316-317,320-333,335-339,341-352,354-355,357,370-371,378,380-386,388-394
+test/status-page.test.js
+  s_3d05802ef9ac1b::t_2405781a26c871 83
+  s_3d05802ef9ac1b::t_5812758f344029 84-90
+  s_3d05802ef9ac1b::t_693f28873a5ab8 76-82
+test/job-manager.test.js
+  s_3d05802ef9ac1b::t_84b42f03d864ca 188,190-192,195-196
+  s_3d05802ef9ac1b::t_6dcf8ec2da269d 103-104
+  s_3d05802ef9ac1b::t_c462ee50b4c4f7 173-185
+  s_283fd6cff5aacb::t_6d43a2f272b5b9 141,145-172
+  s_3d05802ef9ac1b::t_8cb2e4f8fbc926 186-187,189,193-194
+  s_283fd6cff5aacb::t_dc1b247be2f8c4 142-144
+src/backend-registry.js
+  s_283fd6cff5aacb::t_a6136f42729fce 10,66-68,1235,1254,1272,1332
+test/asr.test.js
+  s_3d05802ef9ac1b::t_180e2d3507edcc 238-242
+  s_3d05802ef9ac1b::t_09398691d3ec1b 200-237
+src/job-manager.js
+  s_283fd6cff5aacb::t_e0ea80c5f3d177 171-172,193,225,242-247,253-274,276,278,282-283
+  s_283fd6cff5aacb::t_7761d35fdf0126 284
+  s_3d05802ef9ac1b::t_70133f472442f5 412-418
+  s_3d05802ef9ac1b::t_575d3fd1640f7d 275,277,279-281
+  s_283fd6cff5aacb::t_a17ee841c2a179 65-68,89,190-192
+  s_3d05802ef9ac1b::t_1b7dcac89f8a81 230-237
+test/local-upscale.test.js
+  s_3d05802ef9ac1b::t_8d43fc843ea6fb 45-47
+  s_283fd6cff5aacb::t_654720d25aa1f6 1-36,38-40,129-137
+  s_3d05802ef9ac1b::t_c434c309f36e6e 48-49
+  s_3d05802ef9ac1b::t_fabb33c63ef301 50,53-79
+  s_3d05802ef9ac1b::t_273de4ed62d307 44
+  s_3d05802ef9ac1b::t_fc34e92dc6dc09 80
+  s_3d05802ef9ac1b::t_b9494f896e1855 81-107
+  s_283fd6cff5aacb::t_6c75bbaef73e52 37,41-43
+  s_3d05802ef9ac1b::t_f7ecfc98490de5 108-128
+  s_3d05802ef9ac1b::t_e2ae4b0e720c5b 51-52
+src/server.js
+  s_3d05802ef9ac1b::t_fff1c4ac5f725a 503-507
+  s_283fd6cff5aacb::t_b0c6c83847b6ec 471-472,475,478,551-574
+  s_283fd6cff5aacb::t_6606e17c61f7a1 579
+  s_3d05802ef9ac1b::t_04470e09dde3db 469-470,473
+  s_3d05802ef9ac1b::t_8b72c59ef02903 575-576
+  s_3d05802ef9ac1b::t_9c1d4c346bc7dd 646-661
+  s_3d05802ef9ac1b::t_d41957f2ad0e0a 11
+  s_283fd6cff5aacb::t_2680d9c8c96476 293,314
+  s_3d05802ef9ac1b::t_b099c58096e4cc 690-720
+  s_283fd6cff5aacb::t_7ad027e0a4f609 577-578,593-596,598-605
+  s_3d05802ef9ac1b::t_6bf207f677239f 597
+  s_3d05802ef9ac1b::t_0b2a99333a95b7 938
+  s_283fd6cff5aacb::t_156853092ea0f2 267
+  s_a24a52784f4f7d::t_a5c334700947f1 479-480
+  s_283fd6cff5aacb::t_7780180f590cfd 48,148,238-266
+  s_3d05802ef9ac1b::t_64f45065a6a057 423-425
+  s_a24a52784f4f7d::t_dcb083ac7239b0 474,476-477
+src/asr.js
+  s_3d05802ef9ac1b::t_090af0ab3f33b5 1627
+  s_3d05802ef9ac1b::t_167fcc29180dbe 1663
+  s_3d05802ef9ac1b::t_33907153e2795d 1575-1591,1602,1610,1615
+  s_3d05802ef9ac1b::t_3cab243c6b13dd 1571-1574,1592-1601,1603-1609,1611-1614,1616-1626
+README.md
+  s_3d05802ef9ac1b::t_0501b15200d369 160
+  s_3d05802ef9ac1b::t_7ce6ac76aa04ec 80
+  s_3d05802ef9ac1b::t_0c03b9c93f1a4e 70
+  s_3d05802ef9ac1b::t_920148fd4ba135 157
+  s_3d05802ef9ac1b::t_b3e5891e44b36a 51
+  s_283fd6cff5aacb::t_ea7e5bde8bb060 74-77,83-85,172-174,297-301
+  s_3d05802ef9ac1b::t_d190979c98ec88 295-296
+  s_3d05802ef9ac1b::t_5eec88106349b2 78-79,81-82
+docs/local-bridge-api.md
+  s_3d05802ef9ac1b::t_3f2ca1840a98fe 621-624
+src/status-page.js
+  s_3d05802ef9ac1b::t_1f174c1ca187fe 943
+  s_3d05802ef9ac1b::t_d54f298a366b6e 1500
+  s_3d05802ef9ac1b::t_1d0e2c36b2c058 931
+  s_3d05802ef9ac1b::t_b8ad5ad8c72863 883
+  s_3d05802ef9ac1b::t_a6a2e436abed4d 2107,2110-2122,2125-2126,2137-2165
+  s_3d05802ef9ac1b::t_bbea94d7858405 2552-2557
+  s_3d05802ef9ac1b::t_97a775b81f6ca7 768-779,781-782
+  s_3d05802ef9ac1b::t_0bf3d99e02fd39 871
+  s_3d05802ef9ac1b::t_a267d09bb698f1 874-875
+  s_3d05802ef9ac1b::t_ca406edf930fb2 480-496
+  s_3d05802ef9ac1b::t_d599edcd81df58 799
+  s_3d05802ef9ac1b::t_8958e28682e0de 978
+  s_3d05802ef9ac1b::t_0ecfc58be51bd8 780
+  s_3d05802ef9ac1b::t_f0f17e4a25695c 1881-1924,1950-1955,1959-1961,1967,1969-1971,1973-1979
+  s_3d05802ef9ac1b::t_c73ec3de4b6587 1925-1935,1937-1946,1948-1949,1956,1962-1966,1968,1972
+  s_3d05802ef9ac1b::t_0b1997d15ab29a 2166
+  s_3d05802ef9ac1b::t_48a521d2b059fd 2563-2567
+  s_3d05802ef9ac1b::t_498330b4ec5239 923-930
+  s_3d05802ef9ac1b::t_f987ecc77a454f 1957-1958
+  s_283fd6cff5aacb::t_3a3115a887cc99 1501
+  s_3d05802ef9ac1b::t_ddf1b126451539 822
+  s_db2abca2e9e532::t_667c1d40a9b405 767
+  s_3d05802ef9ac1b::t_937e455f639c35 1936
+  s_3d05802ef9ac1b::t_27f828867bf89f 1947
+  s_3d05802ef9ac1b::t_7b2fc03fa17fd6 2047
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "78a2107d3ccd64e8b66d469b4c5a40661253c046",
+  "prompts": {},
+  "sessions": {
+    "s_283fd6cff5aacb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fe0c8-2012-7ae3-a5b8-7804867046e5",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_3d05802ef9ac1b": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "6913c7a8-c79a-4a4f-913e-fc43993249d8",
+        "model": "grok-4.6"
+      },
+      "human_author": null
+    },
+    "s_a24a52784f4f7d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f532f-e127-77d2-af95-cf138999bbde",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_db2abca2e9e532": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f65a2-68ff-73e0-ab0a-0cff620fbbe0",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
