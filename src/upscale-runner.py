@@ -50,7 +50,15 @@ def main():
         from PIL import Image
     except Exception:
         fail("runtime_missing", "Install the configured Python runtime with torch and Pillow before local upscaling.")
-    if not torch.cuda.is_available():
+    cuda = getattr(torch, "cuda", None)
+    if cuda is None or not callable(getattr(cuda, "is_available", None)):
+        sys.stderr.write(
+            "Incomplete torch import for local upscale: "
+            f"python={sys.executable}; torch={getattr(torch, '__file__', '<unknown>')}; "
+            f"version={getattr(torch, '__version__', '<unknown>')}\n"
+        )
+        fail("cuda_runtime_invalid", "The configured PyTorch runtime has no CUDA interface; local upscale refuses CPU fallback.")
+    if not cuda.is_available():
         fail("cuda_unavailable", "CUDA is unavailable; local upscale refuses CPU fallback.")
     source = Path(job.get("source_path", ""))
     output = Path(job.get("output_path", ""))
@@ -80,13 +88,40 @@ def main():
         root = Path(model.get("root", ""))
         if model.get("engine") == "swinir":
             script = root / "main_test_swinir.py"
-            command = [sys.executable, str(script), "--task", "classical_sr", "--scale", "2", "--training_patch_size", "64", "--model_path", str(model["model_path"]), "--folder_lq", str(crop_source.parent), "--tile", str(int(job.get("tile", 512))), "--tile_overlap", "32"]
+            # Recent PyTorch releases default torch.load to ``weights_only``.
+            # SwinIR's official legacy checkpoint is not compatible with that
+            # restricted unpickler. The runner has already verified the exact
+            # model SHA-256 above, so invoke the unmodified official script
+            # through a narrowly-scoped compatibility launcher for that one
+            # trusted weight file instead of editing the checkout or allowing
+            # arbitrary unverified pickles.
+            swinir_launcher = (
+                "import runpy, sys, torch\n"
+                "_trusted_load = torch.load\n"
+                "def load_verified_weight(*args, **kwargs):\n"
+                "    kwargs['weights_only'] = False\n"
+                "    return _trusted_load(*args, **kwargs)\n"
+                "torch.load = load_verified_weight\n"
+                "sys.argv = sys.argv[1:]\n"
+                "runpy.run_path(sys.argv[0], run_name='__main__')\n"
+            )
+            command = [sys.executable, "-c", swinir_launcher, str(script), "--task", "classical_sr", "--scale", "2", "--training_patch_size", "64", "--model_path", str(model["model_path"]), "--folder_lq", str(crop_source.parent), "--tile", str(int(job.get("tile", 512))), "--tile_overlap", "32"]
         elif model.get("engine") == "realesrgan":
             script = root / "inference_realesrgan.py"
             # The official CLI otherwise resolves a default weight and may
             # download it when it is missing.  Always provide the checksum-
             # verified, operator-installed file that was included in this job.
-            command = [sys.executable, str(script), "-n", "RealESRGAN_x2plus", "--model_path", str(model["model_path"]), "-i", str(crop_source), "-o", str(result_root), "--outscale", "2", "--tile", str(int(job.get("tile", 512))), "--gpu-id", str(int(job.get("cuda_device", 0))), "--ext", "png"]
+            # BasicSR still imports torchvision.transforms.functional_tensor,
+            # removed by current CUDA Torchvision releases.  Provide that
+            # compatibility module only to the checked-out, checksum-verified
+            # official CLI; this neither changes the checkout nor enables CPU.
+            realesrgan_launcher = (
+                "import runpy, sys, torchvision.transforms.functional as functional\n"
+                "sys.modules['torchvision.transforms.functional_tensor'] = functional\n"
+                "sys.argv = sys.argv[1:]\n"
+                "runpy.run_path(sys.argv[0], run_name='__main__')\n"
+            )
+            command = [sys.executable, "-c", realesrgan_launcher, str(script), "-n", "RealESRGAN_x2plus", "--model_path", str(model["model_path"]), "-i", str(crop_source), "-o", str(result_root), "--outscale", "2", "--tile", str(int(job.get("tile", 512))), "--gpu-id", str(int(job.get("cuda_device", 0))), "--ext", "png"]
             if str(job.get("precision", "fp16")) != "fp16":
                 command.append("--fp32")
         else:
@@ -100,6 +135,15 @@ def main():
         except subprocess.TimeoutExpired:
             fail("engine_timeout", "The CUDA model runner timed out; source bytes were preserved.")
         if completed.returncode != 0:
+            # Preserve the Relay's opaque, safe failure response while making
+            # the bounded official-runner diagnostics available in the local
+            # status UI.  Without this, an engine exit only reports
+            # `engine_failed` and makes an installed CUDA model impossible to
+            # diagnose.  The parent Relay already bounds captured stderr.
+            if completed.stdout:
+                sys.stderr.write(completed.stdout[-8000:])
+            if completed.stderr:
+                sys.stderr.write(completed.stderr[-8000:])
             fail("engine_failed", "The CUDA model runner failed; source bytes were preserved.")
         generated = find_png(result_root, engine_started_at) or find_png(root / "results", engine_started_at)
         if generated is None:

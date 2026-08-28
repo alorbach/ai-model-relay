@@ -33,6 +33,8 @@ const INSTALL = {
 		script: 'main_test_swinir.py',
 		weight_name: '001_classicalSR_DF2K_s64w8_SwinIR-M_x2.pth',
 		weight_url: 'https://github.com/JingyunLiang/SwinIR/releases/download/v0.0/001_classicalSR_DF2K_s64w8_SwinIR-M_x2.pth',
+		weight_bytes: 67277475,
+		weight_sha256: '2032ebf8f401dd3ce2fae5f3852117cb72101ec6ed8358faa64c2a3fa09ed4ac',
 		packages: ['numpy', 'opencv-python-headless', 'pillow', 'timm'],
 	},
 	realesrgan: {
@@ -41,6 +43,8 @@ const INSTALL = {
 		script: 'inference_realesrgan.py',
 		weight_name: 'RealESRGAN_x2plus.pth',
 		weight_url: 'https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.1/RealESRGAN_x2plus.pth',
+		weight_bytes: 67061725,
+		weight_sha256: '49fafd45f8fd7aa8d31ab2a22d14d91b536c34494a5cfe31eb5d89c2fa266abb',
 		packages: ['basicsr', 'facexlib', 'gfpgan', 'opencv-python-headless', 'pillow', 'tqdm'],
 	},
 };
@@ -117,13 +121,17 @@ function resolveModelFiles(engine, env = process.env) {
 	};
 }
 
-function modelConfig(id, env = process.env) {
+function modelConfig(id, env = process.env, manifests = INSTALL) {
 	const model = MODELS[id];
 	if (!model) return null;
 	const files = resolveModelFiles(model.engine, env);
+	const manifest = manifests[model.engine] || {};
 	const actualChecksum = files.model_path && fs.existsSync(files.model_path) ? sha256File(files.model_path) : '';
-	const manifestValid = /^[a-f0-9]{64}$/.test(files.expected_checksum) && actualChecksum && actualChecksum === files.expected_checksum;
-	return { ...model, model_path: files.model_path, root: files.root, expected_checksum: files.expected_checksum, actual_checksum: actualChecksum, installed: !!files.model_path && fs.existsSync(files.model_path), manifest_valid: !!manifestValid, state: !files.model_path || !fs.existsSync(files.model_path) ? 'not_installed' : (!/^[a-f0-9]{64}$/.test(files.expected_checksum) ? 'manifest_missing' : (!manifestValid ? 'checksum_mismatch' : 'installed')) };
+	const expectedChecksum = cleanPath(manifest.weight_sha256).toLowerCase();
+	const expectedBytes = Number(manifest.weight_bytes || 0);
+	const actualBytes = files.model_path && fs.existsSync(files.model_path) ? fs.statSync(files.model_path).size : 0;
+	const manifestValid = /^[a-f0-9]{64}$/.test(expectedChecksum) && actualChecksum && actualChecksum === expectedChecksum && (!expectedBytes || actualBytes === expectedBytes);
+	return { ...model, model_path: files.model_path, root: files.root, expected_checksum: expectedChecksum, expected_bytes: expectedBytes, actual_checksum: actualChecksum, actual_bytes: actualBytes, installed: !!files.model_path && fs.existsSync(files.model_path), manifest_valid: !!manifestValid, state: !files.model_path || !fs.existsSync(files.model_path) ? 'not_installed' : (!/^[a-f0-9]{64}$/.test(expectedChecksum) ? 'manifest_missing' : (!manifestValid ? 'checksum_mismatch' : 'installed')) };
 }
 
 function pythonCommand(env = process.env) {
@@ -234,7 +242,8 @@ function discoverBasePython(config = settings()) {
 
 async function setup(options = {}) {
 	const engine = String(options.engine || '').trim() || 'swinir';
-	const spec = INSTALL[engine];
+	const manifests = options.install || INSTALL;
+	const spec = manifests[engine];
 	if (!spec) return { success: false, category: 'validation', code: 'local_upscale_engine_invalid', message: 'Choose SwinIR or Real-ESRGAN on the status page to install a local CUDA upscale model.' };
 	const emit = typeof options.onOutput === 'function' ? options.onOutput : () => {};
 	const run = options.runCommand || runCommand;
@@ -282,17 +291,27 @@ async function setup(options = {}) {
 		if (cloned.error || cloned.status !== 0) return setupFailure('local_upscale_clone_failed', `Could not clone ${spec.engine} from GitHub.`, cloned, { repo: spec.repo, destination: root });
 	}
 	if (!fs.existsSync(scriptPath)) return { success: false, category: 'configuration', code: 'local_upscale_checkout_missing', message: `The official ${spec.engine} checkout is missing ${spec.script}.` };
+	// Real-ESRGAN's checkout generates realesrgan/version.py during package
+	// installation.  Cloning alone leaves the official inference script unable
+	// to import its own package, even when the pinned weight is present.
+	if (engine === 'realesrgan') {
+		const editable = await run(venvPython, ['-m', 'pip', 'install', '--disable-pip-version-check', '--no-deps', '-e', root], { cwd: root, timeout: SETUP_TIMEOUT_MS, onOutput: emit });
+		if (editable.error || editable.status !== 0) return setupFailure('local_upscale_realesrgan_package_failed', 'Could not install the official Real-ESRGAN checkout into the local upscale environment.', editable, { python: venvPython, root });
+	}
 	const modelPath = config[`${key}_model_path`] || path.join(security.stateDir, 'upscale', 'weights', spec.weight_name);
-	const expected = String(config[`${key}_weight_sha256`] || '').toLowerCase();
+	const expected = String(spec.weight_sha256 || '').toLowerCase();
+	const expectedBytes = Number(spec.weight_bytes || 0);
 	const existingChecksum = fs.existsSync(modelPath) ? sha256File(modelPath) : '';
-	if (!existingChecksum || !expected || existingChecksum !== expected) {
+	const existingBytes = fs.existsSync(modelPath) ? fs.statSync(modelPath).size : 0;
+	if (!existingChecksum || !expected || existingChecksum !== expected || (expectedBytes && existingBytes !== expectedBytes)) {
 		emit('stdout', `Downloading ${spec.weight_name}\n`);
 		try { await download(spec.weight_url, modelPath); }
 		catch (error) { return setupFailure('local_upscale_weight_download_failed', error.message || 'The official ×2 weight could not be downloaded.'); }
 	}
 	const checksum = sha256File(modelPath);
+	const bytes = fs.existsSync(modelPath) ? fs.statSync(modelPath).size : 0;
 	if (!/^[a-f0-9]{64}$/.test(checksum)) return setupFailure('local_upscale_weight_invalid', 'The downloaded ×2 weight could not be checksummed.');
-	if (expected && checksum !== expected) return setupFailure('local_upscale_checksum_mismatch', 'The downloaded ×2 weight did not match the pinned SHA-256.');
+	if (!expected || checksum !== expected || (expectedBytes && bytes !== expectedBytes)) return setupFailure('local_upscale_checksum_mismatch', 'The downloaded ×2 weight did not match the pinned SHA-256 and byte size.');
 	const saved = persist({
 		...config,
 		[`${key}_root`]: root,
@@ -324,12 +343,13 @@ function safeOutput(result, modelId) {
 
 function createLocalUpscaleDriver(options = {}) {
 	const env = options.env || process.env;
+	const manifests = options.manifests || INSTALL;
 	const runner = options.runnerPath || path.join(__dirname, 'upscale-runner.py');
 	let snapshot = { id: 'local-upscale', label: 'Local CUDA Upscale', kind: 'local-runtime', ready: false, state: 'checking', diagnostic: 'Checking local CUDA upscale readiness.', gpu: gpuStatus(), models: [] };
 	function inspect() {
 		const python = pythonCommand(env);
 		const gpu = gpuStatus();
-		const models = Object.keys(MODELS).map((id) => modelConfig(id, env));
+		const models = Object.keys(MODELS).map((id) => modelConfig(id, env, manifests));
 		const runnersReady = fs.existsSync(runner) && !!python;
 		const ready = runnersReady && gpu.available && models.some((model) => model.manifest_valid);
 		snapshot = { id: 'local-upscale', label: 'Local CUDA Upscale', kind: 'local-runtime', ready, state: ready ? 'ready' : 'not_ready', diagnostic: ready ? 'CUDA and at least one pinned local upscale model are ready.' : 'Use Settings to install a local CUDA upscale model; jobs never download weights or fall back to CPU.', python: python ? '<detected>' : '', gpu, models: models.map((model) => ({ id: model.id, label: model.label, engine: model.engine, installed: model.installed, manifest_valid: model.manifest_valid, state: model.state })) };
@@ -350,7 +370,7 @@ function createLocalUpscaleDriver(options = {}) {
 		refresh: async () => inspect(),
 		async upscale(payload = {}, session = {}) {
 			const state = inspect();
-			const model = modelConfig(payload.model, env);
+			const model = modelConfig(payload.model, env, manifests);
 			if (!model || !model.manifest_valid || !state.gpu.available) return { success: false, category: 'configuration', code: 'local_upscale_not_ready', message: 'Pinned model or CUDA readiness is unavailable. CPU fallback is disabled.', details: { state: model ? model.state : 'unknown_model', gpu: state.gpu.state } };
 			const source = Buffer.isBuffer(payload.source_bytes) ? payload.source_bytes : null;
 			if (!source || !source.length || source.length > MAX_BYTES || !['image/png', 'image/jpeg', 'image/webp'].includes(String(payload.source_mime_type || '').toLowerCase())) return { success: false, category: 'validation', code: 'local_upscale_source_invalid', message: 'The local upscale source must be a bounded PNG, JPEG, or WebP binary.' };

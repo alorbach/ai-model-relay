@@ -5,13 +5,14 @@ const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { MODELS, createLocalUpscaleDriver, modelConfig } = require('../src/local-upscale');
+const { INSTALL, MODELS, createLocalUpscaleDriver, modelConfig } = require('../src/local-upscale');
 
 (async () => {
 	const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-local-upscale-test-'));
 	const weight = path.join(directory, 'swinir-x2.pth');
 	fs.writeFileSync(weight, Buffer.from('test-pinned-weight'));
 	const checksum = crypto.createHash('sha256').update(fs.readFileSync(weight)).digest('hex');
+	const testSwinirManifest = { swinir: { ...INSTALL.swinir, weight_sha256: checksum, weight_bytes: fs.statSync(weight).size } };
 	try {
 		const env = {
 			AI_MODEL_RELAY_SWINIR_MODEL_PATH: weight,
@@ -21,14 +22,16 @@ const { MODELS, createLocalUpscaleDriver, modelConfig } = require('../src/local-
 			AI_MODEL_RELAY_REALESRGAN_WEIGHT_SHA256: '',
 			AI_MODEL_RELAY_REALESRGAN_ROOT: '',
 		};
-		const valid = modelConfig('model-relay:local-upscale:swinir-classical-x2', env);
-		const invalid = modelConfig('model-relay:local-upscale:realesrgan-x2plus', env);
+		const untrusted = modelConfig('model-relay:local-upscale:swinir-classical-x2', env);
+		const valid = modelConfig('model-relay:local-upscale:swinir-classical-x2', env, testSwinirManifest);
+		const invalid = modelConfig('model-relay:local-upscale:realesrgan-x2plus', env, testSwinirManifest);
+		assert.strictEqual(untrusted.manifest_valid, false, 'a saved self-reported checksum must not make an arbitrary weight trusted');
 		assert.strictEqual(valid.manifest_valid, true);
 		assert.strictEqual(valid.state, 'installed');
 		assert.strictEqual(invalid.state, 'not_installed');
 		assert.strictEqual(Object.keys(MODELS).length, 2);
 
-		const driver = createLocalUpscaleDriver({ env, runnerPath: __filename });
+		const driver = createLocalUpscaleDriver({ env, manifests: testSwinirManifest, runnerPath: __filename });
 		const capability = driver.capabilities();
 		assert.ok(capability.models.some((model) => model.id === valid.id && model.manifest_valid), 'a freshly constructed driver must expose an already installed pinned model');
 		assert.strictEqual(capability.features.cuda_only, true);
@@ -40,6 +43,8 @@ const { MODELS, createLocalUpscaleDriver, modelConfig } = require('../src/local-
 		assert.ok(!JSON.stringify(capability).includes(weight));
 		const runner = fs.readFileSync(path.join(__dirname, '..', 'src', 'upscale-runner.py'), 'utf8');
 		assert.ok(runner.includes('"--model_path", str(model["model_path"])'), 'both official runners must receive the checksum-pinned weight path');
+		assert.ok(runner.includes("kwargs['weights_only'] = False"), 'the checksum-verified legacy SwinIR checkpoint must use the explicit trusted compatibility loader with current PyTorch');
+		assert.ok(runner.includes('"cuda_runtime_invalid"'), 'an incomplete PyTorch import must report a safe CUDA-runtime diagnostic instead of raising an unhandled attribute error');
 		assert.ok(runner.includes('"--gpu-id", str(int(job.get("cuda_device", 0)))'), 'Real-ESRGAN must receive the selected CUDA device');
 		assert.ok(runner.includes('int(job.get("timeout_seconds", 1800))'), 'the CUDA subprocess must use the Node-configured timeout');
 		const driverSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'local-upscale.js'), 'utf8');
@@ -54,8 +59,11 @@ const { MODELS, createLocalUpscaleDriver, modelConfig } = require('../src/local-
 		const checkout = path.join(directory, 'swinir');
 		const venv = path.join(directory, 'venv');
 		const saved = {};
+		const installedWeight = Buffer.from('ui-installed-weight');
+		const installedManifest = { swinir: { ...INSTALL.swinir, weight_sha256: crypto.createHash('sha256').update(installedWeight).digest('hex'), weight_bytes: installedWeight.length } };
 		const setupResult = await require('../src/local-upscale').setup({
 			engine: 'swinir',
+			install: installedManifest,
 			pythonCommand: process.execPath,
 			gitCommand: 'git',
 			settings: { python_path: process.execPath, venv_path: venv, swinir_root: checkout, swinir_model_path: '', swinir_weight_sha256: '', realesrgan_root: path.join(directory, 'realesrgan'), realesrgan_model_path: '', realesrgan_weight_sha256: '' },
@@ -70,7 +78,7 @@ const { MODELS, createLocalUpscaleDriver, modelConfig } = require('../src/local-
 				}
 				return { status: 0, stdout: '', stderr: '' };
 			},
-			downloadFile: async (url, dest) => { fs.mkdirSync(path.dirname(dest), { recursive: true }); fs.writeFileSync(dest, Buffer.from('ui-installed-weight')); return dest; },
+			downloadFile: async (url, dest) => { fs.mkdirSync(path.dirname(dest), { recursive: true }); fs.writeFileSync(dest, installedWeight); return dest; },
 			saveSettings: (next) => Object.assign(saved, next),
 		});
 		assert.strictEqual(setupResult.success, true);
@@ -135,8 +143,11 @@ const { MODELS, createLocalUpscaleDriver, modelConfig } = require('../src/local-
 		fs.writeFileSync(junkPath, Buffer.from('partial-or-wrong-weight'));
 		const junkSaved = {};
 		let downloadedJunkPath = '';
+		const replacementWeight = Buffer.from('official-x2-weight');
+		const replacementManifest = { swinir: { ...INSTALL.swinir, weight_sha256: crypto.createHash('sha256').update(replacementWeight).digest('hex'), weight_bytes: replacementWeight.length } };
 		const replaced = await require('../src/local-upscale').setup({
 			engine: 'swinir',
+			install: replacementManifest,
 			pythonCommand: process.execPath,
 			gitCommand: 'git',
 			settings: { python_path: process.execPath, venv_path: junkVenv, swinir_root: junkCheckout, swinir_model_path: junkPath, swinir_weight_sha256: '', realesrgan_root: path.join(directory, 'junk-realesrgan'), realesrgan_model_path: '', realesrgan_weight_sha256: '' },
@@ -150,7 +161,7 @@ const { MODELS, createLocalUpscaleDriver, modelConfig } = require('../src/local-
 			downloadFile: async (url, dest) => {
 				downloadedJunkPath = dest;
 				fs.mkdirSync(path.dirname(dest), { recursive: true });
-				fs.writeFileSync(dest, Buffer.from('official-x2-weight'));
+				fs.writeFileSync(dest, replacementWeight);
 				return dest;
 			},
 			saveSettings: (next) => Object.assign(junkSaved, next),
@@ -158,7 +169,7 @@ const { MODELS, createLocalUpscaleDriver, modelConfig } = require('../src/local-
 		assert.strictEqual(replaced.success, true);
 		assert.strictEqual(downloadedJunkPath, junkPath);
 		assert.strictEqual(fs.readFileSync(junkPath, 'utf8'), 'official-x2-weight');
-		assert.strictEqual(junkSaved.swinir_weight_sha256, crypto.createHash('sha256').update('official-x2-weight').digest('hex'));
+		assert.strictEqual(junkSaved.swinir_weight_sha256, crypto.createHash('sha256').update(replacementWeight).digest('hex'));
 	} finally {
 		fs.rmSync(directory, { recursive: true, force: true });
 	}
