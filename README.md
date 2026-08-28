@@ -48,6 +48,7 @@ Double-click the tray icon or use `Open status page` to open the local status pa
 - Alorbach AI Subscription Gateway with User-owned Local Codex enabled for production WordPress usage.
 - Optional Local ASR transcription/alignment: Python 3.10 for faster-whisper, Python 3.12 for Qwen3 ASR and Qwen3 ForcedAligner, ffmpeg/ffprobe on PATH, and cached Hugging Face models or explicit permission to download models.
 - Optional local music analysis: Python 3.10+, ffmpeg/ffprobe on PATH, and a dedicated virtual environment with `numpy`, `scipy`, `soundfile`, `librosa`, and `pyloudnorm`. The status page's explicit setup action creates and installs this environment; it is never downloaded automatically.
+- Optional BuchWerk KDP local upscale: NVIDIA CUDA, plus the status page **Install SwinIR ×2** / **Install Real-ESRGAN ×2** actions. Setup clones the official checkout and pins the ×2 weight; jobs never download a model, send pixels to a cloud provider, or fall back to CPU.
 
 Before pairing, log in to Codex in the same Windows account:
 
@@ -66,9 +67,21 @@ codex login
 7. Choose a Local Codex model such as `codex-local:auto` or `codex-local:image`.
 8. Enter the pairing code shown in the tray app when WordPress prompts for it.
 
-For local audio transcription, open the bridge status page after installation and review `Local ASR Settings`. By default, the bridge can create private Python virtual environments under `%USERPROFILE%\.alorbach-codex-bridge\asr-venv` for faster-whisper and `%USERPROFILE%\.alorbach-codex-bridge\qwen-asr-venv` for Qwen3 ASR/ForcedAligner. Package installation is controlled by the ASR setting, and model downloads stay disabled until explicitly enabled or local model paths are configured.
+For local audio transcription, open the bridge status page after installation and review `Local ASR Settings`. Use each model's **Install model** button to download that Hugging Face snapshot onto this computer. That action is explicit; transcription jobs stay offline unless you also enable **Allow ASR model downloads**. By default, the bridge can create private Python virtual environments under `%USERPROFILE%\.alorbach-codex-bridge\asr-venv` for faster-whisper and `%USERPROFILE%\.alorbach-codex-bridge\qwen-asr-venv` for Qwen3 ASR/ForcedAligner.
 
 For local album metrics, use the separate `Local Music Analysis Settings` panel. Its setup button creates `%USERPROFILE%\.alorbach-codex-bridge\music-analysis-venv` and installs the local analysis packages only after you ask it to. It returns tempo/beat grid, key estimate, loudness, spectral descriptors, and neutral numbered sections; it does not perform stem separation, chord recognition, melody/MIDI extraction, or automatic transcription.
+
+### BuchWerk local KDP upscale
+
+This optional workflow accepts only a signed binary image from a paired BuchWerk browser. It creates a new candidate asset after the browser has reviewed a KDP crop; it never modifies the original asset.
+
+1. Open the Relay status page **Settings** tab and use **Local CUDA Upscale Settings**.
+2. Click **Install SwinIR ×2** for print geometry (`model-relay:local-upscale:swinir-classical-x2`). **Install Real-ESRGAN ×2** is an explicit restoration comparison, not an automatic fallback.
+3. Setup clones the official GitHub checkout, downloads the ×2 weight, installs CUDA PyTorch into a private `upscale-venv` under the Relay state directory, and pins the weight SHA-256. Jobs never download a model or fall back to CPU. If install fails, the Settings panel shows pip/Python stdout and stderr under the buttons.
+4. Wait until the model state shows `installed`. The first install can take a long time.
+5. In BuchWerk choose **KDP first + local CUDA ×2**, review the crop, explicitly approve it, and start one local job. The Relay permits only one CUDA upscale job per GPU and reports free VRAM before it starts.
+
+The Relay runs SwinIR or Real-ESRGAN at exactly ×2, then applies a fixed Lanczos downsample to BuchWerk's signed print target. A CUDA, VRAM, checksum, timeout, cancellation, or binary-validation failure leaves the source unchanged and returns no derived asset.
 
 ## Documentation
 
@@ -141,9 +154,10 @@ Routes:
 - `GET /v1/status/stream`: paired live status stream for browser/API clients.
 - `GET /v1/capabilities`: bridge, Codex, video, and media-analysis capability metadata.
 - `GET /v1/relay/capabilities`: provider-neutral capabilities, including backend driver metadata.
-- `GET /v1/asr/settings`: Local ASR settings and cached runtime metadata. Add `?refresh=1` to run a full Python/GPU/ffmpeg probe.
+- `GET /v1/asr/settings`, `POST /v1/asr/settings`, `POST /v1/asr/setup`: Local ASR settings and explicit status-page install for a Whisper or Qwen model. Add `?refresh=1` on GET to run a full Python/GPU/ffmpeg probe. Setup downloads even when job-time model downloads are disabled.
 - `GET /v1/music-analysis/settings`: local music-analysis settings and cached runtime metadata. Add `?refresh=1` to run its Python/ffmpeg probe.
 - `POST /v1/music-analysis/settings`, `/v1/music-analysis/setup`: save local music settings or deliberately create/install its private Python environment.
+- `GET /v1/upscale/settings`, `POST /v1/upscale/settings`, `POST /v1/upscale/setup`: status-page install for local CUDA SwinIR / Real-ESRGAN. Setup is explicit; jobs never download weights.
 - `POST /v1/pair`: exchange tray pairing code for an origin token.
 - `POST /v1/unpair`: remove the pairing for the request origin.
 - `GET /v1/models`: list paired local model IDs.
@@ -155,6 +169,9 @@ Routes:
 - `POST /v1/media/analyze`: analyze bounded media frames, an HTTPS media URL, or a bounded MP4/MOV/WebM/AVI data URL.
 - `POST /v1/music/analyze`: analyze a local audio payload with the separate local music-analysis pipeline.
 - `POST /v1/relay/jobs/chat`, `/images`, `/transcribe`, `/videos`, `/media/analyze`, and `/music/analyze`: provider-neutral job aliases using the same signed envelope and response shapes.
+- `POST /v1/relay/jobs/upscale`: paired signed binary PNG/JPEG/WebP input for a local CUDA ×2 job. The request metadata remains bounded JSON in `X-Alorbach-Upscale-Payload`; image bytes are never base64 JSON.
+- `GET /v1/relay/jobs/:requestId/artifact`: paired temporary binary PNG result for BuchWerk's protected multipart completion.
+- `POST /v1/relay/jobs/upscale/cancel`: paired cancellation for an active or queued local CUDA job.
 
 Paired routes require:
 
@@ -275,6 +292,13 @@ for await (const chunk of response.body.pipeThrough(new TextDecoderStream())) {
 - `AI_MODEL_RELAY_ANTIGRAVITY_STATE_DIR`: Antigravity CLI artifact state root. Default: `%USERPROFILE%\.gemini\antigravity-cli`.
 - `AI_MODEL_RELAY_ANTIGRAVITY_CHAT_TIMEOUT_MS`, `AI_MODEL_RELAY_ANTIGRAVITY_IMAGE_TIMEOUT_MS`, `AI_MODEL_RELAY_ANTIGRAVITY_MEDIA_TIMEOUT_MS`: Antigravity CLI timeouts. Defaults: `600000`, `1800000`, and `600000` ms.
 - `AI_MODEL_RELAY_CHAT_API_KEY`, `AI_MODEL_RELAY_CHAT_BASE_URL`, and `AI_MODEL_RELAY_CHAT_MODEL`: optional OpenAI-compatible API-key chat backend profile for Cursor-style or other provider keys.
+- `AI_MODEL_RELAY_UPSCALE_PYTHON`: base Python used by **Settings → Local CUDA Upscale** to create `upscale-venv`. Default auto-detects Python 3.10 or 3.12.
+- `AI_MODEL_RELAY_UPSCALE_TORCH_INDEX_URL`: CUDA wheel index for `torch`/`torchvision`. Default: `https://download.pytorch.org/whl/cu128`. Setup uses only this index so pip cannot pick a CPU wheel from PyPI.
+- `AI_MODEL_RELAY_SWINIR_ROOT`, `AI_MODEL_RELAY_SWINIR_MODEL_PATH`, `AI_MODEL_RELAY_SWINIR_WEIGHT_SHA256`: official SwinIR checkout, local ×2 weight path, and pinned lowercase SHA-256.
+- `AI_MODEL_RELAY_REALESRGAN_ROOT`, `AI_MODEL_RELAY_REALESRGAN_MODEL_PATH`, `AI_MODEL_RELAY_REALESRGAN_WEIGHT_SHA256`: official Real-ESRGAN checkout, local ×2plus weight path, and pinned lowercase SHA-256.
+- `AI_MODEL_RELAY_UPSCALE_TILE`: CUDA tile edge for the local ×2 run. Default: `512`.
+- `AI_MODEL_RELAY_UPSCALE_PRECISION`: `fp16` (default) or `fp32`; this remains CUDA-only.
+- `AI_MODEL_RELAY_UPSCALE_TIMEOUT_MS`: bounded local upscale timeout. Default: `1800000` (30 minutes).
 
 If Windows resolves `codex` to a problematic `.cmd` shim, set `ALORBACH_CODEX_BINARY` to the real executable path before starting the bridge.
 

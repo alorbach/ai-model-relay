@@ -100,6 +100,8 @@ function deferredRunner(label, started, resolvers, result = { success: true }) {
 		assert.strictEqual(artifact.url, '/v1/status/jobs/1/artifacts/0');
 		assert.strictEqual(manager.artifact(1, 0).bytes.toString(), 'generated image bytes');
 		assert.strictEqual(manager.artifact(1, 1), null);
+		assert.strictEqual(manager.artifactByRequestId('request-image').bytes.toString(), 'generated image bytes');
+		assert.strictEqual(manager.artifactByRequestId('missing'), null);
 	}
 
 	{
@@ -134,6 +136,81 @@ function deferredRunner(label, started, resolvers, result = { success: true }) {
 		resolvers.image();
 		await Promise.all([image, chatTwo]);
 		assert.strictEqual(manager.snapshot().running_count, 0);
+	}
+
+	{
+		const started = [];
+		const resolvers = {};
+		const manager = new JobManager({ maxConcurrent: 2 });
+		const first = manager.run({ requestId: 'upscale-1', type: 'upscale', model: 'model-relay:local-upscale:swinir-classical-x2', provider: 'local-upscale' }, deferredRunner('upscale-one', started, resolvers));
+		const second = manager.run({ requestId: 'upscale-2', type: 'upscale', model: 'model-relay:local-upscale:realesrgan-x2plus', provider: 'local-upscale' }, deferredRunner('upscale-two', started, resolvers));
+		await tick();
+		assert.deepStrictEqual(started, ['upscale-one']);
+		assert.strictEqual(manager.snapshot().queued_count, 1);
+		resolvers['upscale-one']();
+		await first;
+		await tick();
+		assert.deepStrictEqual(started, ['upscale-one', 'upscale-two']);
+		resolvers['upscale-two']();
+		await second;
+	}
+
+	{
+		const manager = new JobManager({ maxConcurrent: 1 });
+		let aborted = false;
+		const running = manager.run({ requestId: 'upscale-cancel', type: 'upscale', provider: 'local-upscale' }, (session) => new Promise((resolve) => {
+			session.signal.addEventListener('abort', () => { aborted = true; resolve({ success: false, category: 'cancelled', code: 'local_upscale_cancelled', message: 'cancelled' }); }, { once: true });
+		}));
+		await tick();
+		assert.strictEqual(manager.cancelByRequestId('upscale-cancel'), true);
+		const cancelled = await running;
+		assert.strictEqual(cancelled.code, 'local_upscale_cancelled');
+		assert.strictEqual(aborted, true);
+		assert.strictEqual(manager.snapshot().recent[0].status, 'cancelled');
+	}
+
+	{
+		const manager = new JobManager({ maxConcurrent: 1 });
+		const running = manager.run({ requestId: 'late-success', type: 'upscale', provider: 'local-upscale' }, (session) => new Promise((resolve) => {
+			session.signal.addEventListener('abort', () => resolve({ success: true, response: { output: { checksum: 'x' } } }), { once: true });
+		}));
+		await tick();
+		assert.strictEqual(manager.cancelByRequestId('late-success'), true);
+		const cancelled = await running;
+		assert.strictEqual(cancelled.success, false);
+		assert.strictEqual(cancelled.category, 'cancelled');
+		assert.strictEqual(manager.snapshot().recent[0].status, 'cancelled');
+	}
+
+	{
+		const started = [];
+		const resolvers = {};
+		const manager = new JobManager({ maxConcurrent: 1 });
+		const running = manager.run({ requestId: 'chat-keep', type: 'chat', provider: 'codex-cli' }, deferredRunner('chat-keep', started, resolvers));
+		await tick();
+		assert.strictEqual(manager.cancelByRequestId('chat-keep', 'upscale'), false);
+		assert.strictEqual(manager.snapshot().running_count, 1);
+		resolvers['chat-keep']();
+		await running;
+	}
+
+	{
+		const manager = new JobManager({ maxConcurrent: 1 });
+		await manager.run({ requestId: 'owned-artifact', type: 'upscale', origin: 'http://site-a', provider: 'local-upscale' }, () => Promise.resolve({ success: true, artifact: { mime_type: 'image/png', bytes: Buffer.from('owned-png') } }));
+		assert.strictEqual(manager.artifactByRequestId('owned-artifact', 'http://site-a').bytes.toString(), 'owned-png');
+		assert.strictEqual(manager.artifactByRequestId('owned-artifact', 'http://site-b'), null);
+		assert.ok(!JSON.stringify(manager.snapshot()).includes('http://site-a'));
+	}
+
+	{
+		const manager = new JobManager({ maxConcurrent: 1 });
+		const running = manager.run({ requestId: 'owned-cancel', type: 'upscale', origin: 'http://site-a', provider: 'local-upscale' }, (session) => new Promise((resolve) => {
+			session.signal.addEventListener('abort', () => resolve({ success: false, category: 'cancelled' }), { once: true });
+		}));
+		await tick();
+		assert.strictEqual(manager.cancelByRequestId('owned-cancel', 'upscale', 'http://site-b'), false);
+		assert.strictEqual(manager.cancelByRequestId('owned-cancel', 'upscale', 'http://site-a'), true);
+		await running;
 	}
 
 	{

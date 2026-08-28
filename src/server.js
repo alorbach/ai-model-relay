@@ -8,6 +8,7 @@ const { attachDebugHelp } = require('./debug-help');
 const { JobManager, clampMaxConcurrent } = require('./job-manager');
 const mediaAnalysis = require('./media-analysis');
 const musicAnalysis = require('./music-analysis');
+const localUpscale = require('./local-upscale');
 const security = require('./security');
 const { statusPageHtml } = require('./status-page');
 const { resetTempDebugLogs } = require('./temp-debug-logs');
@@ -44,7 +45,7 @@ function sseHeaders(origin = '') {
 	};
 	if (origin) {
 		headers['Access-Control-Allow-Origin'] = origin;
-		headers['Access-Control-Allow-Headers'] = 'Content-Type, X-Alorbach-Bridge-Token, X-Alorbach-Request-Id';
+		headers['Access-Control-Allow-Headers'] = 'Content-Type, X-Alorbach-Bridge-Token, X-Alorbach-Request-Id, X-Alorbach-Job-Token, X-Alorbach-Request-Hash, X-Alorbach-Upscale-Payload';
 		headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS';
 		headers.Vary = 'Origin';
 	}
@@ -144,7 +145,7 @@ function sendJson(res, statusCode, payload, origin) {
 	};
 	if (origin) {
 		headers['Access-Control-Allow-Origin'] = origin;
-		headers['Access-Control-Allow-Headers'] = 'Content-Type, X-Alorbach-Bridge-Token, X-Alorbach-Request-Id';
+		headers['Access-Control-Allow-Headers'] = 'Content-Type, X-Alorbach-Bridge-Token, X-Alorbach-Request-Id, X-Alorbach-Job-Token, X-Alorbach-Request-Hash, X-Alorbach-Upscale-Payload';
 		headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS';
 		headers.Vary = 'Origin';
 	}
@@ -234,6 +235,36 @@ function readBody(req, maxBytes) {
 	});
 }
 
+/** Read a bounded opaque PNG/JPEG/WebP body without applying the JSON limit. */
+function readBinaryBody(req, maxBytes) {
+	return new Promise((resolve, reject) => {
+		const chunks = []; let size = 0; let rejected = false;
+		req.on('data', (chunk) => {
+			if (rejected) return;
+			size += chunk.length;
+			if (size > maxBytes) { rejected = true; reject(new Error('Binary transfer exceeds the local upscale limit.')); return; }
+			chunks.push(chunk);
+		});
+		req.on('end', () => { if (!rejected) resolve(Buffer.concat(chunks)); });
+		req.on('error', reject);
+	});
+}
+
+function decodeUpscalePayload(value) {
+	try {
+		const encoded = String(value || '').trim();
+		if (!encoded || encoded.length > 16384 || !/^[A-Za-z0-9_-]+$/.test(encoded)) return null;
+		const parsed = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'));
+		return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+	} catch (error) { return null; }
+}
+
+function withoutArtifact(result) {
+	if (!result || typeof result !== 'object') return result;
+	const { artifact, ...safe } = result;
+	return safe;
+}
+
 function exposeOrigin(req, bridgeSecurity) {
 	return bridgeSecurity.normalizeOrigin(req.headers.origin || '');
 }
@@ -259,7 +290,7 @@ function modelFromPayload(payload, fallback) {
 
 function capabilitiesPayload(context) {
 	if (context.statusCache) {
-		return { ...context.statusCache.capabilities(), product: { name: PRODUCT_NAME, short_name: SHORT_NAME, legacy_name: LEGACY_PRODUCT_NAME }, bridge: { version: packageInfo.version }, frontend_interfaces: { legacy_v1: true, relay_v1: true, legacy_routes: ['/v1/status', '/v1/capabilities', '/v1/models', '/v1/chat', '/v1/images', '/v1/transcribe', '/v1/videos', '/v1/media/analyze', '/v1/music/analyze'], relay_routes: ['/v1/relay/status', '/v1/relay/capabilities', '/v1/relay/models', '/v1/relay/jobs/chat', '/v1/relay/jobs/images', '/v1/relay/jobs/transcribe', '/v1/relay/jobs/videos', '/v1/relay/jobs/media/analyze', '/v1/relay/jobs/music/analyze'], local_status_test_route: '/v1/relay/test' } };
+		return { ...context.statusCache.capabilities(), product: { name: PRODUCT_NAME, short_name: SHORT_NAME, legacy_name: LEGACY_PRODUCT_NAME }, bridge: { version: packageInfo.version }, frontend_interfaces: { legacy_v1: true, relay_v1: true, legacy_routes: ['/v1/status', '/v1/capabilities', '/v1/models', '/v1/chat', '/v1/images', '/v1/transcribe', '/v1/videos', '/v1/media/analyze', '/v1/music/analyze'], relay_routes: ['/v1/relay/status', '/v1/relay/capabilities', '/v1/relay/models', '/v1/relay/jobs/chat', '/v1/relay/jobs/images', '/v1/relay/jobs/upscale', '/v1/relay/jobs/transcribe', '/v1/relay/jobs/videos', '/v1/relay/jobs/media/analyze', '/v1/relay/jobs/music/analyze'], local_status_test_route: '/v1/relay/test' } };
 	}
 	const codexCapabilities = context.codex.capabilities ? context.codex.capabilities() : { success: true, bridge_features: {} };
 	return {
@@ -280,7 +311,7 @@ function capabilitiesPayload(context) {
 			legacy_v1: true,
 			relay_v1: true,
 			legacy_routes: ['/v1/status', '/v1/capabilities', '/v1/models', '/v1/chat', '/v1/images', '/v1/transcribe', '/v1/videos', '/v1/media/analyze', '/v1/music/analyze'],
-			relay_routes: ['/v1/relay/status', '/v1/relay/capabilities', '/v1/relay/models', '/v1/relay/jobs/chat', '/v1/relay/jobs/images', '/v1/relay/jobs/transcribe', '/v1/relay/jobs/videos', '/v1/relay/jobs/media/analyze', '/v1/relay/jobs/music/analyze'],
+			relay_routes: ['/v1/relay/status', '/v1/relay/capabilities', '/v1/relay/models', '/v1/relay/jobs/chat', '/v1/relay/jobs/images', '/v1/relay/jobs/upscale', '/v1/relay/jobs/transcribe', '/v1/relay/jobs/videos', '/v1/relay/jobs/media/analyze', '/v1/relay/jobs/music/analyze'],
 			local_status_test_route: '/v1/relay/test',
 		},
 		video: context.video.capabilities ? context.video.capabilities() : { enabled: false },
@@ -389,6 +420,9 @@ function errorStatusForResult(result) {
 	if (result && result.category === 'validation') {
 		return 400;
 	}
+	if (result && result.category === 'cancelled') {
+		return 409;
+	}
 	if (result && result.category === 'rate_limit') {
 		return 429;
 	}
@@ -432,6 +466,18 @@ async function route(req, res, context) {
 		sendArtifact(res, artifact, origin || pairedOriginForCors(req, bridgeSecurity));
 		return;
 	}
+	const relayArtifactMatch = url.pathname.match(/^\/v1\/relay\/jobs\/([^/]+)\/artifact$/);
+	if (req.method === 'GET' && relayArtifactMatch) {
+		const pairedOrigin = requirePairing(req, res, bridgeSecurity);
+		if (!pairedOrigin) return;
+		const artifact = jobManager.artifactByRequestId(relayArtifactMatch[1], pairedOrigin);
+		if (!artifact) {
+			sendJson(res, 404, { success: false, message: 'Generated job artifact was not found.' }, pairedOrigin);
+			return;
+		}
+		sendArtifact(res, artifact, pairedOrigin);
+		return;
+	}
 
 	if (req.method === 'GET' && (url.pathname === '/v1/status' || url.pathname === '/v1/relay/status')) {
 		const status = statusPayload(context);
@@ -451,6 +497,11 @@ async function route(req, res, context) {
 	}
 	if (req.method === 'GET' && url.pathname === '/v1/music-analysis/settings') {
 		const payload = context.musicAnalysis.publicSettings ? context.musicAnalysis.publicSettings({ refresh: url.searchParams.get('refresh') === '1' }) : { success: false, message: 'Music analysis settings are unavailable.' };
+		sendJson(res, payload.success === false ? 500 : 200, payload, origin || pairedOriginForCors(req, bridgeSecurity));
+		return;
+	}
+	if (req.method === 'GET' && url.pathname === '/v1/upscale/settings') {
+		const payload = context.localUpscale.publicSettings ? context.localUpscale.publicSettings() : { success: false, message: 'Local upscale settings are unavailable.' };
 		sendJson(res, payload.success === false ? 500 : 200, payload, origin || pairedOriginForCors(req, bridgeSecurity));
 		return;
 	}
@@ -497,6 +548,35 @@ async function route(req, res, context) {
 		return;
 	}
 
+	/* Dedicated signed binary path. It deliberately precedes readBody(), whose
+	 * 12 MiB JSON ceiling remains unchanged for all existing endpoints. */
+	if (req.method === 'POST' && url.pathname === '/v1/relay/jobs/upscale') {
+		const pairedOrigin = requirePairing(req, res, bridgeSecurity);
+		if (!pairedOrigin) return;
+		const requestId = String(req.headers['x-alorbach-request-id'] || '').trim();
+		const jobToken = String(req.headers['x-alorbach-job-token'] || '').trim();
+		const requestHash = String(req.headers['x-alorbach-request-hash'] || '').trim();
+		const payload = decodeUpscalePayload(req.headers['x-alorbach-upscale-payload']);
+		const mimeType = String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
+		if (!requestId || !jobToken || !requestHash || !payload || !['image/png', 'image/jpeg', 'image/webp'].includes(mimeType)) {
+			sendErrorJson(req, res, 400, { success: false, category: 'validation', message: 'Signed local-upscale headers and a PNG, JPEG, or WebP binary body are required.' }, pairedOrigin, { requestId, route: url.pathname });
+			return;
+		}
+		let bytes;
+		try { bytes = await readBinaryBody(req, 64 * 1024 * 1024); } catch (error) { sendErrorJson(req, res, 413, { success: false, category: 'validation', message: error.message || 'Binary transfer failed.' }, pairedOrigin, { requestId, route: url.pathname }); return; }
+		if (!bytes.length) { sendErrorJson(req, res, 400, { success: false, category: 'validation', message: 'The local-upscale source body is empty.' }, pairedOrigin, { requestId, route: url.pathname }); return; }
+		const resolved = relayPayloadFor(context, 'upscale', { ...payload, source_bytes: bytes, source_mime_type: mimeType });
+		if (resolved.error) { sendErrorJson(req, res, errorStatusForResult(resolved.error), resolved.error, pairedOrigin, { requestId, route: url.pathname }); return; }
+		const display = jobDisplayMeta(context, 'upscale', resolved.payload, '', '', resolved.resolved);
+		const result = await jobManager.run({ requestId, type: 'upscale', model: modelFromPayload(resolved.payload, ''), origin: pairedOrigin, ...display }, (session) => context.backends.run('upscale', resolved.payload, session));
+		context.statusCache.sync();
+		if (!result.success) { sendErrorJson(req, res, errorStatusForResult(result), result, pairedOrigin, { requestId, route: url.pathname }); return; }
+		const safe = withoutArtifact(result);
+		if (!jobManager.artifactByRequestId(requestId) || !safe.response || !safe.response.output) { sendErrorJson(req, res, 500, { success: false, message: 'The local upscale result did not include an artifact manifest.' }, pairedOrigin, { requestId, route: url.pathname }); return; }
+		sendJson(res, 200, { ...safe, request_id: requestId, gateway_completion: { job_token: jobToken, request_hash: requestHash, result: safe.response }, artifact_url: `/v1/relay/jobs/${encodeURIComponent(requestId)}/artifact` }, pairedOrigin);
+		return;
+	}
+
 	if (req.method !== 'POST') {
 		sendErrorJson(req, res, 405, { success: false, message: 'Method not allowed.' }, origin);
 		return;
@@ -507,6 +587,19 @@ async function route(req, res, context) {
 		body = await readBody(req, bridgeSecurity.MAX_BODY_BYTES || security.MAX_BODY_BYTES);
 	} catch (error) {
 		sendErrorJson(req, res, 400, { success: false, message: error.message || 'Invalid request.' }, origin);
+		return;
+	}
+
+	if (url.pathname === '/v1/relay/jobs/upscale/cancel') {
+		const pairedOrigin = requirePairing(req, res, bridgeSecurity);
+		if (!pairedOrigin) return;
+		const requestId = String(body.request_id || '').trim();
+		if (!requestId || !jobManager.cancelByRequestId(requestId, 'upscale', pairedOrigin)) {
+			sendErrorJson(req, res, 404, { success: false, category: 'validation', message: 'No active local CUDA upscale matches this request.' }, pairedOrigin, { requestId, route: url.pathname });
+			return;
+		}
+		context.statusCache.sync();
+		sendJson(res, 200, { success: true, request_id: requestId, status: 'cancelling' }, pairedOrigin);
 		return;
 	}
 
@@ -550,6 +643,22 @@ async function route(req, res, context) {
 		sendJson(res, 200, { success: true, settings, capabilities: payload.capabilities }, origin);
 		return;
 	}
+	if (url.pathname === '/v1/asr/setup') {
+		if (!context.codex.setupAsr) {
+			sendErrorJson(req, res, 500, { success: false, message: 'Local ASR setup is unavailable.' }, origin);
+			return;
+		}
+		const result = await context.codex.setupAsr({ model_id: body.model_id || body.model || '', runtime: body.runtime || '' });
+		context.statusCache.sync();
+		context.statusEvents.broadcast('status', statusPayload(context));
+		context.statusEvents.broadcast('capabilities', capabilitiesPayload(context));
+		if (!result.success) {
+			sendErrorJson(req, res, errorStatusForResult(result), result, origin, { route: url.pathname });
+			return;
+		}
+		sendJson(res, 200, result, origin);
+		return;
+	}
 	if (url.pathname === '/v1/music-analysis/settings') {
 		if (!context.musicAnalysis.saveSettings || !context.musicAnalysis.publicSettings) {
 			sendErrorJson(req, res, 500, { success: false, message: 'Music analysis settings are unavailable.' }, origin);
@@ -568,6 +677,39 @@ async function route(req, res, context) {
 			return;
 		}
 		const result = await context.musicAnalysis.setup();
+		context.statusCache.sync();
+		context.statusEvents.broadcast('status', statusPayload(context));
+		context.statusEvents.broadcast('capabilities', capabilitiesPayload(context));
+		if (!result.success) {
+			sendErrorJson(req, res, errorStatusForResult(result), result, origin, { route: url.pathname });
+			return;
+		}
+		sendJson(res, 200, result, origin);
+		return;
+	}
+	if (url.pathname === '/v1/upscale/settings') {
+		if (!context.localUpscale.saveSettings || !context.localUpscale.publicSettings) {
+			sendErrorJson(req, res, 500, { success: false, message: 'Local upscale settings are unavailable.' }, origin);
+			return;
+		}
+		const settings = context.localUpscale.saveSettings(body.settings || body || {});
+		const driver = context.backends && context.backends.getDriverById ? context.backends.getDriverById('local-upscale') : null;
+		if (driver && driver.refresh) await driver.refresh();
+		const payload = context.localUpscale.publicSettings();
+		context.statusCache.sync();
+		context.statusEvents.broadcast('status', statusPayload(context));
+		context.statusEvents.broadcast('capabilities', capabilitiesPayload(context));
+		sendJson(res, 200, { success: true, settings, models: payload.models, capabilities: payload }, origin);
+		return;
+	}
+	if (url.pathname === '/v1/upscale/setup') {
+		if (!context.localUpscale.setup) {
+			sendErrorJson(req, res, 500, { success: false, message: 'Local upscale setup is unavailable.' }, origin);
+			return;
+		}
+		const result = await context.localUpscale.setup({ engine: body.engine || 'swinir' });
+		const driver = context.backends && context.backends.getDriverById ? context.backends.getDriverById('local-upscale') : null;
+		if (driver && driver.refresh) await driver.refresh();
 		context.statusCache.sync();
 		context.statusEvents.broadcast('status', statusPayload(context));
 		context.statusEvents.broadcast('capabilities', capabilitiesPayload(context));
@@ -795,6 +937,7 @@ function createServer(options = {}) {
 		codex: options.codex || codex,
 		mediaAnalysis: options.mediaAnalysis || mediaAnalysis,
 		musicAnalysis: options.musicAnalysis || musicAnalysis,
+		localUpscale: options.localUpscale || localUpscale,
 		security: options.security || security,
 		video: options.video || video,
 		jobManager: options.jobManager || createJobManager({ ...options, onJobState }),

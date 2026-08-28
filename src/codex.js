@@ -1151,6 +1151,7 @@ module.exports = {
 	asrStatus: asr.capabilities,
 	asrSettings: asr.publicSettings,
 	saveAsrSettings: asr.saveSettings,
+	setupAsr: asr.setup,
 	resolveCodexBinary,
 	setCodexBinary,
 };

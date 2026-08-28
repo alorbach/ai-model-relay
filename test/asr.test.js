@@ -197,4 +197,46 @@ function createQwenSnapshot(snapshot) {
 	const cachedCapabilities = asr.capabilities();
 	assert.strictEqual(cachedCapabilities.runtime_checked, true);
 	assert.strictEqual(cachedCapabilities.runtime_cached, true);
-})();
+
+	const setupMissing = await asr.setup({ settings: config });
+	assert.strictEqual(setupMissing.success, false);
+	assert.strictEqual(setupMissing.code, 'asr_setup_model_required');
+
+	const setupCalls = [];
+	const setupWhisper = await asr.setup({
+		model_id: 'whisper-small',
+		settings: config,
+		ensureRuntime: async () => ({ success: true, python: 'python' }),
+		runAsync: async (command, args) => {
+			setupCalls.push(args);
+			return { status: 0, stdout: '/tmp/hub/org-small\n', stderr: '' };
+		},
+	});
+	assert.strictEqual(setupWhisper.success, true);
+	assert.strictEqual(setupWhisper.model_id, 'local-asr:whisper-small');
+	assert.ok(setupCalls.some((args) => args.includes('org/small')));
+
+	const setupQwen = await asr.setup({
+		model_id: 'qwen3-asr-0.6b',
+		settings: config,
+		ensureQwenRuntime: async () => ({ success: true, python: 'python' }),
+		runAsync: async (command, args) => ({ status: 0, stdout: '/tmp/hub/' + args[args.length - 1], stderr: '' }),
+	});
+	assert.strictEqual(setupQwen.success, true);
+	assert.strictEqual(setupQwen.provider, 'qwen-asr');
+	assert.strictEqual(setupQwen.downloaded.length, 2);
+
+	const setupDownloadFailed = await asr.setup({
+		model_id: 'whisper-small',
+		settings: config,
+		ensureRuntime: async () => ({ success: true, python: 'python' }),
+		runAsync: async () => ({ status: 1, stdout: '', stderr: 'ModuleNotFoundError: huggingface_hub' }),
+	});
+	assert.strictEqual(setupDownloadFailed.success, false);
+	assert.strictEqual(setupDownloadFailed.code, 'asr_model_download_failed');
+	assert.ok(String(setupDownloadFailed.details.log).includes('huggingface_hub'));
+	console.log('asr tests passed');
+})().catch((error) => {
+	console.error(error);
+	process.exit(1);
+});

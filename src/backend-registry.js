@@ -7,6 +7,7 @@ const { randomUUID } = require('crypto');
 const { spawn } = require('child_process');
 const { createBoundedCollector } = require('./diagnostics');
 const { detectCli, detectCliAsync, messagesToText, runTextCommand } = require('./local-cli');
+const { createLocalUpscaleDriver } = require('./local-upscale');
 
 const RELAY_MODEL_PREFIX = 'model-relay';
 const GROK_MEDIA_TIMEOUT_MS = 450000;
@@ -61,6 +62,9 @@ function providerFromPayload(payload = {}) {
 	if (model.startsWith('model-relay:cursor-cli:')) return 'cursor-cli';
 	if (model.startsWith('model-relay:local-asr:')) {
 		return 'local-asr';
+	}
+	if (model.startsWith('model-relay:local-upscale:')) {
+		return 'local-upscale';
 	}
 	if (model.startsWith('model-relay:music-analysis:')) {
 		return 'music-analysis';
@@ -1228,6 +1232,7 @@ function createBackendRegistry(options = {}) {
 		createAntigravityCliDriver(options.mediaAnalysis, configuredCliOptions(options.antigravity, 'antigravity-cli')),
 		createCursorCliDriver(configuredCliOptions(options.cursor, 'cursor-cli')),
 		createLocalAsrDriver(options.codex),
+		createLocalUpscaleDriver(options.upscale || {}),
 		createMusicAnalysisDriver(options.musicAnalysis),
 		createOpenAiVideosDriver(options.video),
 		createXaiApiDriver(options.xai || {}),
@@ -1246,6 +1251,7 @@ function createBackendRegistry(options = {}) {
 		'cursor-cli': 'cursor-cli',
 		asr: 'local-asr',
 		'local-asr': 'local-asr',
+		'local-upscale': 'local-upscale',
 		'music-analysis': 'music-analysis',
 		xai: 'xai-api',
 		'xai-api': 'xai-api',
@@ -1263,7 +1269,7 @@ function createBackendRegistry(options = {}) {
 	}
 
 	function expectedModelType(jobType) {
-		return ({ chat: 'text', images: 'image', videos: 'video', transcribe: 'audio', 'media.analyze': 'text', 'music.analyze': 'audio' })[jobType] || '';
+		return ({ chat: 'text', images: 'image', videos: 'video', transcribe: 'audio', upscale: 'image', 'media.analyze': 'text', 'music.analyze': 'audio' })[jobType] || '';
 	}
 
 	function capabilitiesFor(driver) {
@@ -1304,6 +1310,8 @@ function createBackendRegistry(options = {}) {
 		}),
 		refresh: () => Promise.all(drivers.map((driver) => driver.refresh ? driver.refresh({ resetMedia: true }) : driver.capabilities())),
 		getDriver: (jobType, payload) => driverFor(jobType, payload),
+		/* Used by explicit local setup to refresh a driver before it is ready. */
+		getDriverById: (id) => byId.get(aliases[String(id || '').trim()] || String(id || '').trim()) || null,
 		driverFor,
 		resolve,
 		run(jobType, payload, session) {
@@ -1323,6 +1331,7 @@ module.exports = {
 	createCursorCliDriver,
 	createGrokCliDriver,
 	createLocalAsrDriver,
+	createLocalUpscaleDriver,
 	createMusicAnalysisDriver,
 	createOpenAiVideosDriver,
 	createXaiApiDriver,

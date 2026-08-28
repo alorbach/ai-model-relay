@@ -1568,6 +1568,63 @@ function capabilities(options = {}) {
 	};
 }
 
+async function downloadHfSnapshot(pythonPath, repoId, run, emit) {
+	emit('stdout', `Downloading ${repoId}\n`);
+	const result = await run(pythonPath, ['-c', 'from huggingface_hub import snapshot_download; import sys; print(snapshot_download(sys.argv[1]))', repoId], { timeout: DEFAULT_TIMEOUT_MS, onOutput: emit });
+	if (result.error || result.status !== 0) {
+		const stdout = String(result.stdout || '').trim();
+		const stderr = String(result.stderr || '').trim();
+		const error = result.error ? (result.error.message || String(result.error)) : '';
+		return {
+			success: false,
+			category: 'configuration',
+			code: 'asr_model_download_failed',
+			message: `Could not download local audio model ${repoId}.`,
+			details: {
+				repo_id: repoId,
+				status: result.status != null ? result.status : null,
+				error,
+				stdout: stdout.slice(-8000),
+				stderr: stderr.slice(-8000),
+				log: [stderr, stdout, error].filter(Boolean).join('\n').slice(-12000),
+			},
+		};
+	}
+	return { success: true, repo_id: repoId, path: String(result.stdout || '').trim().split(/\r?\n/).filter(Boolean).pop() || '' };
+}
+
+async function setup(options = {}) {
+	const emit = typeof options.onOutput === 'function' ? options.onOutput : () => {};
+	const session = { appendSessionOutput: emit };
+	const run = options.runAsync || runAsync;
+	const ensureWhisper = options.ensureRuntime || ensureRuntime;
+	const ensureQwen = options.ensureQwenRuntime || ensureQwenRuntime;
+	const config = { ...(options.settings || settings()), allow_package_install: true };
+	const modelId = modelSlug(options.model_id || options.modelId || '');
+	if (!modelId) {
+		const runtime = String(options.runtime || '').trim();
+		if (runtime === 'qwen' || runtime === 'qwen-asr') return ensureQwen(config, session);
+		if (runtime === 'whisper' || runtime === 'faster-whisper') return ensureWhisper(config, session);
+		return { success: false, category: 'validation', code: 'asr_setup_model_required', message: 'Choose a Local ASR model on the status page to install.' };
+	}
+	const model = (config.models || []).find((entry) => entry && entry.id === modelId);
+	if (!model) return { success: false, category: 'validation', code: 'asr_model_unavailable', message: `Unknown Local ASR model: ${modelId}` };
+	const provider = model.provider || 'faster-whisper';
+	const runtime = provider === 'qwen-asr' || provider === 'qwen-aligner' ? await ensureQwen(config, session) : await ensureWhisper(config, session);
+	if (!runtime.success) return runtime;
+	const repos = provider === 'qwen-asr' || provider === 'qwen-aligner'
+		? [model.repo_id, model.aligner_repo_id]
+		: [model.repo_id, model.gpu_repo_id];
+	const downloaded = [];
+	for (const repoId of [...new Set(repos.map((value) => String(value || '').trim()).filter(Boolean))]) {
+		const result = await downloadHfSnapshot(runtime.python, repoId, run, emit);
+		if (!result.success) return result;
+		downloaded.push(result);
+	}
+	invalidateProbeCache();
+	return { success: true, model_id: fullModelId(model.id), label: model.label, provider, downloaded };
+}
+
 function publicSettings(options = {}) {
 	return {
 		success: true,
@@ -1603,6 +1660,7 @@ module.exports = {
 	saveSettings,
 	selectModel,
 	settings,
+	setup,
 	transcribe,
 	cudaRuntimeDirs,
 	cudaRuntimeInfo,

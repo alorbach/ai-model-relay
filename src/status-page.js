@@ -477,6 +477,23 @@ function statusPageHtml() {
 		.settings-actions button:hover,
 		.settings-actions button:focus-visible {
 			border-color: var(--info);
+		}
+		.setup-log {
+			display: block;
+			margin: 10px 0 0;
+			max-height: 280px;
+			overflow: auto;
+			white-space: pre-wrap;
+			word-break: break-word;
+			font-size: 12px;
+			line-height: 1.45;
+			padding: 10px 12px;
+			background: #070b10;
+			border: 1px solid var(--line);
+			border-radius: 8px;
+			color: var(--text);
+		}
+		.setup-log[hidden] { display: none; }
 			outline: none;
 		}
 		.provider-media-tests {
@@ -748,6 +765,22 @@ function statusPageHtml() {
 				</div>
 			</div>
 			<div class="panel span-12">
+				<div class="label">Local CUDA Upscale Settings</div>
+				<p class="muted">Installs an official SwinIR or Real-ESRGAN checkout and the pinned ×2 weight on this computer. Setup never runs during a BuchWerk job and never falls back to CPU.</p>
+				<form class="settings-editor" id="upscaleSettingsForm">
+					<div class="settings-grid" id="upscaleSettings"></div>
+					<div class="muted" id="upscaleModelStates">Models: not checked</div>
+					<div class="settings-actions">
+						<span class="muted" id="upscaleSettingsMessage">Loading settings</span>
+						<button type="button" id="reloadUpscaleSettings">Reload</button>
+						<button type="button" id="setupSwinir">Install SwinIR ×2</button>
+						<button type="button" id="setupRealesrgan">Install Real-ESRGAN ×2</button>
+						<button type="button" id="saveUpscaleSettings">Save settings</button>
+					</div>
+					<pre class="setup-log" id="upscaleSetupLog" hidden></pre>
+				</form>
+			</div>
+			<div class="panel span-12">
 				<div class="label">Local Music Analysis Settings</div>
 				<p class="muted">Core album metrics run privately with ffmpeg/ffprobe, librosa, and pyloudnorm. Setup downloads Python packages only when you press Setup.</p>
 				<form class="settings-editor" id="musicAnalysisSettingsForm">
@@ -763,6 +796,7 @@ function statusPageHtml() {
 			</div>
 			<div class="panel span-12">
 				<div class="label">Local ASR Settings</div>
+				<p class="muted">Install a Whisper or Qwen model onto this computer with the per-model Install button. That download is explicit; transcription jobs stay offline unless you also enable Allow ASR model downloads.</p>
 				<form class="settings-editor" id="asrSettingsForm">
 					<div class="settings-grid" id="asrGeneralSettings"></div>
 					<div>
@@ -785,6 +819,7 @@ function statusPageHtml() {
 						<button type="button" id="refreshAsrRuntime">Refresh runtime</button>
 						<button type="button" id="saveAsrSettings">Save settings</button>
 					</div>
+					<pre class="setup-log" id="asrSetupLog" hidden></pre>
 				</form>
 			</div>
 		</section>
@@ -833,8 +868,11 @@ function statusPageHtml() {
 		const statusUrl = '/v1/status';
 		const capabilitiesUrl = '/v1/capabilities';
 		const asrSettingsUrl = '/v1/asr/settings';
+		const asrSetupUrl = '/v1/asr/setup';
 		const musicAnalysisSettingsUrl = '/v1/music-analysis/settings';
 		const musicAnalysisSetupUrl = '/v1/music-analysis/setup';
+		const upscaleSettingsUrl = '/v1/upscale/settings';
+		const upscaleSetupUrl = '/v1/upscale/setup';
 		const relaySettingsUrl = '/v1/relay/settings';
 		const relayTestUrl = '/v1/relay/test';
 		const jobEventsUrl = '/v1/status/events';
@@ -842,6 +880,7 @@ function statusPageHtml() {
 		let currentCapabilities = {};
 		let currentAsrSettings = null;
 		let currentMusicAnalysisSettings = null;
+		let currentUpscaleSettings = null;
 		let settingsLoaded = false;
 		let fallbackPollTimer = null;
 		let providerRefreshPollTimer = null;
@@ -881,6 +920,15 @@ function statusPageHtml() {
 			refreshMusicAnalysisRuntime: document.getElementById('refreshMusicAnalysisRuntime'),
 			setupMusicAnalysis: document.getElementById('setupMusicAnalysis'),
 			saveMusicAnalysisSettings: document.getElementById('saveMusicAnalysisSettings'),
+			upscaleSettingsForm: document.getElementById('upscaleSettingsForm'),
+			upscaleSettings: document.getElementById('upscaleSettings'),
+			upscaleModelStates: document.getElementById('upscaleModelStates'),
+			upscaleSettingsMessage: document.getElementById('upscaleSettingsMessage'),
+			reloadUpscaleSettings: document.getElementById('reloadUpscaleSettings'),
+			setupSwinir: document.getElementById('setupSwinir'),
+			setupRealesrgan: document.getElementById('setupRealesrgan'),
+			saveUpscaleSettings: document.getElementById('saveUpscaleSettings'),
+			upscaleSetupLog: document.getElementById('upscaleSetupLog'),
 			asrDetails: document.getElementById('asrDetails'),
 			asrSettingsForm: document.getElementById('asrSettingsForm'),
 			asrGeneralSettings: document.getElementById('asrGeneralSettings'),
@@ -892,6 +940,7 @@ function statusPageHtml() {
 			saveAsrSettings: document.getElementById('saveAsrSettings'),
 			applyAsrSettingsJson: document.getElementById('applyAsrSettingsJson'),
 			addAsrModel: document.getElementById('addAsrModel'),
+			asrSetupLog: document.getElementById('asrSetupLog'),
 			activeJobs: document.getElementById('activeJobs'),
 			queuedJobs: document.getElementById('queuedJobs'),
 			recentActivity: document.getElementById('recentActivity'),
@@ -926,6 +975,7 @@ function statusPageHtml() {
 				settingsLoaded = true;
 				loadAsrSettings();
 				loadMusicAnalysisSettings();
+				loadUpscaleSettings();
 				loadRelaySettings();
 			}
 		}
@@ -1447,7 +1497,8 @@ function statusPageHtml() {
 				const features = Object.keys(backend.features || {}).filter((key) => backend.features[key]).join(', ') || (backend.job_types || []).join(', ') || 'No supported jobs';
 				const detail = backend.version || backend.command || features;
 				const diagnostic = backend.diagnostic && backend.diagnostic !== 'Ready.' && backend.diagnostic !== 'Authentication not checked yet.' ? '<br><small class="muted">' + escapeHtml(backend.diagnostic) + '</small>' : '';
-				return '<div class="feature-pill ' + (backend.ready ? 'enabled' : 'disabled') + '"><span class="name"><strong>' + escapeHtml(backend.label || backend.id) + '</strong><br><small class="muted">' + escapeHtml(detail) + '</small>' + diagnostic + '</span><span class="state">' + escapeHtml(status) + '</span></div>';
+				const installation = backend.id === 'local-upscale' ? '<br><small class="muted">Use Settings → Local CUDA Upscale to install SwinIR or Real-ESRGAN. Jobs never download a model or fall back to CPU.</small><br><small class="muted">Models: ' + (Array.isArray(backend.models) ? backend.models.map((model) => escapeHtml(String(model.label || model.id || 'model') + ' — ' + String(model.state || 'not checked'))).join(' · ') : 'not checked') + '</small>' : '';
+				return '<div class="feature-pill ' + (backend.ready ? 'enabled' : 'disabled') + '"><span class="name"><strong>' + escapeHtml(backend.label || backend.id) + '</strong><br><small class="muted">' + escapeHtml(detail) + '</small>' + diagnostic + installation + '</span><span class="state">' + escapeHtml(status) + '</span></div>';
 			}).join('') || '<div class="muted">No provider metadata reported</div>';
 			const cliPathFields = [
 				{ id: 'codex-cli', label: 'Codex CLI executable', placeholder: 'codex or C:\\Tools\\codex.exe' },
@@ -1827,6 +1878,105 @@ function statusPageHtml() {
 			}
 		}
 
+		function renderUpscaleSettings(settings, models) {
+			currentUpscaleSettings = settings || {};
+			fields.upscaleSettings.innerHTML = [
+				'<label class="field"><span>Python path</span><input id="upscalePythonPath" value="' + escapeHtml(currentUpscaleSettings.python_path || '') + '" placeholder="Auto-detect CUDA-capable Python"></label>',
+				'<label class="field"><span>Virtual environment path</span><input id="upscaleVenvPath" value="' + escapeHtml(currentUpscaleSettings.venv_path || '') + '"></label>',
+			].join('');
+			fields.upscaleModelStates.textContent = 'Models: ' + (Array.isArray(models) && models.length ? models.map((model) => String(model.label || model.id || 'model') + ' — ' + String(model.state || 'not checked')).join(' · ') : 'not checked');
+		}
+
+		function serializeUpscaleSettings() {
+			return {
+				python_path: document.getElementById('upscalePythonPath').value.trim(),
+				venv_path: document.getElementById('upscaleVenvPath').value.trim(),
+			};
+		}
+
+		async function loadUpscaleSettings() {
+			fields.upscaleSettingsMessage.textContent = 'Loading settings';
+			try {
+				const response = await fetch(upscaleSettingsUrl, { cache: 'no-store' });
+				const payload = await response.json();
+				if (!response.ok || payload.success === false) throw new Error(payload.message || 'Local upscale settings unavailable');
+				renderUpscaleSettings(payload.settings || {}, payload.models || []);
+				fields.upscaleSettingsMessage.textContent = 'Settings loaded';
+			} catch (error) {
+				fields.upscaleSettingsMessage.textContent = error.message || 'Local upscale settings load failed';
+			}
+		}
+
+		async function saveUpscaleSettings() {
+			const settings = serializeUpscaleSettings();
+			fields.upscaleSettingsMessage.textContent = 'Saving';
+			try {
+				const response = await fetch(upscaleSettingsUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ settings }) });
+				const payload = await response.json();
+				if (!response.ok || payload.success === false) throw new Error(payload.message || 'Save failed');
+				renderUpscaleSettings(payload.settings || settings, payload.models || []);
+				fields.upscaleSettingsMessage.textContent = 'Saved';
+				await Promise.all([refresh().catch(() => {}), loadRelaySettings().catch(() => {})]);
+			} catch (error) {
+				fields.upscaleSettingsMessage.textContent = error.message || 'Save failed';
+			}
+		}
+
+		function showSetupLog(node, text) {
+			if (!node) return;
+			const value = String(text || '').trim();
+			node.hidden = !value;
+			node.textContent = value;
+		}
+
+		function setupFailureText(payload, fallback) {
+			const details = payload && payload.details && typeof payload.details === 'object' ? payload.details : {};
+			const lines = [String((payload && payload.message) || fallback || 'Setup failed')];
+			if (payload && payload.code) lines.push('Code: ' + payload.code);
+			['python', 'python_version', 'python_exists', 'venv_path', 'venv_python', 'index_url', 'extra_index_url', 'status', 'error', 'repo_id'].forEach((key) => {
+				const value = details[key];
+				if (value === undefined || value === null || value === '') return;
+				const text = value && typeof value === 'object' ? (value.message || JSON.stringify(value)) : String(value);
+				lines.push(key.replace(/_/g, ' ') + ': ' + text);
+			});
+			if (details.torch && typeof details.torch === 'object') {
+				lines.push('torch: ' + JSON.stringify(details.torch));
+			}
+			const log = String(details.log || details.stderr || details.stdout || '').trim();
+			if (log) lines.push('', log.slice(-12000));
+			return lines.join(String.fromCharCode(10));
+		}
+
+		async function setupUpscale(engine, button) {
+			const original = button.textContent;
+			try {
+				fields.setupSwinir.disabled = true;
+				fields.setupRealesrgan.disabled = true;
+				button.textContent = 'Installing...';
+				showSetupLog(fields.upscaleSetupLog, '');
+				const settings = serializeUpscaleSettings();
+				await fetch(upscaleSettingsUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ settings }) });
+				fields.upscaleSettingsMessage.textContent = engine === 'swinir' ? 'Installing SwinIR ×2 (venv, CUDA torch, checkout, weight)...' : 'Installing Real-ESRGAN ×2 (venv, CUDA torch, checkout, weight)...';
+				const response = await fetch(upscaleSetupUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ engine }) });
+				const payload = await response.json();
+				if (!response.ok || payload.success === false) {
+					const error = new Error(payload.message || 'Local upscale setup failed');
+					error.payload = payload;
+					throw error;
+				}
+				fields.upscaleSettingsMessage.textContent = (payload.model && payload.model.label || engine) + ' is installed';
+				showSetupLog(fields.upscaleSetupLog, '');
+				await Promise.all([loadUpscaleSettings(), refresh().catch(() => {}), loadRelaySettings().catch(() => {})]);
+			} catch (error) {
+				fields.upscaleSettingsMessage.textContent = error.message || 'Local upscale setup failed';
+				showSetupLog(fields.upscaleSetupLog, setupFailureText(error.payload || {}, error.message || 'Local upscale setup failed'));
+			} finally {
+				fields.setupSwinir.disabled = false;
+				fields.setupRealesrgan.disabled = false;
+				button.textContent = original;
+			}
+		}
+
 		function checkedAttr(value) {
 			return value ? ' checked' : '';
 		}
@@ -1894,6 +2044,7 @@ function statusPageHtml() {
 						'<option value="cpu"' + optionAttr('cpu', model.preferred_device || 'auto') + '>CPU</option>' +
 						'<option value="cuda"' + optionAttr('cuda', model.preferred_device || 'auto') + '>CUDA</option>' +
 					'</select></label>' +
+					'<div class="settings-actions"><button type="button" data-install-asr-model="' + escapeHtml(model.id || '') + '">Install model</button></div>' +
 				'</div>'
 			)).join('');
 			renderAsrSettingsJson(currentAsrSettings);
@@ -1953,21 +2104,26 @@ function statusPageHtml() {
 			}
 		}
 
-		async function saveAsrSettings() {
+		async function persistAsrSettings() {
 			const settings = serializeAsrSettingsForm();
 			renderAsrSettingsJson(settings);
+			const response = await fetch(asrSettingsUrl, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ settings }),
+			});
+			const payload = await response.json();
+			if (!response.ok || payload.success === false) {
+				throw new Error(payload.message || 'Save failed');
+			}
+			return payload;
+		}
+
+		async function saveAsrSettings() {
 			fields.asrSettingsMessage.textContent = 'Saving';
 			try {
-				const response = await fetch(asrSettingsUrl, {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({ settings }),
-				});
-				const payload = await response.json();
-				if (!response.ok || payload.success === false) {
-					throw new Error(payload.message || 'Save failed');
-				}
-				renderAsrSettingsForm(payload.settings || settings);
+				const payload = await persistAsrSettings();
+				renderAsrSettingsForm(payload.settings || serializeAsrSettingsForm());
 				fields.asrSettingsMessage.textContent = 'Saved';
 				if (payload.capabilities) {
 					renderAsrDetails(payload.capabilities);
@@ -1975,6 +2131,36 @@ function statusPageHtml() {
 				refresh();
 			} catch (error) {
 				fields.asrSettingsMessage.textContent = error.message || 'Save failed';
+			}
+		}
+
+		async function setupAsrModel(button) {
+			const card = button.closest('.model-settings-card');
+			const modelId = String((card && card.querySelector('[data-field="id"]') || {}).value || button.getAttribute('data-install-asr-model') || '').trim();
+			const original = button.textContent;
+			const installButtons = Array.from(fields.asrModelSettings.querySelectorAll('[data-install-asr-model]'));
+			try {
+				installButtons.forEach((item) => { item.disabled = true; });
+				button.textContent = 'Installing...';
+				showSetupLog(fields.asrSetupLog, '');
+				fields.asrSettingsMessage.textContent = 'Saving settings, then installing ' + (modelId || 'model') + '...';
+				await persistAsrSettings();
+				const response = await fetch(asrSetupUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model_id: modelId }) });
+				const payload = await response.json();
+				if (!response.ok || payload.success === false) {
+					const error = new Error(payload.message || 'Local ASR setup failed');
+					error.payload = payload;
+					throw error;
+				}
+				fields.asrSettingsMessage.textContent = (payload.label || modelId) + ' is installed';
+				showSetupLog(fields.asrSetupLog, '');
+				await Promise.all([loadAsrSettings({ refreshRuntime: true }), refresh().catch(() => {}), loadRelaySettings().catch(() => {})]);
+			} catch (error) {
+				fields.asrSettingsMessage.textContent = error.message || 'Local ASR setup failed';
+				showSetupLog(fields.asrSetupLog, setupFailureText(error.payload || {}, error.message || 'Local ASR setup failed'));
+			} finally {
+				Array.from(fields.asrModelSettings.querySelectorAll('[data-install-asr-model]')).forEach((item) => { item.disabled = false; });
+				if (button.isConnected) button.textContent = original;
 			}
 		}
 
@@ -2363,11 +2549,22 @@ function statusPageHtml() {
 		fields.saveAsrSettings.addEventListener('click', saveAsrSettings);
 		fields.applyAsrSettingsJson.addEventListener('click', applyAsrSettingsJson);
 		fields.addAsrModel.addEventListener('click', addAsrModel);
+		fields.asrSettingsForm.addEventListener('click', (event) => {
+			const button = event.target.closest('[data-install-asr-model]');
+			if (!button || !fields.asrSettingsForm.contains(button)) return;
+			event.preventDefault();
+			setupAsrModel(button);
+		});
 		fields.musicAnalysisSettingsForm.addEventListener('submit', (event) => { event.preventDefault(); saveMusicAnalysisSettings(); });
 		fields.reloadMusicAnalysisSettings.addEventListener('click', loadMusicAnalysisSettings);
 		fields.refreshMusicAnalysisRuntime.addEventListener('click', () => loadMusicAnalysisSettings({ refreshRuntime: true }));
 		fields.saveMusicAnalysisSettings.addEventListener('click', saveMusicAnalysisSettings);
 		fields.setupMusicAnalysis.addEventListener('click', setupMusicAnalysis);
+		fields.upscaleSettingsForm.addEventListener('submit', (event) => { event.preventDefault(); saveUpscaleSettings(); });
+		fields.reloadUpscaleSettings.addEventListener('click', loadUpscaleSettings);
+		fields.saveUpscaleSettings.addEventListener('click', saveUpscaleSettings);
+		fields.setupSwinir.addEventListener('click', () => setupUpscale('swinir', fields.setupSwinir));
+		fields.setupRealesrgan.addEventListener('click', () => setupUpscale('realesrgan', fields.setupRealesrgan));
 		fields.relaySettingsForm.addEventListener('submit', (event) => { event.preventDefault(); saveRelaySettings(); });
 		fields.saveRelaySettings.addEventListener('click', saveRelaySettings);
 		fields.refreshRelayProviders.addEventListener('click', refreshProviderDetection);

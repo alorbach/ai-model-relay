@@ -35,6 +35,13 @@ function imageConcurrencyKey(job) {
 	return `model:${safeJobMetadata(job && job.model, 160).toLowerCase()}`;
 }
 
+function jobMatchesOrigin(job, origin) {
+	const expected = String(origin || '').trim();
+	if (!expected) return true;
+	const owner = String(job && job.origin || '').trim();
+	return !owner || owner === expected;
+}
+
 function extractRuntimeMetadata(text) {
 	const source = String(text || '');
 	const workflowMatch = source.match(/\b(?:using|use)\s+(?:the\s+)?([a-z0-9][a-z0-9 _-]{1,80}?)\s+workflow\b/i);
@@ -62,6 +69,10 @@ function redactSessionInput(value) {
 }
 
 function collectMediaArtifacts(result) {
+	const localArtifact = result && result.artifact && typeof result.artifact === 'object' ? result.artifact : null;
+	const localBytes = localArtifact && Buffer.isBuffer(localArtifact.bytes) ? localArtifact.bytes : null;
+	const localMime = String(localArtifact && localArtifact.mime_type || '').toLowerCase();
+	const localArtifacts = localBytes && localBytes.length && localBytes.length <= 64 * 1024 * 1024 && ['image/png', 'image/jpeg', 'image/webp'].includes(localMime) ? [{ mime_type: localMime, bytes: localBytes }] : [];
 	const response = result && result.response && typeof result.response === 'object' ? result.response : {};
 	const data = Array.isArray(response.data) ? response.data : [];
 	const artifacts = [];
@@ -82,7 +93,7 @@ function collectMediaArtifacts(result) {
 			if (bytes.length && bytes.length <= 100 * 1024 * 1024) artifacts.push({ mime_type: mimeType, bytes });
 		}
 	}
-	return artifacts;
+	return [...localArtifacts, ...artifacts];
 }
 
 function collectSessionOutput(failure) {
@@ -151,6 +162,7 @@ class JobManager {
 		const job = {
 			id: this.nextId++,
 			requestId: String(meta.requestId || ''),
+			origin: String(meta.origin || '').trim(),
 			type: String(meta.type || 'job'),
 			model: String(meta.model || ''),
 			provider: safeJobMetadata(meta.provider),
@@ -164,6 +176,8 @@ class JobManager {
 			lastOutputEmitAt: 0,
 			sessionOutput: '',
 			sessionInput: '',
+			abortController: new AbortController(),
+			cancelled: false,
 			runner,
 		};
 
@@ -180,6 +194,10 @@ class JobManager {
 	canStart(job) {
 		if (this.running.size >= this.maxConcurrent) {
 			return false;
+		}
+		if (job.type === 'upscale') {
+			/* One CUDA upscale job per Relay/GPU. Other CPU/API work may continue. */
+			return !Array.from(this.running.values()).some((runningJob) => runningJob.type === 'upscale' && imageConcurrencyKey(runningJob) === imageConcurrencyKey(job));
 		}
 		if (job.type !== 'images') return true;
 		const key = imageConcurrencyKey(job);
@@ -212,17 +230,64 @@ class JobManager {
 				requestId: job.requestId,
 				type: job.type,
 				model: job.model,
+				signal: job.abortController.signal,
 				appendSessionInput: (stream, chunk) => this.appendSessionInput(job, stream, chunk),
 				appendSessionOutput: (stream, chunk) => this.appendSessionOutput(job, stream, chunk),
 			}))
 			.then((result) => {
+				if (job.cancelled) {
+					const cancelled = result && result.category === 'cancelled'
+						? { ...result, success: false }
+						: { success: false, category: 'cancelled', code: 'local_job_cancelled', message: 'The local Relay job was cancelled; source bytes were preserved.' };
+					this.finish(job, 'cancelled', cancelled);
+					job.resolve(cancelled);
+					return;
+				}
 				this.finish(job, result && result.success === false ? 'failed' : 'completed', result);
 				job.resolve(result);
 			})
 			.catch((error) => {
+				if (job.cancelled) {
+					const result = { success: false, category: 'cancelled', code: 'local_job_cancelled', message: 'The local Relay job was cancelled; source bytes were preserved.' };
+					this.finish(job, 'cancelled', result);
+					job.resolve(result);
+					return;
+				}
 				this.finish(job, 'failed', error);
 				job.reject(error);
 			});
+	}
+
+	/** Cancel by Relay-local id without exposing artifacts or source bytes. */
+	cancel(jobId) {
+		const numericId = Number(jobId);
+		const queuedIndex = this.queue.findIndex((job) => job.id === numericId);
+		if (queuedIndex >= 0) {
+			const [job] = this.queue.splice(queuedIndex, 1);
+			job.cancelled = true;
+			job.abortController.abort();
+			const result = { success: false, category: 'cancelled', code: 'local_job_cancelled', message: 'The local Relay job was cancelled before CUDA execution; source bytes were preserved.' };
+			this.finish(job, 'cancelled', result);
+			job.resolve(result);
+			return true;
+		}
+		const job = this.running.get(numericId);
+		if (!job || job.cancelled) return false;
+		job.cancelled = true;
+		job.status = 'cancelling';
+		job.abortController.abort();
+		this.emitChange();
+		return true;
+	}
+
+	cancelByRequestId(requestId, type = '', origin = '') {
+		const value = String(requestId || '').trim();
+		const expectedType = String(type || '').trim();
+		if (!value) return false;
+		const matches = (job) => job.requestId === value && (!expectedType || job.type === expectedType) && jobMatchesOrigin(job, origin);
+		const queued = this.queue.find(matches);
+		const running = Array.from(this.running.values()).find(matches);
+		return this.cancel((queued || running || {}).id);
 	}
 
 	appendSessionOutput(job, stream, chunk) {
@@ -287,6 +352,7 @@ class JobManager {
 		this.recent.unshift({
 			id: job.id,
 			requestId: job.requestId,
+			origin: job.origin,
 			type: job.type,
 			model: job.model,
 			provider: job.provider,
@@ -350,6 +416,13 @@ class JobManager {
 		const artifacts = this.artifacts.get(String(jobId));
 		const item = artifacts && artifacts[Number(index)];
 		return item ? { mime_type: item.mime_type, bytes: item.bytes } : null;
+	}
+
+	artifactByRequestId(requestId, origin = '') {
+		const value = String(requestId || '').trim();
+		if (!value) return null;
+		const recent = this.recent.find((job) => job.requestId === value && jobMatchesOrigin(job, origin));
+		return recent ? this.artifact(recent.id, 0) : null;
 	}
 
 	snapshot() {

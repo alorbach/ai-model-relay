@@ -618,6 +618,10 @@ Returns a retained PNG, JPEG, or WebP image artifact from a recent completed job
 
 The job's `artifacts` metadata in `/v1/status` and status events provides the same-origin URL, MIME type, and byte size. Artifact bytes are intentionally not embedded in JSON or SSE responses.
 
+## `GET /v1/relay/jobs/{requestId}/artifact`
+
+Returns the paired binary PNG result for a completed local CUDA upscale. This route requires pairing and is the URL returned in `artifact_url` after `POST /v1/relay/jobs/upscale`. Status-page `<img>` / `<video>` previews continue to use the unpaired `/v1/status/jobs/{jobId}/artifacts/{index}` helper.
+
 ## `POST /v1/transcribe`
 
 Runs a local ASR transcription or reference-text alignment request through the private local ASR runtimes. This route requires pairing and the signed WordPress job envelope.

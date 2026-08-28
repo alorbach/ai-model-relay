@@ -159,6 +159,7 @@ function createMockSecurity() {
 			};
 		},
 		saveAsrSettings: (settings) => settings,
+		setupAsr: (options) => Promise.resolve({ success: true, model_id: 'local-asr:' + (options.model_id || 'whisper-small') }),
 		chat: (payload, session = {}) => new Promise((resolve) => {
 			if (session.appendSessionOutput) {
 				session.appendSessionOutput('stderr', `live output for ${payload.model || 'unknown'}`);

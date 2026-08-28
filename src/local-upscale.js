@@ -1,0 +1,403 @@
+'use strict';
+
+/*
+ * CUDA-only print-upscale driver. Jobs never download a model or fall back to
+ * CPU. The status-page Setup action is the explicit operator install: it
+ * clones the official checkout, fetches the ×2 weight, and records the
+ * SHA-256 for later job-time verification.
+ */
+const crypto = require('crypto');
+const fs = require('fs');
+const http = require('http');
+const https = require('https');
+const os = require('os');
+const path = require('path');
+const { spawn, spawnSync } = require('child_process');
+const { appendLog, createBoundedCollector } = require('./diagnostics');
+const { resolveCommand } = require('./local-cli');
+const security = require('./security');
+
+const MAX_BYTES = 64 * 1024 * 1024;
+const SETUP_TIMEOUT_MS = Number(process.env.AI_MODEL_RELAY_UPSCALE_SETUP_TIMEOUT_MS || 1800000);
+const DEFAULT_TORCH_INDEX = process.env.AI_MODEL_RELAY_UPSCALE_TORCH_INDEX_URL || 'https://download.pytorch.org/whl/cu128';
+const DEFAULT_PYTHON310 = path.join(os.homedir(), 'AppData', 'Local', 'Programs', 'Python', 'Python310', 'python.exe');
+const DEFAULT_PYTHON312 = path.join(os.homedir(), 'AppData', 'Local', 'Programs', 'Python', 'Python312', 'python.exe');
+const MODELS = {
+	'model-relay:local-upscale:swinir-classical-x2': { id: 'model-relay:local-upscale:swinir-classical-x2', engine: 'swinir', label: 'SwinIR classical ×2' },
+	'model-relay:local-upscale:realesrgan-x2plus': { id: 'model-relay:local-upscale:realesrgan-x2plus', engine: 'realesrgan', label: 'Real-ESRGAN ×2plus (restoration)' },
+};
+const INSTALL = {
+	swinir: {
+		engine: 'swinir',
+		repo: 'https://github.com/JingyunLiang/SwinIR.git',
+		script: 'main_test_swinir.py',
+		weight_name: '001_classicalSR_DF2K_s64w8_SwinIR-M_x2.pth',
+		weight_url: 'https://github.com/JingyunLiang/SwinIR/releases/download/v0.0/001_classicalSR_DF2K_s64w8_SwinIR-M_x2.pth',
+		packages: ['numpy', 'opencv-python-headless', 'pillow', 'timm'],
+	},
+	realesrgan: {
+		engine: 'realesrgan',
+		repo: 'https://github.com/xinntao/Real-ESRGAN.git',
+		script: 'inference_realesrgan.py',
+		weight_name: 'RealESRGAN_x2plus.pth',
+		weight_url: 'https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.1/RealESRGAN_x2plus.pth',
+		packages: ['basicsr', 'facexlib', 'gfpgan', 'opencv-python-headless', 'pillow', 'tqdm'],
+	},
+};
+
+function sha256File(filePath) {
+	try { const hash = crypto.createHash('sha256'); const stream = fs.readFileSync(filePath); hash.update(stream); return hash.digest('hex'); } catch (error) { return ''; }
+}
+
+function cleanPath(value) { return String(value || '').trim(); }
+
+function readState() {
+	try {
+		const state = JSON.parse(fs.readFileSync(security.statePath, 'utf8'));
+		return state && typeof state === 'object' ? state : {};
+	} catch (error) { return {}; }
+}
+
+function writeState(state) {
+	fs.mkdirSync(security.stateDir, { recursive: true });
+	fs.writeFileSync(security.statePath, JSON.stringify(state, null, 2));
+}
+
+function venvPythonPath(venvPath) {
+	return path.join(venvPath, process.platform === 'win32' ? 'Scripts' : 'bin', process.platform === 'win32' ? 'python.exe' : 'python');
+}
+
+function defaultSettings() {
+	return {
+		python_path: process.env.AI_MODEL_RELAY_UPSCALE_PYTHON || '',
+		venv_path: process.env.AI_MODEL_RELAY_UPSCALE_VENV || path.join(security.stateDir, 'upscale-venv'),
+		swinir_root: process.env.AI_MODEL_RELAY_SWINIR_ROOT || path.join(security.stateDir, 'upscale', 'swinir'),
+		swinir_model_path: process.env.AI_MODEL_RELAY_SWINIR_MODEL_PATH || '',
+		swinir_weight_sha256: String(process.env.AI_MODEL_RELAY_SWINIR_WEIGHT_SHA256 || '').toLowerCase(),
+		realesrgan_root: process.env.AI_MODEL_RELAY_REALESRGAN_ROOT || path.join(security.stateDir, 'upscale', 'realesrgan'),
+		realesrgan_model_path: process.env.AI_MODEL_RELAY_REALESRGAN_MODEL_PATH || '',
+		realesrgan_weight_sha256: String(process.env.AI_MODEL_RELAY_REALESRGAN_WEIGHT_SHA256 || '').toLowerCase(),
+	};
+}
+
+function normalizeSettings(raw) {
+	const defaults = defaultSettings();
+	const source = raw && typeof raw === 'object' ? raw : {};
+	return {
+		python_path: String(source.python_path || defaults.python_path || '').trim(),
+		venv_path: String(source.venv_path || defaults.venv_path || '').trim() || defaults.venv_path,
+		swinir_root: String(source.swinir_root || defaults.swinir_root || '').trim() || defaults.swinir_root,
+		swinir_model_path: String(source.swinir_model_path || defaults.swinir_model_path || '').trim(),
+		swinir_weight_sha256: String(source.swinir_weight_sha256 || defaults.swinir_weight_sha256 || '').trim().toLowerCase(),
+		realesrgan_root: String(source.realesrgan_root || defaults.realesrgan_root || '').trim() || defaults.realesrgan_root,
+		realesrgan_model_path: String(source.realesrgan_model_path || defaults.realesrgan_model_path || '').trim(),
+		realesrgan_weight_sha256: String(source.realesrgan_weight_sha256 || defaults.realesrgan_weight_sha256 || '').trim().toLowerCase(),
+	};
+}
+
+function settings() {
+	return normalizeSettings({ ...defaultSettings(), ...(readState().local_upscale || {}) });
+}
+
+function saveSettings(nextSettings) {
+	const state = readState();
+	state.local_upscale = normalizeSettings({ ...settings(), ...(nextSettings || {}) });
+	writeState(state);
+	return settings();
+}
+
+function resolveModelFiles(engine, env = process.env) {
+	const saved = env === process.env ? settings() : {};
+	const prefix = engine === 'swinir' ? 'AI_MODEL_RELAY_SWINIR' : 'AI_MODEL_RELAY_REALESRGAN';
+	const key = engine === 'swinir' ? 'swinir' : 'realesrgan';
+	return {
+		model_path: cleanPath(env[`${prefix}_MODEL_PATH`]) || cleanPath(saved[`${key}_model_path`]),
+		root: cleanPath(env[`${prefix}_ROOT`]) || cleanPath(saved[`${key}_root`]),
+		expected_checksum: cleanPath(env[`${prefix}_WEIGHT_SHA256`]).toLowerCase() || cleanPath(saved[`${key}_weight_sha256`]).toLowerCase(),
+	};
+}
+
+function modelConfig(id, env = process.env) {
+	const model = MODELS[id];
+	if (!model) return null;
+	const files = resolveModelFiles(model.engine, env);
+	const actualChecksum = files.model_path && fs.existsSync(files.model_path) ? sha256File(files.model_path) : '';
+	const manifestValid = /^[a-f0-9]{64}$/.test(files.expected_checksum) && actualChecksum && actualChecksum === files.expected_checksum;
+	return { ...model, model_path: files.model_path, root: files.root, expected_checksum: files.expected_checksum, actual_checksum: actualChecksum, installed: !!files.model_path && fs.existsSync(files.model_path), manifest_valid: !!manifestValid, state: !files.model_path || !fs.existsSync(files.model_path) ? 'not_installed' : (!/^[a-f0-9]{64}$/.test(files.expected_checksum) ? 'manifest_missing' : (!manifestValid ? 'checksum_mismatch' : 'installed')) };
+}
+
+function pythonCommand(env = process.env) {
+	if (env === process.env) {
+		const config = settings();
+		const venvPython = venvPythonPath(config.venv_path);
+		if (fs.existsSync(venvPython)) return venvPython;
+		return resolveCommand([env.AI_MODEL_RELAY_UPSCALE_PYTHON, config.python_path, 'python.exe', 'python']);
+	}
+	return resolveCommand([env.AI_MODEL_RELAY_UPSCALE_PYTHON, 'python.exe', 'python']);
+}
+
+function gpuStatus() {
+	const command = resolveCommand([process.env.AI_MODEL_RELAY_NVIDIA_SMI, 'nvidia-smi']);
+	if (!command) return { available: false, state: 'nvidia_smi_missing', devices: [] };
+	try {
+		const result = spawnSync(command, ['--query-gpu=index,name,memory.free,memory.total', '--format=csv,noheader,nounits'], { encoding: 'utf8', shell: false, windowsHide: true, timeout: 10000 });
+		if (result.error || result.status !== 0) return { available: false, state: 'gpu_probe_failed', devices: [] };
+		const devices = String(result.stdout || '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map((line) => {
+			const [index, name, free, total] = line.split(',').map((part) => part.trim());
+			return { index: Number(index), name, free_vram_mib: Number(free), total_vram_mib: Number(total) };
+		}).filter((device) => Number.isInteger(device.index) && device.total_vram_mib > 0);
+		return { available: devices.length > 0, state: devices.length ? 'available' : 'no_cuda_device', devices };
+	} catch (error) { return { available: false, state: 'gpu_probe_failed', devices: [] }; }
+}
+
+function publicSettings() {
+	const config = settings();
+	const models = Object.keys(MODELS).map((id) => {
+		const model = modelConfig(id);
+		return { id: model.id, label: model.label, engine: model.engine, state: model.state, installed: model.installed, manifest_valid: model.manifest_valid };
+	});
+	return { success: true, settings: config, models, venv_exists: fs.existsSync(venvPythonPath(config.venv_path)), gpu: gpuStatus() };
+}
+
+function runCommand(command, args, options = {}) {
+	const emit = typeof options.onOutput === 'function' ? options.onOutput : () => {};
+	return new Promise((resolve) => {
+		let child;
+		const stdout = createBoundedCollector({ maxChars: 1024 * 1024 });
+		const stderr = createBoundedCollector({ maxChars: 1024 * 1024 });
+		let error = null;
+		let settled = false;
+		const finish = (value) => { if (settled) return; settled = true; clearTimeout(timer); resolve(value); };
+		try { child = spawn(command, args, { cwd: options.cwd, env: options.env, shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }); }
+		catch (spawnError) { resolve({ status: null, stdout: '', stderr: '', error: spawnError }); return; }
+		const timer = setTimeout(() => { try { child.kill(); } catch (killError) {} finish({ status: null, stdout: stdout.value(), stderr: stderr.value(), error: new Error('Local upscale setup timed out.') }); }, Number(options.timeout || SETUP_TIMEOUT_MS));
+		if (typeof timer.unref === 'function') timer.unref();
+		child.stdout.on('data', (chunk) => { const text = String(chunk || ''); stdout.append(text); emit('stdout', text); });
+		child.stderr.on('data', (chunk) => { const text = String(chunk || ''); stderr.append(text); emit('stderr', text); });
+		child.once('error', (spawnError) => { error = spawnError; });
+		child.once('close', (status) => finish({ status, stdout: stdout.value(), stderr: stderr.value(), error }));
+	});
+}
+
+function downloadHttpsFile(url, destination, redirects = 0) {
+	return new Promise((resolve, reject) => {
+		if (redirects > 5) { reject(new Error('Weight download followed too many redirects.')); return; }
+		const client = String(url).startsWith('http://') ? http : https;
+		const req = client.get(url, { headers: { 'User-Agent': 'ai-model-relay' } }, (res) => {
+			if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+				res.resume();
+				downloadHttpsFile(new URL(res.headers.location, url).toString(), destination, redirects + 1).then(resolve, reject);
+				return;
+			}
+			if (res.statusCode !== 200) { res.resume(); reject(new Error(`Weight download failed with HTTP ${res.statusCode}.`)); return; }
+			fs.mkdirSync(path.dirname(destination), { recursive: true });
+			const out = fs.createWriteStream(destination);
+			res.pipe(out);
+			out.on('finish', () => out.close(() => resolve(destination)));
+			out.on('error', reject);
+		});
+		req.on('error', reject);
+	});
+}
+
+function commandDetails(result, extra = {}) {
+	const stdout = String(result && result.stdout || '').trim();
+	const stderr = String(result && result.stderr || '').trim();
+	const error = result && result.error ? (result.error.message || String(result.error)) : '';
+	const python = extra.python || '';
+	return {
+		...extra,
+		python,
+		python_exists: python ? fs.existsSync(python) : extra.python_exists,
+		status: result && result.status != null ? result.status : null,
+		error,
+		stdout: stdout.slice(-8000),
+		stderr: stderr.slice(-8000),
+		log: [stderr, stdout, error].filter(Boolean).join('\n').slice(-12000),
+	};
+}
+
+function setupFailure(code, message, result, extra = {}) {
+	const details = commandDetails(result, extra);
+	appendLog('upscale-setup', message, { code, ...details });
+	return { success: false, category: 'configuration', code, message, details };
+}
+
+function discoverBasePython(config = settings()) {
+	const candidates = [config.python_path, process.env.AI_MODEL_RELAY_UPSCALE_PYTHON, DEFAULT_PYTHON310, DEFAULT_PYTHON312, 'python.exe', 'python'].filter(Boolean);
+	for (const candidate of candidates) {
+		const command = resolveCommand([candidate]);
+		if (command) return command;
+	}
+	return '';
+}
+
+async function setup(options = {}) {
+	const engine = String(options.engine || '').trim() || 'swinir';
+	const spec = INSTALL[engine];
+	if (!spec) return { success: false, category: 'validation', code: 'local_upscale_engine_invalid', message: 'Choose SwinIR or Real-ESRGAN on the status page to install a local CUDA upscale model.' };
+	const emit = typeof options.onOutput === 'function' ? options.onOutput : () => {};
+	const run = options.runCommand || runCommand;
+	const download = options.downloadFile || downloadHttpsFile;
+	const persist = options.saveSettings || saveSettings;
+	const git = options.gitCommand || resolveCommand(['git']);
+	const config = options.settings || settings();
+	const basePython = options.pythonCommand || discoverBasePython(config);
+	if (!basePython) return setupFailure('local_upscale_python_missing', 'Local CUDA upscale setup needs a Python executable. Set the Python path in Settings or AI_MODEL_RELAY_UPSCALE_PYTHON.');
+	const venvPython = venvPythonPath(config.venv_path);
+	if (!fs.existsSync(venvPython)) {
+		emit('stdout', `Creating CUDA upscale virtual environment at ${config.venv_path}\n`);
+		fs.mkdirSync(path.dirname(config.venv_path), { recursive: true });
+		const created = await run(basePython, ['-m', 'venv', config.venv_path], { timeout: SETUP_TIMEOUT_MS, onOutput: emit });
+		if (created.error || created.status !== 0) return setupFailure('local_upscale_venv_failed', 'Could not create the local CUDA upscale virtual environment.', created, { python: basePython, venv_path: config.venv_path });
+	}
+	const versionResult = await run(venvPython, ['-V'], { timeout: 15000, onOutput: emit });
+	const pythonVersion = String(versionResult.stdout || versionResult.stderr || '').trim();
+	await run(venvPython, ['-m', 'pip', 'install', '--disable-pip-version-check', '--upgrade', 'pip'], { timeout: SETUP_TIMEOUT_MS, onOutput: emit });
+	emit('stdout', 'Removing any existing CPU PyTorch wheels so pip cannot keep 2.x+cpu.\n');
+	await run(venvPython, ['-m', 'pip', 'uninstall', '-y', 'torch', 'torchvision', 'torchaudio'], { timeout: 120000, onOutput: emit });
+	emit('stdout', `Installing CUDA PyTorch for local upscale (${pythonVersion || venvPython}) from ${DEFAULT_TORCH_INDEX} only.\n`);
+	const torch = await run(venvPython, ['-m', 'pip', 'install', '--disable-pip-version-check', '--progress-bar', 'off', '--force-reinstall', '--no-cache-dir', 'torch', 'torchvision', '--index-url', DEFAULT_TORCH_INDEX], { timeout: SETUP_TIMEOUT_MS, onOutput: emit });
+	if (torch.error || torch.status !== 0) return setupFailure('local_upscale_torch_failed', 'CUDA PyTorch could not be installed for local upscale. CPU fallback is disabled.', torch, { python: venvPython, python_version: pythonVersion, index_url: DEFAULT_TORCH_INDEX });
+	const cuda = await run(venvPython, ['-c', 'import json,torch; info={"available":bool(torch.cuda.is_available()),"version":getattr(torch,"__version__",""),"cuda_version":getattr(getattr(torch,"version",None),"cuda",None),"device_count":int(torch.cuda.device_count()) if hasattr(torch,"cuda") else 0}; print(json.dumps(info)); raise SystemExit(0 if info["available"] else 1)'], { timeout: 60000, onOutput: emit });
+	let torchProbe = {};
+	try { torchProbe = JSON.parse(String(cuda.stdout || '').trim().split(/\r?\n/).filter(Boolean).pop() || '{}'); } catch (error) { torchProbe = {}; }
+	const torchVersion = String(torchProbe.version || '').toLowerCase();
+	if (torchVersion.includes('+cpu') || (!torchProbe.cuda_version && torchVersion && !torchProbe.available)) {
+		return setupFailure('local_upscale_cpu_torch', `pip installed a CPU PyTorch wheel (${torchProbe.version}) instead of a CUDA build from ${DEFAULT_TORCH_INDEX}. Local upscale does not fall back to CPU.`, cuda, { python: venvPython, python_version: pythonVersion, index_url: DEFAULT_TORCH_INDEX, torch: torchProbe });
+	}
+	if (cuda.error || cuda.status !== 0) return setupFailure('local_upscale_cuda_unavailable', `CUDA PyTorch ${torchProbe.version || ''} is installed but torch.cuda is not usable (CUDA ${torchProbe.cuda_version || 'missing'}). CPU fallback is disabled.`, cuda, { python: venvPython, python_version: pythonVersion, index_url: DEFAULT_TORCH_INDEX, torch: torchProbe });
+	if (spec.packages.length) {
+		const packages = await run(venvPython, ['-m', 'pip', 'install', '--disable-pip-version-check', '--progress-bar', 'off', ...spec.packages], { timeout: SETUP_TIMEOUT_MS, onOutput: emit });
+		if (packages.error || packages.status !== 0) return setupFailure('local_upscale_packages_failed', `Could not install ${spec.engine} Python packages.`, packages, { python: venvPython, python_version: pythonVersion });
+	}
+	const key = engine === 'swinir' ? 'swinir' : 'realesrgan';
+	const root = config[`${key}_root`];
+	const scriptPath = path.join(root, spec.script);
+	if (!fs.existsSync(scriptPath)) {
+		if (!git) return setupFailure('local_upscale_git_missing', 'git is required on PATH to clone the official upscale checkout.');
+		emit('stdout', `Cloning ${spec.repo}\n`);
+		fs.mkdirSync(path.dirname(root), { recursive: true });
+		const cloned = await run(git, ['clone', '--depth', '1', spec.repo, root], { timeout: SETUP_TIMEOUT_MS, onOutput: emit });
+		if (cloned.error || cloned.status !== 0) return setupFailure('local_upscale_clone_failed', `Could not clone ${spec.engine} from GitHub.`, cloned, { repo: spec.repo, destination: root });
+	}
+	if (!fs.existsSync(scriptPath)) return { success: false, category: 'configuration', code: 'local_upscale_checkout_missing', message: `The official ${spec.engine} checkout is missing ${spec.script}.` };
+	const modelPath = config[`${key}_model_path`] || path.join(security.stateDir, 'upscale', 'weights', spec.weight_name);
+	const expected = String(config[`${key}_weight_sha256`] || '').toLowerCase();
+	const existingChecksum = fs.existsSync(modelPath) ? sha256File(modelPath) : '';
+	if (!existingChecksum || !expected || existingChecksum !== expected) {
+		emit('stdout', `Downloading ${spec.weight_name}\n`);
+		try { await download(spec.weight_url, modelPath); }
+		catch (error) { return setupFailure('local_upscale_weight_download_failed', error.message || 'The official ×2 weight could not be downloaded.'); }
+	}
+	const checksum = sha256File(modelPath);
+	if (!/^[a-f0-9]{64}$/.test(checksum)) return setupFailure('local_upscale_weight_invalid', 'The downloaded ×2 weight could not be checksummed.');
+	if (expected && checksum !== expected) return setupFailure('local_upscale_checksum_mismatch', 'The downloaded ×2 weight did not match the pinned SHA-256.');
+	const saved = persist({
+		...config,
+		[`${key}_root`]: root,
+		[`${key}_model_path`]: modelPath,
+		[`${key}_weight_sha256`]: checksum,
+	});
+	const modelId = engine === 'swinir' ? 'model-relay:local-upscale:swinir-classical-x2' : 'model-relay:local-upscale:realesrgan-x2plus';
+	return { success: true, engine, settings: saved, model: { id: modelId, label: MODELS[modelId].label, state: 'installed', manifest_valid: true } };
+}
+
+function killProcessTree(child) {
+	if (!child || !child.pid) return;
+	try {
+		if (process.platform === 'win32') spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { shell: false, windowsHide: true, stdio: 'ignore' });
+		else child.kill('SIGKILL');
+	} catch (error) {}
+}
+
+function safeOutput(result, modelId) {
+	const output = result && result.output && typeof result.output === 'object' ? result.output : {};
+	const { path: privatePath, ...manifest } = output;
+	return {
+		success: true,
+		response: { output: manifest, provenance: result.provenance || {}, model: modelId, local_unmetered: true },
+		artifact: { mime_type: 'image/png', bytes: fs.readFileSync(privatePath) },
+		local_job_id: result.local_job_id,
+	};
+}
+
+function createLocalUpscaleDriver(options = {}) {
+	const env = options.env || process.env;
+	const runner = options.runnerPath || path.join(__dirname, 'upscale-runner.py');
+	let snapshot = { id: 'local-upscale', label: 'Local CUDA Upscale', kind: 'local-runtime', ready: false, state: 'checking', diagnostic: 'Checking local CUDA upscale readiness.', gpu: gpuStatus(), models: [] };
+	function inspect() {
+		const python = pythonCommand(env);
+		const gpu = gpuStatus();
+		const models = Object.keys(MODELS).map((id) => modelConfig(id, env));
+		const runnersReady = fs.existsSync(runner) && !!python;
+		const ready = runnersReady && gpu.available && models.some((model) => model.manifest_valid);
+		snapshot = { id: 'local-upscale', label: 'Local CUDA Upscale', kind: 'local-runtime', ready, state: ready ? 'ready' : 'not_ready', diagnostic: ready ? 'CUDA and at least one pinned local upscale model are ready.' : 'Use Settings to install a local CUDA upscale model; jobs never download weights or fall back to CPU.', python: python ? '<detected>' : '', gpu, models: models.map((model) => ({ id: model.id, label: model.label, engine: model.engine, installed: model.installed, manifest_valid: model.manifest_valid, state: model.state })) };
+		return snapshot;
+	}
+	/*
+	 * Start with a real readiness snapshot.  The status page can install a
+	 * model before any generic provider refresh runs; advertising the initial
+	 * placeholder here would otherwise make the newly installed model appear
+	 * unavailable until an unrelated refresh succeeds.
+	 */
+	inspect();
+	return {
+		id: 'local-upscale', label: 'Local CUDA Upscale', kind: 'local-runtime', job_types: ['upscale'],
+		checkStatus: () => ({ success: snapshot.ready, message: snapshot.diagnostic, details: snapshot }),
+		capabilities: () => ({ ...snapshot, job_types: ['upscale'], features: { local_upscale: true, binary_transfer: true, cuda_only: true, cpu_fallback: false, cancellation: true, max_gpu_jobs: 1, web_ui_setup: true } }),
+		models: () => Object.keys(MODELS).map((id) => ({ id, type: 'image', backend: 'local-upscale', ready: !!snapshot.models.find((model) => model.id === id && model.manifest_valid) && !!snapshot.gpu.available, job_types: ['upscale'], label: MODELS[id].label })),
+		refresh: async () => inspect(),
+		async upscale(payload = {}, session = {}) {
+			const state = inspect();
+			const model = modelConfig(payload.model, env);
+			if (!model || !model.manifest_valid || !state.gpu.available) return { success: false, category: 'configuration', code: 'local_upscale_not_ready', message: 'Pinned model or CUDA readiness is unavailable. CPU fallback is disabled.', details: { state: model ? model.state : 'unknown_model', gpu: state.gpu.state } };
+			const source = Buffer.isBuffer(payload.source_bytes) ? payload.source_bytes : null;
+			if (!source || !source.length || source.length > MAX_BYTES || !['image/png', 'image/jpeg', 'image/webp'].includes(String(payload.source_mime_type || '').toLowerCase())) return { success: false, category: 'validation', code: 'local_upscale_source_invalid', message: 'The local upscale source must be a bounded PNG, JPEG, or WebP binary.' };
+			const workdir = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-model-relay-upscale-'));
+			const sourcePath = path.join(workdir, 'source'); const outputPath = path.join(workdir, 'result.png'); const jobPath = path.join(workdir, 'job.json');
+			try {
+				fs.writeFileSync(sourcePath, source);
+				fs.writeFileSync(jobPath, JSON.stringify({ model, source_path: sourcePath, output_path: outputPath, source_mime_type: payload.source_mime_type, crop: payload.crop, target_print: payload.target_print, scale: payload.scale, cuda_device: 0, tile: Number(env.AI_MODEL_RELAY_UPSCALE_TILE || 512), precision: String(env.AI_MODEL_RELAY_UPSCALE_PRECISION || 'fp16'), timeout_seconds: Math.max(1, Math.ceil(Number(env.AI_MODEL_RELAY_UPSCALE_TIMEOUT_MS || 1800000) / 1000)) }));
+				const python = pythonCommand(env);
+				const result = await new Promise((resolve) => {
+					let stdout = ''; let stderr = ''; let settled = false; let timeout = null; let stopReason = ''; let removeAbort = () => {};
+					const child = spawn(python, [runner, '--job-json', jobPath], { shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], env: { ...env, PYTHONUNBUFFERED: '1' } });
+					const settle = (value) => { if (settled) return; settled = true; if (timeout) clearTimeout(timeout); removeAbort(); resolve(value); };
+					const requestStop = (reason) => {
+						if (settled || stopReason) return;
+						stopReason = reason;
+						killProcessTree(child);
+					};
+					timeout = setTimeout(() => requestStop('timeout'), Number(env.AI_MODEL_RELAY_UPSCALE_TIMEOUT_MS || 1800000));
+					const onAbort = () => requestStop('cancelled');
+					if (session.signal) {
+						if (session.signal.aborted) onAbort();
+						else { session.signal.addEventListener('abort', onAbort, { once: true }); removeAbort = () => session.signal.removeEventListener('abort', onAbort); }
+					}
+					child.stdout.on('data', (chunk) => { stdout += String(chunk); session.appendSessionOutput && session.appendSessionOutput('stdout', String(chunk)); });
+					child.stderr.on('data', (chunk) => { stderr += String(chunk); session.appendSessionOutput && session.appendSessionOutput('stderr', String(chunk)); });
+					child.on('error', (error) => settle({ error, stdout, stderr }));
+					child.on('close', (status) => {
+						if (stopReason === 'cancelled') settle({ cancelled: true, stdout, stderr });
+						else if (stopReason === 'timeout') settle({ timeout: true, stdout, stderr });
+						else settle({ status, stdout, stderr });
+					});
+				});
+				if (result.cancelled) return { success: false, category: 'cancelled', code: 'local_upscale_cancelled', message: 'The local CUDA upscale was cancelled; source bytes were preserved.' };
+				if (result.timeout) return { success: false, category: 'timeout', code: 'local_upscale_timeout', message: 'The local CUDA upscale job timed out; source bytes were preserved.', details: { stderr: result.stderr } };
+				if (result.error || result.status !== 0) return { success: false, category: 'configuration', code: 'local_upscale_failed', message: 'The local CUDA upscale runner did not complete; source bytes were preserved.', details: { stderr: String(result.stderr || '').slice(-4000) } };
+				const metadata = JSON.parse(String(result.stdout || '').trim().split(/\r?\n/).filter(Boolean).pop() || '{}');
+				if (!fs.existsSync(outputPath) || fs.statSync(outputPath).size < 1 || fs.statSync(outputPath).size > MAX_BYTES) return { success: false, category: 'validation', code: 'local_upscale_output_missing', message: 'The local CUDA runner did not produce a bounded PNG result.' };
+				const outputChecksum = sha256File(outputPath);
+				const output = { ...metadata.output, path: outputPath, checksum: outputChecksum, mime_type: 'image/png', byte_size: fs.statSync(outputPath).size };
+				if (!metadata.success || !outputChecksum || output.width !== Number(payload.target_print.width) || output.height !== Number(payload.target_print.height)) return { success: false, category: 'validation', code: 'local_upscale_manifest_invalid', message: 'The local CUDA output did not match the signed print target.' };
+				const value = safeOutput({ output, provenance: metadata.provenance, local_job_id: session.jobId }, model.id);
+				return value;
+			} catch (error) { return { success: false, category: 'configuration', code: 'local_upscale_failed', message: 'The local CUDA upscale runner failed; source bytes were preserved.' }; }
+			finally { setTimeout(() => { try { fs.rmSync(workdir, { recursive: true, force: true }); } catch (error) {} }, 30000).unref?.(); }
+		},
+	};
+}
+
+module.exports = { MAX_BYTES, MODELS, INSTALL, createLocalUpscaleDriver, gpuStatus, modelConfig, publicSettings, saveSettings, settings, setup };
