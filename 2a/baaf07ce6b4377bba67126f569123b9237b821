@@ -1,0 +1,92 @@
+test/job-manager.test.js
+  s_283fd6cff5aacb::t_6d43a2f272b5b9 141,145-172
+  s_3d05802ef9ac1b::t_6dcf8ec2da269d 103-104
+  s_283fd6cff5aacb::t_dc1b247be2f8c4 142-144
+  s_3d05802ef9ac1b::t_8cb2e4f8fbc926 173-174,176,180-181
+  s_3d05802ef9ac1b::t_84b42f03d864ca 175,177-179,182-183
+test/status-page.test.js
+  s_283fd6cff5aacb::t_6c75bbaef73e52 76-77
+src/status-page.js
+  s_283fd6cff5aacb::t_3a3115a887cc99 1450-1451
+src/local-upscale.js
+  s_283fd6cff5aacb::t_537bb463824974 58,61-62
+  s_283fd6cff5aacb::t_3a3115a887cc99 83
+  s_283fd6cff5aacb::t_37156cda4c5d74 99,101-103,106,110-111
+  s_3d05802ef9ac1b::t_db657d3fe1fdc4 96
+  s_283fd6cff5aacb::t_5cf14f6db9d51b 1-57,59-60,63-82,84-95,97-98,100,108-109,112,114-129
+  s_283fd6cff5aacb::t_e0ea80c5f3d177 104-105,107,113
+src/backend-registry.js
+  s_283fd6cff5aacb::t_a6136f42729fce 10,66-68,1235,1254,1272,1332
+src/server.js
+  s_283fd6cff5aacb::t_7ad027e0a4f609 571-572,587-590,592-599
+  s_283fd6cff5aacb::t_6606e17c61f7a1 573
+  s_a24a52784f4f7d::t_a5c334700947f1 478-479
+  s_3d05802ef9ac1b::t_6bf207f677239f 591
+  s_3d05802ef9ac1b::t_8b72c59ef02903 569-570
+  s_3d05802ef9ac1b::t_04470e09dde3db 468-469,472
+  s_283fd6cff5aacb::t_7780180f590cfd 47,147,237-265
+  s_283fd6cff5aacb::t_156853092ea0f2 266
+  s_283fd6cff5aacb::t_b0c6c83847b6ec 470-471,474,477,545-568
+  s_a24a52784f4f7d::t_dcb083ac7239b0 473,475-476
+  s_3d05802ef9ac1b::t_64f45065a6a057 422-424
+  s_283fd6cff5aacb::t_2680d9c8c96476 292,313
+src/upscale-runner.py
+  s_283fd6cff5aacb::t_e0ea80c5f3d177 33-34,96,104
+  s_3d05802ef9ac1b::t_7ebef65432ab03 97-101
+  s_283fd6cff5aacb::t_d5633e6d10f94d 1-32,35-85,90-95,102-103,105-115
+  s_283fd6cff5aacb::t_3a3115a887cc99 86-89
+test/local-upscale.test.js
+  s_283fd6cff5aacb::t_6c75bbaef73e52 37,41-43
+  s_3d05802ef9ac1b::t_273de4ed62d307 44
+  s_283fd6cff5aacb::t_654720d25aa1f6 1-36,38-40,45-53
+README.md
+  s_283fd6cff5aacb::t_ea7e5bde8bb060 51,74-84,170-172,293-298
+src/job-manager.js
+  s_283fd6cff5aacb::t_a17ee841c2a179 65-68,89,190-192
+  s_283fd6cff5aacb::t_e0ea80c5f3d177 171-172,193,225,230,234-239,245-266,268,270,274-275
+  s_3d05802ef9ac1b::t_575d3fd1640f7d 267,269,271-273
+  s_283fd6cff5aacb::t_7761d35fdf0126 276
+  s_3d05802ef9ac1b::t_70133f472442f5 404-410
+test/relay-routes.test.js
+  s_283fd6cff5aacb::t_2a79cb2edae8a8 38-54,112,119,121-122,124,190,241-244,246-248,251-254,258-259
+  s_3d05802ef9ac1b::t_c8f0e7cabfcd2c 55-64
+  s_3d05802ef9ac1b::t_848764db569421 245,249-250,255-257
+  s_283fd6cff5aacb::t_33efa135f1b518 260
+package.json
+  s_283fd6cff5aacb::t_f02b3da3d1bdb9 37-40
+  s_283fd6cff5aacb::t_654720d25aa1f6 12-13
+docs/local-bridge-api.md
+  s_3d05802ef9ac1b::t_3f2ca1840a98fe 621-624
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "2abaaf07ce6b4377bba67126f569123b9237b821",
+  "prompts": {},
+  "sessions": {
+    "s_283fd6cff5aacb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fe0c8-2012-7ae3-a5b8-7804867046e5",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_3d05802ef9ac1b": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "6913c7a8-c79a-4a4f-913e-fc43993249d8",
+        "model": "grok-4.6"
+      },
+      "human_author": null
+    },
+    "s_a24a52784f4f7d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f532f-e127-77d2-af95-cf138999bbde",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
