@@ -7,6 +7,7 @@ const { spawn, spawnSync } = require('child_process');
 const asr = require('./asr');
 const { appendLog, createBoundedCollector, safeError } = require('./diagnostics');
 const { beginLocalModelDebugLog } = require('./temp-debug-logs');
+const { resolveMaxTokens } = require('./token-policy');
 
 const defaultCodexBinary = process.env.ALORBACH_CODEX_BINARY || 'codex';
 let configuredCodexBinary = '';
@@ -675,10 +676,11 @@ function contentPartsToPrompt(content, tempDir, attachments) {
 
 function buildChatPrompt(messages, maxTokens, tempDir) {
 	const attachments = [];
+	const resolvedMaxTokens = resolveMaxTokens('chat', maxTokens);
 	const parts = [
 		'Respond to the following WordPress Gateway chat transcript.',
 		'Do not access local files, run shell commands, or modify the filesystem.',
-		`Maximum response tokens hint: ${maxTokens || 1024}.`,
+		`Maximum response tokens hint: ${resolvedMaxTokens}.`,
 		'',
 	];
 	for (const message of Array.isArray(messages) ? messages : []) {
@@ -710,6 +712,7 @@ async function chat(payload, session = {}) {
 	const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'alorbach-codex-chat-'));
 	const outputFile = path.join(tempDir, 'last-message.txt');
 	const { attachments, prompt } = buildChatPrompt(messages, payload.max_tokens, tempDir);
+	const resolvedMaxTokens = resolveMaxTokens('chat', payload.max_tokens);
 	const debugLog = beginLocalModelDebugLog({
 		kind: 'chat',
 		model: `codex-local:${model}`,
@@ -721,7 +724,7 @@ async function chat(payload, session = {}) {
 		debugLog.writePrompt(prompt);
 		debugLog.writeJson('request', {
 			model: `codex-local:${model}`,
-			max_tokens: payload.max_tokens || null,
+			max_tokens: resolvedMaxTokens,
 			attachment_count: attachments.length,
 			temp_dir: tempDir,
 			output_file: outputFile,

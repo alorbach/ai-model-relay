@@ -256,7 +256,7 @@
 						messages: [
 							{ role: 'user', content: document.getElementById('chatPrompt').value },
 						],
-						max_tokens: 256,
+						max_tokens: 8192,
 					};
 					const result = await bridgeFetch('/v1/chat', {
 						method: 'POST',

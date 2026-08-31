@@ -526,7 +526,7 @@ Request:
         "content": "Write a short status line."
       }
     ],
-    "max_tokens": 256
+    "max_tokens": 8192
   }
 }
 ```

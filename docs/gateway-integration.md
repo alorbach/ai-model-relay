@@ -81,7 +81,7 @@ Chat request:
         "content": "Hello"
       }
     ],
-    "max_tokens": 256
+    "max_tokens": 8192
   }
 }
 ```

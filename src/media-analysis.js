@@ -6,6 +6,7 @@ const net = require('net');
 const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
+const { resolveMaxTokens } = require('./token-policy');
 
 const MAX_FRAMES = 6;
 const MAX_FRAME_DATA_URL_CHARS = 2 * 1024 * 1024;
@@ -222,7 +223,7 @@ function buildAnalysisMessages(payload, frames) {
 	const prompt = String(payload.prompt || 'Analyze this media and summarize the important visual content, text, timing, and likely user-facing issues.').trim();
 	const transcript = String(payload.transcript || '').trim();
 	const content = [
-		{ type: 'input_text', text: transcript ? `${prompt}\n\nProvided audio transcript:\n${transcript.slice(0, 12000)}` : prompt },
+		{ type: 'input_text', text: transcript ? `${prompt}\n\nProvided audio transcript:\n${transcript.slice(0, 32000)}` : prompt },
 	];
 	for (const frame of frames) {
 		content.push({ type: 'input_image', image_url: frame });
@@ -249,7 +250,7 @@ async function analyze(payload = {}, codexAdapter, session = {}) {
 		}
 		const result = await codexAdapter.chat({
 			model: payload.model || 'codex-local:auto',
-			max_tokens: payload.max_tokens || 1200,
+			max_tokens: resolveMaxTokens('media.analyze', payload.max_tokens),
 			messages: buildAnalysisMessages(payload, frames),
 		}, session);
 		if (!result.success) {

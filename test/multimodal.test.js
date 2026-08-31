@@ -120,16 +120,20 @@ async function withServer(options, callback) {
 		},
 	};
 	const codex = {
+		lastChatPayload: null,
 		capabilities: () => ({ success: true, bridge_features: { structured_exec_json: true, app_server: true }, codex: { version: 'codex-cli test' } }),
 		checkStatus: () => ({ success: true, message: 'ready', details: {} }),
 		models: () => ({ success: true, models: { text: ['codex-local:auto'], image: ['codex-local:image'] } }),
-		chat: (payload) => Promise.resolve({
-			success: true,
-			response: {
-				choices: [{ message: { role: 'assistant', content: `analyzed ${payload.messages[0].content.length} parts` } }],
-				provider_details: {},
-			},
-		}),
+		chat: (payload) => {
+			codex.lastChatPayload = payload;
+			return Promise.resolve({
+				success: true,
+				response: {
+					choices: [{ message: { role: 'assistant', content: `analyzed ${payload.messages[0].content.length} parts` } }],
+					provider_details: {},
+				},
+			});
+		},
 	};
 	const mediaAnalysis = require('../src/media-analysis');
 
@@ -153,9 +157,17 @@ async function withServer(options, callback) {
 		assert.strictEqual(downloaded.statusCode, 200);
 		assert.strictEqual(downloaded.body.response.b64_video, Buffer.from('mp4').toString('base64'));
 
-		const analyzed = await requestJson(port, 'POST', '/v1/media/analyze', jobBody('media', { frames: [framePng], prompt: 'What is visible?' }));
+		const analyzed = await requestJson(port, 'POST', '/v1/media/analyze', jobBody('media', {
+			frames: [framePng],
+			prompt: 'What is visible?',
+			transcript: `${'a'.repeat(32000)}b`,
+		}));
 		assert.strictEqual(analyzed.statusCode, 200);
 		assert.strictEqual(analyzed.body.response.provider_details.media_analysis.frames_analyzed, 1);
+		assert.strictEqual(codex.lastChatPayload.max_tokens, 4096);
+		const analysisText = codex.lastChatPayload.messages[0].content[0].text;
+		assert.ok(analysisText.endsWith('a'.repeat(32000)));
+		assert.ok(!analysisText.endsWith('a'.repeat(32000) + 'b'));
 	});
 
 	await withServer({
