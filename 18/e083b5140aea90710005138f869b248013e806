@@ -1,0 +1,31 @@
+test/backend-registry.test.js
+  s_f875d017f94040::t_bc7f1ede94d7e0 462-486
+docs/architecture.md
+  s_f875d017f94040::t_43b52739f3ccd1 37
+src/backend-registry.js
+  s_f875d017f94040::t_4f25323497ef95 941
+  s_f875d017f94040::t_2357233e533939 529-534
+  s_f875d017f94040::t_c0dba620ac4bd8 903
+docs/operations.md
+  s_f875d017f94040::t_8c1fbd7e99e9ff 212
+  s_f875d017f94040::t_d79d1ae9133d31 19
+test/grok-media.test.js
+  s_f875d017f94040::t_100641b95da24d 140-157
+  s_f875d017f94040::t_0818222725ecbe 56-61
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "18e083b5140aea90710005138f869b248013e806",
+  "prompts": {},
+  "sessions": {
+    "s_f875d017f94040": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "ee04f1be-df62-41a8-8028-54d6351731df",
+        "model": "composer-2.5"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
