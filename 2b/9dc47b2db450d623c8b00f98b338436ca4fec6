@@ -1,0 +1,35 @@
+test/codex-runner.test.js
+  s_66a384a8a418ee::t_fc74bd8ef859f8 6,90-100
+src/codex.js
+  s_66a384a8a418ee::t_8de5a8091c08c0 753-780,812,814-818,820-825,870
+  s_66a384a8a418ee::t_5c6cac3379de55 1190,1199-1202,1209,1217,1225,1227
+  s_66a384a8a418ee::t_428fb487f0ec2e 62-66
+  s_66a384a8a418ee::t_43952036fb7b1f 17,99-123,198,204-208
+  s_66a384a8a418ee::t_cb492b0e6c89f2 781,813
+  s_66a384a8a418ee::t_f3694f70e971a9 408-424
+src/media-analysis.js
+  s_66a384a8a418ee::t_01630c368e8908 309,336,340,348-353,361
+  s_66a384a8a418ee::t_ceb349e06e986a 22-104
+  s_66a384a8a418ee::t_cb492b0e6c89f2 319,322,341-344
+test/multimodal.test.js
+  s_66a384a8a418ee::t_f3e54d8eadaa8b 124-127,129-130,139-142,146,183-184,187-215
+  s_66a384a8a418ee::t_cb492b0e6c89f2 128,133,135-138,185-186,216
+docs/architecture.md
+  s_66a384a8a418ee::t_bbb83b02e7e5fc 61
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "2b9dc47b2db450d623c8b00f98b338436ca4fec6",
+  "prompts": {},
+  "sessions": {
+    "s_66a384a8a418ee": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0583f-8e85-7db1-886d-02293ade9cd8",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": null
+    }
+  }
+}
