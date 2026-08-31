@@ -1,0 +1,73 @@
+docs/operations.md
+  s_f875d017f94040::t_154d011e87a3cc 214-215
+  s_f875d017f94040::t_0ec84f2fdf4488 279
+  s_f875d017f94040::t_90ce056de94251 22
+src/status-page.js
+  s_f875d017f94040::t_15f2eb098ddc61 1587
+test/backend-registry.test.js
+  s_f875d017f94040::t_213e43d7a39274 161-162
+  s_f875d017f94040::t_7219563c6efd29 214-228,230-257,289-304,314-324,326
+  s_f875d017f94040::t_dd3de532b45a90 305-313,325,327
+  s_f875d017f94040::t_ccfc0f6a95bb2a 92,95-103
+  s_f875d017f94040::t_2ca795bc22cdde 229
+  s_f875d017f94040::t_0b6b3cf5b95efc 258-288
+docs/local-bridge-api.md
+  s_f875d017f94040::t_66cc482726ecf7 498
+  s_f875d017f94040::t_48968b4ac6dc2b 462-464
+  s_f875d017f94040::t_9349d61d41f858 492
+  s_f875d017f94040::t_177cd8275c5c25 496-497
+  s_f875d017f94040::t_96e5bfe81fa8e9 469
+  s_f875d017f94040::t_def0f085a9bbbd 233
+  s_f875d017f94040::t_a8d7bb10a047a5 712
+docs/architecture.md
+  s_f875d017f94040::t_665349ab6332fb 37
+  s_f875d017f94040::t_a61b8551bfd670 65
+test/relay-settings.test.js
+  s_f875d017f94040::t_8fdc063363bfd5 45-61
+test/relay-routes.test.js
+  s_f875d017f94040::t_a058a326aed087 322-328
+  s_f875d017f94040::t_d0fd4e9290e0da 121,123-124
+  s_f875d017f94040::t_6dacb93d18c5c6 201-202
+README.md
+  s_f875d017f94040::t_93280ed2aa0938 198
+  s_f875d017f94040::t_400771fc21e7cb 280,284,286
+  s_f875d017f94040::t_cf19bb18156c9b 27-28
+test/grok-media.test.js
+  s_f875d017f94040::t_3aa97734d8a279 69-75
+  s_f875d017f94040::t_6b01bffdc05db4 90,95-97
+src/server.js
+  s_f875d017f94040::t_f9fdaeb865e4a6 404-405
+  s_f875d017f94040::t_60c97f3d947174 836
+src/relay-settings.js
+  s_f875d017f94040::t_ffe5a870d314c7 32
+  s_f875d017f94040::t_1e589bebeb219c 34
+  s_f875d017f94040::t_5dbb8f19be0ea6 14-20
+src/backend-registry.js
+  s_f875d017f94040::t_3b8fc369b6244f 115-123,125-163,180-190
+  s_f875d017f94040::t_ddaebff4856cce 164-179
+  s_f875d017f94040::t_7d378c4a9a7512 332-350,352-359,363,370-388,392-422
+  s_f875d017f94040::t_17c0eefde6e6a2 1126-1146,1151,1160-1162,1165-1170
+  s_f875d017f94040::t_f763fe6f1ff6e9 1269-1292,1295-1297,1299-1355,1357-1425
+  s_f875d017f94040::t_3339f3eee78461 291-293
+  s_f875d017f94040::t_718f49cebbab61 1293-1294,1298
+  s_f875d017f94040::t_ad1fdc52734ba4 679
+  s_f875d017f94040::t_3e1796d1bfbd89 1356
+docs/gateway-integration.md
+  s_f875d017f94040::t_6ce38a01a559dc 21
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "b98388928db37c072a60542a4905b05ccad876fb",
+  "prompts": {},
+  "sessions": {
+    "s_f875d017f94040": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "ee04f1be-df62-41a8-8028-54d6351731df",
+        "model": "grok-4.6"
+      },
+      "human_author": null
+    }
+  }
+}
