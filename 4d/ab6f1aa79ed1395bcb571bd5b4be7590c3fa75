@@ -1,0 +1,104 @@
+test/multimodal.test.js
+  s_3d05802ef9ac1b::t_b65e9bcf11aa06 4,6-7
+  s_3d05802ef9ac1b::t_b9ab3f705c3c96 93,95-110
+  s_3d05802ef9ac1b::t_c8e39659cf203e 9
+test/backend-registry.test.js
+  s_200e785415dbde::t_ec5450477e1b7b 321
+  s_3d05802ef9ac1b::t_33d4f8bc348ba9 299,307-320
+  s_3d05802ef9ac1b::t_20fa5711c81133 282-285
+src/upscale-runner.py
+  s_3d05802ef9ac1b::t_e8b223a7c0f51e 73-79
+src/relay-settings.js
+  s_3d05802ef9ac1b::t_3c09da81f99ac7 54-57,60
+src/server.js
+  s_200e785415dbde::t_2ebd723b8df1fa 490
+  s_3d05802ef9ac1b::t_872e1ff694f68a 501,503-510
+  s_3d05802ef9ac1b::t_3f3ecdc1e6b995 526,529
+  s_3d05802ef9ac1b::t_89b487e502bccf 777
+  s_3d05802ef9ac1b::t_647e7efee0ad65 746
+  s_3d05802ef9ac1b::t_d4cfd59ecf0adb 656-659
+  s_3d05802ef9ac1b::t_b5a4b5330362bf 423,429-431,438-489
+  s_3d05802ef9ac1b::t_c3a8bf29229a5e 718
+test/status-page.test.js
+  s_3d05802ef9ac1b::t_655376486c48ae 90
+test/local-upscale.test.js
+  s_3d05802ef9ac1b::t_c3dd601c2fdc13 139-142
+  s_3d05802ef9ac1b::t_b39620c4e10162 150-169
+  s_3d05802ef9ac1b::t_dff51d5b9895a8 118-122
+  s_3d05802ef9ac1b::t_6a387e925d3324 14,17-44
+  s_3d05802ef9ac1b::t_13da8e34a57f56 86-88
+  s_3d05802ef9ac1b::t_250310f17e479a 8
+  s_3d05802ef9ac1b::t_cbdd8daab0b04d 101,109-110
+  s_3d05802ef9ac1b::t_bb4cf303f72f2c 186
+test/relay-routes.test.js
+  s_3d05802ef9ac1b::t_eafc40fb164d23 55,57
+  s_3d05802ef9ac1b::t_9dfc62a6b838d2 208-209,211,215,218,222,225-227
+  s_3d05802ef9ac1b::t_79902e5bc7da25 28
+  s_3d05802ef9ac1b::t_69611b4b22d194 286-288
+test/relay-settings.test.js
+  s_3d05802ef9ac1b::t_fece75e1916afd 41-44
+src/asr.js
+  s_3d05802ef9ac1b::t_fedad8bbb968b6 1597-1601,1622-1635,1637,1643
+test/asr.test.js
+  s_3d05802ef9ac1b::t_50fa03da531044 238-248
+src/codex.js
+  s_3d05802ef9ac1b::t_5f9e5f80d6e206 537-538
+src/local-upscale.js
+  s_3d05802ef9ac1b::t_79b8330da806f4 318-363,369-374,376-377,398-399,401-402,407-408,416-417,439
+  s_3d05802ef9ac1b::t_f3c9ff53ca0d91 469,472-488
+  s_3d05802ef9ac1b::t_ea77a72cb90515 22-24
+  s_3d05802ef9ac1b::t_f82048f658e31e 47
+  s_3d05802ef9ac1b::t_a9c1990445a839 234
+  s_3d05802ef9ac1b::t_ec7653e598cb4c 243,246-247,252,256-257,260-279,281
+  s_3d05802ef9ac1b::t_73a01caa4d06bc 502
+  s_3d05802ef9ac1b::t_79c9dc52758454 556
+  s_3d05802ef9ac1b::t_8fb84e949100ad 36
+  s_3d05802ef9ac1b::t_807f440f54ff44 138-140,142-187
+  s_3d05802ef9ac1b::t_1670fa597cda8e 53
+  s_3d05802ef9ac1b::t_75222a392c4824 507
+src/status-page.js
+  s_3d05802ef9ac1b::t_5ebd5e4d56fded 1968
+  s_3d05802ef9ac1b::t_14ecc0f8dce42d 2156
+test/grok-media.test.js
+  s_3d05802ef9ac1b::t_e7e62b0b933408 103-112
+src/media-analysis.js
+  s_3d05802ef9ac1b::t_b201b9c9675cee 134,138-141
+  s_3d05802ef9ac1b::t_237c10b5657c68 270-271
+  s_3d05802ef9ac1b::t_ff1fc180e39e76 279
+  s_3d05802ef9ac1b::t_60a28a35438f3f 3
+  s_3d05802ef9ac1b::t_d0051321034e9a 173,184
+  s_3d05802ef9ac1b::t_4ab5a006cf9589 48-58,64,66,96
+  s_3d05802ef9ac1b::t_edafeb01f82aaa 65,67,84-95
+  s_3d05802ef9ac1b::t_d5fc48f7bd0243 97
+src/backend-registry.js
+  s_3d05802ef9ac1b::t_68d88038e2f178 426
+  s_3d05802ef9ac1b::t_7ab7c2a0632f55 650
+  s_3d05802ef9ac1b::t_87c466d9f567bb 696-699
+  s_3d05802ef9ac1b::t_9724fba596bcda 24-29
+test/image-attachments.test.js
+  s_3d05802ef9ac1b::t_23ef02e22f6878 36-44
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "4dab6f1aa79ed1395bcb571bd5b4be7590c3fa75",
+  "prompts": {},
+  "sessions": {
+    "s_200e785415dbde": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a03f51-20bc-7322-87e9-4b6801da4bc2",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_3d05802ef9ac1b": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "6913c7a8-c79a-4a4f-913e-fc43993249d8",
+        "model": "grok-4.6"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
