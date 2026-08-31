@@ -1,7 +1,10 @@
 'use strict';
 
 const assert = require('assert');
-const { detectCli, expandWindowsEnvironmentVariables, safeDiagnostic } = require('../src/local-cli');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const { detectCli, expandWindowsEnvironmentVariables, safeDiagnostic, writePromptFile } = require('../src/local-cli');
 
 const definition = { id: 'grok-cli', label: 'Grok CLI', candidates: ['grok'], versionArgs: ['--version'], authArgs: ['models'], jobTypes: ['chat'], models: ['auto'] };
 
@@ -25,5 +28,14 @@ assert.strictEqual(absent.state, 'unavailable');
 assert.strictEqual(safeDiagnostic('Authorization: abc123'), 'Authorization: <redacted>');
 assert.strictEqual(expandWindowsEnvironmentVariables('%LOCALAPPDATA%\\agy\\bin\\agy.exe', { LocalAppData: 'C:\\Users\\AL\\AppData\\Local' }), 'C:\\Users\\AL\\AppData\\Local\\agy\\bin\\agy.exe');
 assert.strictEqual(expandWindowsEnvironmentVariables('%UNKNOWN_VALUE%\\agy.exe', {}), '%UNKNOWN_VALUE%\\agy.exe');
+
+const promptDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-model-relay-local-cli-test-'));
+try {
+	const promptPath = writePromptFile(promptDir, 'prompt with unicode: äöü');
+	assert.strictEqual(path.basename(promptPath), 'prompt.txt');
+	assert.strictEqual(fs.readFileSync(promptPath, 'utf8'), 'prompt with unicode: äöü');
+} finally {
+	fs.rmSync(promptDir, { recursive: true, force: true });
+}
 
 console.log('local cli tests passed');

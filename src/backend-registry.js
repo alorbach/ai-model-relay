@@ -6,7 +6,7 @@ const path = require('path');
 const { randomUUID } = require('crypto');
 const { spawn } = require('child_process');
 const { createBoundedCollector } = require('./diagnostics');
-const { detectCli, detectCliAsync, messagesToText, runTextCommand } = require('./local-cli');
+const { detectCli, detectCliAsync, messagesToText, runTextCommand, writePromptFile } = require('./local-cli');
 const { createLocalUpscaleDriver } = require('./local-upscale');
 const { resolveMaxTokens } = require('./token-policy');
 
@@ -541,6 +541,7 @@ function cliModelFromRelay(model, provider) {
 
 function createNamedCliDriver(definition, options = {}) {
 	let cached = { id: definition.id, label: definition.label, kind: 'local-cli', installed: null, ready: false, state: 'checking', diagnostic: 'Checking in background.', models: definition.models || ['auto'], job_types: ['chat'] };
+	const detector = options.detectCliAsync || detectCliAsync;
 	function detect() { return cached; }
 	return {
 		id: definition.id,
@@ -556,23 +557,27 @@ function createNamedCliDriver(definition, options = {}) {
 			const state = detect();
 			return (state.models && state.models.length ? state.models : ['auto']).map((id) => ({ id: relayModel(definition.id, id), type: 'text', backend: definition.id, ready: state.ready, job_types: definition.jobTypes || ['chat'] }));
 		},
-		refresh: async () => { cached = await detectCliAsync(definition, { ...options, timeoutMs: Number(options.timeoutMs || process.env.AI_MODEL_RELAY_CLI_PROBE_TIMEOUT_MS || 10000) }); return cached; },
+		refresh: async () => { cached = await detector(definition, { ...options, timeoutMs: Number(options.timeoutMs || process.env.AI_MODEL_RELAY_CLI_PROBE_TIMEOUT_MS || 10000) }); return cached; },
 		async chat(payload = {}, session = {}) {
 			const state = await this.refresh();
 			if (!state.ready) return { success: false, category: 'configuration', code: `${definition.id}_unavailable`, message: `${definition.label} is unavailable: ${state.diagnostic}` };
 			const model = cliModelFromRelay(payload.model, definition.id);
 			const prompt = messagesToText(payload);
-			const args = definition.requestArgs(model, prompt);
-			const result = await runTextCommand(state.command, args, '', session, options);
-			if (!result.success) return result;
-			let parsed = null; try { parsed = JSON.parse(result.text); } catch (error) {}
-			return normalizeChatResponse(definition.id, model, parsed, result.text);
+			const workspace = fs.mkdtempSync(path.join(os.tmpdir(), `ai-model-relay-${definition.id}-`));
+			try {
+				const promptPath = writePromptFile(workspace, prompt);
+				const args = definition.requestArgs(model, promptPath, workspace);
+				const result = await runTextCommand(state.command, args, '', session, { ...options, cwd: workspace });
+				if (!result.success) return result;
+				let parsed = null; try { parsed = JSON.parse(result.text); } catch (error) {}
+				return normalizeChatResponse(definition.id, model, parsed, result.text);
+			} finally { fs.rmSync(workspace, { recursive: true, force: true }); }
 		},
 	};
 }
 
 function createGrokCliDriver(options = {}) {
-	const definition = { id: 'grok-cli', label: 'Grok CLI', candidates: [options.command, process.env.AI_MODEL_RELAY_GROK_BINARY, 'grok'], versionArgs: ['--version'], authArgs: ['models'], jobTypes: ['chat'], models: ['auto'], requestArgs: (model, prompt) => ['--single', prompt, '--output-format', 'json', ...(model !== 'auto' ? ['--model', model] : [])] };
+	const definition = { id: 'grok-cli', label: 'Grok CLI', candidates: [options.command, process.env.AI_MODEL_RELAY_GROK_BINARY, 'grok'], versionArgs: ['--version'], authArgs: ['models'], jobTypes: ['chat'], models: ['auto'], requestArgs: (model, promptPath) => ['--prompt-file', promptPath, '--output-format', 'json', ...(model !== 'auto' ? ['--model', model] : [])] };
 	const configuredMediaTimeout = Number(options.mediaTimeoutMs || process.env.AI_MODEL_RELAY_GROK_MEDIA_TIMEOUT_MS || GROK_MEDIA_TIMEOUT_MS);
 	const mediaTimeoutMs = Number.isFinite(configuredMediaTimeout) && configuredMediaTimeout > 0 ? configuredMediaTimeout : GROK_MEDIA_TIMEOUT_MS;
 	const driver = createNamedCliDriver(definition, options);
@@ -1004,8 +1009,9 @@ function createAntigravityCliDriver(mediaAnalysis, options = {}) {
 			if (!state.ready) return { success: false, category: 'configuration', code: state.state === 'not_authenticated' ? 'antigravity_cli_not_authenticated' : 'antigravity_cli_unavailable', message: `Antigravity CLI is unavailable: ${state.diagnostic}` };
 			const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-model-relay-antigravity-'));
 			try {
-				const prompt = String(messagesToText(payload) || '').trim().slice(0, 24000);
-				const result = await runPrompt(workspace, prompt || 'Respond concisely to the user request.', chatTimeoutMs, session, 'chat');
+				const prompt = String(messagesToText(payload) || '');
+				const promptPath = writePromptFile(workspace, prompt);
+				const result = await runPrompt(workspace, `Read the user's full request from @${promptPath} and respond to it.`, chatTimeoutMs, session, 'chat');
 				if (!result.success) return result;
 				let parsed = null;
 				try { parsed = JSON.parse(result.text); } catch (error) {}
@@ -1080,7 +1086,7 @@ function createAntigravityCliDriver(mediaAnalysis, options = {}) {
 }
 
 function createCursorCliDriver(options = {}) {
-	return createNamedCliDriver({ id: 'cursor-cli', label: 'Cursor Agent', candidates: [options.command, process.env.AI_MODEL_RELAY_CURSOR_BINARY, 'cursor-agent'], versionArgs: ['--version'], authArgs: ['status'], jobTypes: ['chat'], models: ['auto'], requestArgs: (model, prompt) => ['--print', '--output-format', 'json', ...(model !== 'auto' ? ['--model', model] : []), prompt] }, options);
+	return createNamedCliDriver({ id: 'cursor-cli', label: 'Cursor Agent', candidates: [options.command, process.env.AI_MODEL_RELAY_CURSOR_BINARY, 'cursor-agent'], versionArgs: ['--version'], authArgs: ['status'], jobTypes: ['chat'], models: ['auto'], requestArgs: (model, promptPath, workspace) => ['--print', '--output-format', 'json', ...(model !== 'auto' ? ['--model', model] : []), 'Respond to the user request in prompt.txt.', '--workspace', workspace] }, options);
 }
 
 function createLocalAsrDriver(codex) {

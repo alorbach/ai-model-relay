@@ -5,15 +5,40 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const process = require('process');
+const { EventEmitter } = require('events');
+const { PassThrough } = require('stream');
 const {
 	createAntigravityCliDriver,
 	createApiKeyChatDriver,
 	createBackendRegistry,
 	createCliProcessDriver,
+	createCursorCliDriver,
+	createGrokCliDriver,
 	createXaiApiDriver,
 	providerFromPayload,
 } = require('../src/backend-registry');
 const mediaAnalysis = require('../src/media-analysis');
+
+function readyCli(definition) {
+	return { id: definition.id, label: definition.label, command: `${definition.id}-test`, installed: true, ready: true, authenticated: true, state: 'ready', diagnostic: 'Ready.', models: ['auto'] };
+}
+
+function captureCliSpawn(calls) {
+	return (command, args, options) => {
+		const promptPath = path.join(options.cwd, 'prompt.txt');
+		calls.push({ command, args: args.slice(), cwd: options.cwd, promptPath, promptExists: fs.existsSync(promptPath), prompt: fs.existsSync(promptPath) ? fs.readFileSync(promptPath, 'utf8') : '' });
+		const child = new EventEmitter();
+		child.stdin = new PassThrough();
+		child.stdout = new PassThrough();
+		child.stderr = new PassThrough();
+		process.nextTick(() => {
+			child.stdout.end(JSON.stringify({ choices: [{ index: 0, message: { role: 'assistant', content: 'test response' }, finish_reason: 'stop' }] }));
+			child.stderr.end();
+			child.emit('close', 0);
+		});
+		return child;
+	};
+}
 
 (async () => {
 	const codex = {
@@ -407,8 +432,44 @@ const mediaAnalysis = require('../src/media-analysis');
 	assert.strictEqual(failedCliResult.code, 'cli_process_failed');
 	assert.strictEqual(failedCliResult.details.stderr, 'boom');
 
+	const longCliTranscript = 'x'.repeat(30000);
+	const grokCalls = [];
+	const grokCli = createGrokCliDriver({
+		detectCliAsync: async (definition) => readyCli(definition),
+		spawn: captureCliSpawn(grokCalls),
+	});
+	const grokCliResult = await grokCli.chat({ model: 'model-relay:grok-cli:auto', prompt: longCliTranscript });
+	assert.strictEqual(grokCliResult.success, true);
+	assert.strictEqual(grokCalls.length, 1);
+	assert.strictEqual(grokCalls[0].promptExists, true);
+	assert.strictEqual(grokCalls[0].prompt, longCliTranscript);
+	assert.strictEqual(grokCalls[0].args[0], '--prompt-file');
+	assert.strictEqual(grokCalls[0].args[1], grokCalls[0].promptPath);
+	assert.ok(!grokCalls[0].args.includes('--single'));
+	assert.ok(!grokCalls[0].args.join(' ').includes(longCliTranscript));
+	assert.strictEqual(fs.existsSync(grokCalls[0].cwd), false);
+
+	const cursorCalls = [];
+	const cursorCli = createCursorCliDriver({
+		detectCliAsync: async (definition) => readyCli(definition),
+		spawn: captureCliSpawn(cursorCalls),
+	});
+	const cursorCliResult = await cursorCli.chat({ model: 'model-relay:cursor-cli:auto', prompt: longCliTranscript });
+	assert.strictEqual(cursorCliResult.success, true);
+	assert.strictEqual(cursorCalls.length, 1);
+	assert.strictEqual(cursorCalls[0].promptExists, true);
+	assert.strictEqual(cursorCalls[0].prompt, longCliTranscript);
+	assert.ok(cursorCalls[0].args.includes('--print'));
+	assert.ok(cursorCalls[0].args.includes('--output-format'));
+	assert.ok(cursorCalls[0].args.includes('Respond to the user request in prompt.txt.'));
+	assert.ok(cursorCalls[0].args.includes('--workspace'));
+	assert.strictEqual(cursorCalls[0].args[cursorCalls[0].args.indexOf('--workspace') + 1], cursorCalls[0].cwd);
+	assert.ok(!cursorCalls[0].args.join(' ').includes(longCliTranscript));
+	assert.strictEqual(fs.existsSync(cursorCalls[0].cwd), false);
+
 		const antigravityRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-model-relay-antigravity-test-'));
 		const antigravityPrompts = [];
+		const antigravityPromptFiles = [];
 		const antigravityCommands = [];
 	let antigravityCandidates = [];
 	const antigravityOptions = {
@@ -417,11 +478,15 @@ const mediaAnalysis = require('../src/media-analysis');
 			antigravityCandidates = definition.candidates;
 			return { id: 'antigravity-cli', label: 'Antigravity CLI', command: 'agy', installed: true, ready: false, state: 'installed', diagnostic: 'Authentication not checked yet.' };
 		},
-			runTextCommand: async (command, args) => {
+			runTextCommand: async (command, args, input, session, runOptions = {}) => {
 				if (args[0] === '--help') return { success: true, text: '', stderr: 'Usage: agy.exe --print PROMPT\n  -p  Short alias for --print' };
 				antigravityCommands.push(args);
 			const prompt = args[1];
 			antigravityPrompts.push(prompt);
+			if (runOptions.cwd) {
+				const promptPath = path.join(runOptions.cwd, 'prompt.txt');
+				antigravityPromptFiles.push({ args: args.slice(), cwd: runOptions.cwd, promptPath, promptExists: fs.existsSync(promptPath), prompt: fs.existsSync(promptPath) ? fs.readFileSync(promptPath, 'utf8') : '' });
+			}
 			const name = /ImageName\s+("[^"]+")/.exec(prompt);
 			if (name) {
 				const imageName = JSON.parse(name[1]);
@@ -445,6 +510,19 @@ const mediaAnalysis = require('../src/media-analysis');
 		assert.strictEqual(antigravityImageModel.test_options[0].delivery, 'guidance');
 		const antigravityChat = await antigravity.chat({ prompt: 'hello from Antigravity' });
 		assert.strictEqual(antigravityChat.response.choices[0].message.content, 'Antigravity answer');
+		assert.strictEqual(antigravityPromptFiles[0].promptExists, true);
+		assert.strictEqual(antigravityPromptFiles[0].prompt, 'hello from Antigravity');
+		assert.ok(/@.*prompt\.txt/.test(antigravityPromptFiles[0].args[1]));
+		assert.ok(!antigravityPromptFiles[0].args.join(' ').includes('hello from Antigravity'));
+		assert.strictEqual(fs.existsSync(antigravityPromptFiles[0].cwd), false);
+		const longAntigravityPrompt = 'y'.repeat(30000);
+		const longAntigravityChat = await antigravity.chat({ prompt: longAntigravityPrompt });
+		assert.strictEqual(longAntigravityChat.success, true);
+		assert.strictEqual(antigravityPromptFiles[1].promptExists, true);
+		assert.strictEqual(antigravityPromptFiles[1].prompt, longAntigravityPrompt);
+		assert.strictEqual(antigravityPromptFiles[1].prompt.length, 30000);
+		assert.ok(!antigravityPromptFiles[1].args.join(' ').includes(longAntigravityPrompt));
+		assert.strictEqual(fs.existsSync(antigravityPromptFiles[1].cwd), false);
                 const antigravityImage = await antigravity.images({
                         prompt: 'make a relay icon',
                         aspect_ratio: '16:9',

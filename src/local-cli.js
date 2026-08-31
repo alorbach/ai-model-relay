@@ -116,6 +116,12 @@ function runTextCommand(command, args, input, session = {}, options = {}) {
 	});
 }
 
+function writePromptFile(dir, text) {
+	const promptPath = path.join(dir, 'prompt.txt');
+	fs.writeFileSync(promptPath, String(text == null ? '' : text), 'utf8');
+	return promptPath;
+}
+
 function messagesToText(payload = {}) { return payload.input || payload.prompt || (payload.messages || []).map((m) => `${m.role || 'user'}: ${Array.isArray(m.content) ? m.content.map((p) => p.text || p.content || '').join('\n') : m.content || ''}`).join('\n\n'); }
 
-module.exports = { detectCli, detectCliAsync, expandWindowsEnvironmentVariables, messagesToText, resolveCommand, runTextCommand, safeDiagnostic };
+module.exports = { detectCli, detectCliAsync, expandWindowsEnvironmentVariables, messagesToText, resolveCommand, runTextCommand, safeDiagnostic, writePromptFile };
