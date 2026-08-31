@@ -8,6 +8,7 @@ const { spawn } = require('child_process');
 const { createBoundedCollector } = require('./diagnostics');
 const { detectCli, detectCliAsync, messagesToText, runTextCommand } = require('./local-cli');
 const { createLocalUpscaleDriver } = require('./local-upscale');
+const { resolveMaxTokens } = require('./token-policy');
 
 const RELAY_MODEL_PREFIX = 'model-relay';
 const GROK_MEDIA_TIMEOUT_MS = 450000;
@@ -279,6 +280,18 @@ function normalizeChatResponse(provider, model, parsed, fallbackText = '') {
 			},
 		},
 	};
+}
+
+function assignChatSampling(body, payload = {}, jobType = 'chat') {
+	const maxTokens = resolveMaxTokens(jobType, payload.max_tokens);
+	body.max_tokens = maxTokens;
+	body.max_completion_tokens = maxTokens;
+	for (const key of ['temperature', 'top_p']) {
+		if (payload[key] !== undefined) {
+			body[key] = payload[key];
+		}
+	}
+	return body;
 }
 
 function generationPreferences(payload = {}, kind) {
@@ -1235,11 +1248,7 @@ function createXaiApiDriver(options = {}) {
 				model,
 				messages: Array.isArray(payload.messages) ? payload.messages : [{ role: 'user', content: String(payload.prompt || '') }],
 			};
-			for (const key of ['max_tokens', 'temperature', 'top_p', 'stream']) {
-				if (payload[key] !== undefined) {
-					body[key] = payload[key];
-				}
-			}
+			assignChatSampling(body, payload);
 			const response = await fetchImpl(`${baseUrl}/chat/completions`, {
 				method: 'POST',
 				headers: {
@@ -1512,10 +1521,14 @@ function createApiKeyChatDriver(options = {}) {
 				return { success: false, category: 'configuration', code: 'fetch_unavailable', message: 'This Node runtime does not provide fetch for API-backed drivers.' };
 			}
 			const rawModel = String(payload.model || model).replace(/^model-relay:api-key-chat:/, '') || model;
+			const body = assignChatSampling({
+				model: rawModel,
+				messages: payload.messages || [{ role: 'user', content: String(payload.prompt || '') }],
+			}, payload);
 			const response = await fetchImpl(`${baseUrl}/chat/completions`, {
 				method: 'POST',
 				headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-				body: JSON.stringify({ model: rawModel, messages: payload.messages || [{ role: 'user', content: String(payload.prompt || '') }] }),
+				body: JSON.stringify(body),
 			});
 			const text = await response.text();
 			let parsed = null;

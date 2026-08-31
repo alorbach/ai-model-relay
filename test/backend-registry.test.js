@@ -7,6 +7,7 @@ const path = require('path');
 const process = require('process');
 const {
 	createAntigravityCliDriver,
+	createApiKeyChatDriver,
 	createBackendRegistry,
 	createCliProcessDriver,
 	createXaiApiDriver,
@@ -43,6 +44,7 @@ const mediaAnalysis = require('../src/media-analysis');
 		capabilities: () => ({ enabled: true, configured: true, models: ['sora-2'] }),
 		run: () => Promise.resolve({ success: true, response: { id: 'video' } }),
 	};
+	const xaiChatBodies = [];
 	const registry = createBackendRegistry({
 		codex,
 		video,
@@ -57,7 +59,10 @@ const mediaAnalysis = require('../src/media-analysis');
 				assert.ok(String(url).endsWith('/chat/completions'));
 				assert.strictEqual(options.headers.Authorization, 'Bearer secret-xai-key');
 				const body = JSON.parse(options.body);
+				xaiChatBodies.push(body);
 				assert.strictEqual(body.model, 'grok-4.3');
+				assert.strictEqual(body.max_completion_tokens, body.max_tokens);
+				assert.strictEqual(body.stream, undefined);
 				return {
 					ok: true,
 					status: 200,
@@ -153,13 +158,56 @@ const mediaAnalysis = require('../src/media-analysis');
 	const grokAlias = registry.resolve('chat', { provider: 'grok', prompt: 'hi' });
 	assert.strictEqual(grokAlias.error.details.provider, 'grok-cli');
 
-	const xaiResult = await registry.run('chat', { model: 'model-relay:xai:grok-4.3', messages: [{ role: 'user', content: 'hi' }] });
+	const xaiResult = await registry.run('chat', { model: 'model-relay:xai:grok-4.3', messages: [{ role: 'user', content: 'hi' }], stream: true });
 	assert.strictEqual(xaiResult.success, true);
 	assert.strictEqual(xaiResult.response.model, 'model-relay:xai:grok-4.3');
 	assert.strictEqual(xaiResult.response.provider_details.provider, 'xai');
 	assert.ok(!JSON.stringify(xaiResult).includes('secret-xai-key'));
+	const xaiExplicitResult = await registry.run('chat', { model: 'model-relay:xai:grok-4.3', max_tokens: 12000, temperature: 0.4, top_p: 0.8, messages: [{ role: 'user', content: 'hi' }] });
+	assert.strictEqual(xaiExplicitResult.success, true);
+	assert.strictEqual(xaiChatBodies.length, 2);
+	assert.strictEqual(xaiChatBodies[0].max_tokens, 8192);
+	assert.strictEqual(xaiChatBodies[0].max_completion_tokens, 8192);
+	assert.strictEqual(xaiChatBodies[1].max_tokens, 12000);
+	assert.strictEqual(xaiChatBodies[1].max_completion_tokens, 12000);
+	assert.strictEqual(xaiChatBodies[1].temperature, 0.4);
+	assert.strictEqual(xaiChatBodies[1].top_p, 0.8);
 	const xaiChatOnImage = await registry.run('chat', { model: 'model-relay:xai:imagine-image', prompt: 'hi' });
 	assert.strictEqual(xaiChatOnImage.code, 'backend_model_incompatible');
+
+	let apiKeyChatBody = null;
+	const apiKeyChat = createApiKeyChatDriver({
+		apiKey: 'secret-chat-key',
+		baseUrl: 'https://chat.example.test/v1/',
+		model: 'provider-default',
+		fetch: async (url, options) => {
+			assert.strictEqual(url, 'https://chat.example.test/v1/chat/completions');
+			assert.strictEqual(options.headers.Authorization, 'Bearer secret-chat-key');
+			apiKeyChatBody = JSON.parse(options.body);
+			return {
+				ok: true,
+				status: 200,
+				text: async () => JSON.stringify({
+					id: 'api-key-chat-1',
+					object: 'chat.completion',
+					model: 'provider-model',
+					choices: [{ index: 0, message: { role: 'assistant', content: 'hello' }, finish_reason: 'stop' }],
+				}),
+			};
+		},
+	});
+	const apiKeyChatResult = await apiKeyChat.chat({
+		model: 'model-relay:api-key-chat:provider-model',
+		messages: [{ role: 'user', content: 'hi' }],
+		stream: true,
+		temperature: 0.7,
+	});
+	assert.strictEqual(apiKeyChatResult.success, true);
+	assert.strictEqual(apiKeyChatBody.model, 'provider-model');
+	assert.strictEqual(apiKeyChatBody.max_tokens, 8192);
+	assert.strictEqual(apiKeyChatBody.max_completion_tokens, 8192);
+	assert.strictEqual(apiKeyChatBody.temperature, 0.7);
+	assert.strictEqual(apiKeyChatBody.stream, undefined);
 
 	const xaiStt = createXaiApiDriver({
 		apiKey: 'secret-xai-key',
