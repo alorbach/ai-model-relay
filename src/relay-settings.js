@@ -51,9 +51,13 @@ function saveSettings(next = {}) {
 	const state = security.readState();
 	const relay = state.relay && typeof state.relay === 'object' ? state.relay : {};
 	const hasCliPaths = Object.prototype.hasOwnProperty.call(next, 'cli_paths');
+	const hasDefaults = Object.prototype.hasOwnProperty.call(next, 'defaults');
+	const defaultsSource = hasDefaults
+		? next.defaults
+		: (hasCliPaths ? relay.defaults : next);
 	state.relay = {
 		...relay,
-		defaults: normalizeDefaults(next.defaults || next),
+		defaults: normalizeDefaults(defaultsSource),
 		cli_paths: hasCliPaths
 			? normalizeCliPaths(next.cli_paths)
 			: normalizeCliPaths(relay.cli_paths),

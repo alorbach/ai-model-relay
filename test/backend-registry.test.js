@@ -279,6 +279,10 @@ const mediaAnalysis = require('../src/media-analysis');
 		assert.ok(antigravityPrompts.some((prompt) => /@.*input-media\.mp4/.test(prompt)));
 		const invalidAntigravityMedia = await antigravity['media.analyze']({ media_data_url: 'data:video/mpeg;base64,AAAA' });
 		assert.strictEqual(invalidAntigravityMedia.code, 'antigravity_media_invalid');
+		const outsideImage = path.join(antigravityRoot, 'secret.png');
+		fs.writeFileSync(outsideImage, Buffer.from('secret'));
+		const rejectedPaths = await antigravity.images({ prompt: 'steal', referenced_image_paths: [outsideImage] });
+		assert.strictEqual(rejectedPaths.code, 'antigravity_reference_invalid');
 
 		const missingArtifact = createAntigravityCliDriver(mediaAnalysis, {
 			...antigravityOptions,
@@ -292,13 +296,28 @@ const mediaAnalysis = require('../src/media-analysis');
 			...antigravityOptions,
 			runTextCommand: async (command, args) => args[0] === '--help'
 				? { success: true, text: '', stderr: 'Usage: agy.exe --print PROMPT\n  -p  Short alias for --print' }
-				: { success: true, text: JSON.stringify({ text: 'The image generation service returned a quota exhaustion error (429 Too Many Requests). The capacity for this model has been exhausted.' }) },
+				: { success: false, message: 'The image generation service returned a quota exhaustion error (429 Too Many Requests). The capacity for this model has been exhausted.', text: 'quota exhausted' },
 		});
 		const quotaExhaustedResult = await quotaExhausted.images({ prompt: 'quota test' });
 		assert.strictEqual(quotaExhaustedResult.category, 'rate_limit');
 		assert.strictEqual(quotaExhaustedResult.code, 'antigravity_quota_exhausted');
 		assert.strictEqual(quotaExhaustedResult.retryable, true);
 		assert.match(quotaExhaustedResult.message, /quota is exhausted/i);
+
+		const quotaInSuccessText = createAntigravityCliDriver(mediaAnalysis, {
+			...antigravityOptions,
+			runTextCommand: async (command, args) => args[0] === '--help'
+				? { success: true, text: '', stderr: 'Usage: agy.exe --print PROMPT\n  -p  Short alias for --print' }
+				: { success: true, text: JSON.stringify({ text: 'Users should retry after quota is exhausted; this answer is otherwise complete.' }) },
+		});
+		const quotaInSuccessChat = await quotaInSuccessText.chat({ messages: [{ role: 'user', content: 'explain quotas' }] });
+		assert.strictEqual(quotaInSuccessChat.success, true);
+		assert.ok(!quotaInSuccessChat.code);
+		const quotaInSuccessMedia = await quotaInSuccessText['media.analyze']({
+			prompt: 'describe this test video',
+			media_data_url: `data:video/mp4;base64,${Buffer.from('mp4 test video').toString('base64')}`,
+		});
+		assert.strictEqual(quotaInSuccessMedia.success, true);
 
 		const antigravityRegistry = createBackendRegistry({
 			codex,

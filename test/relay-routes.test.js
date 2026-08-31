@@ -25,7 +25,7 @@ function requestJson(port, method, pathname, body, headers = {}) {
 			res.on('data', (chunk) => {
 				raw += chunk;
 			});
-			res.on('end', () => resolve({ statusCode: res.statusCode, body: raw ? JSON.parse(raw) : {} }));
+			res.on('end', () => resolve({ statusCode: res.statusCode, headers: res.headers, body: raw ? JSON.parse(raw) : {} }));
 		});
 		req.on('error', reject);
 		if (data) {
@@ -52,9 +52,9 @@ function requestBinary(port, method, pathname, body, headers = {}) {
 	});
 }
 
-function requestPlain(port, pathname) {
+function requestPlain(port, pathname, headers = {}) {
 	return new Promise((resolve, reject) => {
-		http.get({ hostname: '127.0.0.1', port, path: pathname }, (res) => {
+		http.get({ hostname: '127.0.0.1', port, path: pathname, headers }, (res) => {
 			const chunks = [];
 			res.on('data', (chunk) => chunks.push(chunk));
 			res.on('end', () => resolve({ statusCode: res.statusCode, headers: res.headers, body: Buffer.concat(chunks) }));
@@ -205,22 +205,26 @@ function createMockSecurity() {
 		assert.strictEqual(relaySettings.body.settings.defaults.chat, 'model-relay:codex:auto');
 		const musicSettings = await requestJson(port, 'GET', '/v1/music-analysis/settings');
 		assert.strictEqual(musicSettings.statusCode, 200);
-		const savedMusicSettings = await requestJson(port, 'POST', '/v1/music-analysis/settings', { settings: { sample_rate: 24000 } });
+		const pageOrigin = { Origin: `http://127.0.0.1:${port}` };
+		const savedMusicSettings = await requestJson(port, 'POST', '/v1/music-analysis/settings', { settings: { sample_rate: 24000 } }, pageOrigin);
 		assert.strictEqual(savedMusicSettings.statusCode, 200);
-		const musicSetup = await requestJson(port, 'POST', '/v1/music-analysis/setup', {});
+		const musicSetup = await requestJson(port, 'POST', '/v1/music-analysis/setup', {}, pageOrigin);
 		assert.strictEqual(musicSetup.statusCode, 200);
 		const upscaleSettings = await requestJson(port, 'GET', '/v1/upscale/settings');
 		assert.strictEqual(upscaleSettings.statusCode, 200);
-		const savedUpscaleSettings = await requestJson(port, 'POST', '/v1/upscale/settings', { settings: { venv_path: 'C:\\Models\\upscale-venv' } });
+		const savedUpscaleSettings = await requestJson(port, 'POST', '/v1/upscale/settings', { settings: { venv_path: 'C:\\Models\\upscale-venv' } }, pageOrigin);
 		assert.strictEqual(savedUpscaleSettings.statusCode, 200);
 		assert.strictEqual(localUpscaleRefreshes, 1, 'saving local model settings refreshes the blocked local-upscale driver');
-		const upscaleSetup = await requestJson(port, 'POST', '/v1/upscale/setup', { engine: 'swinir' });
+		const upscaleSetup = await requestJson(port, 'POST', '/v1/upscale/setup', { engine: 'swinir' }, pageOrigin);
 		assert.strictEqual(upscaleSetup.statusCode, 200);
 		assert.strictEqual(upscaleSetup.body.model.state, 'installed');
 		assert.strictEqual(localUpscaleRefreshes, 2, 'a completed local model install refreshes the local-upscale driver even when it was previously unavailable');
-		const asrSetup = await requestJson(port, 'POST', '/v1/asr/setup', { model_id: 'whisper-small' });
+		const asrSetup = await requestJson(port, 'POST', '/v1/asr/setup', { model_id: 'whisper-small' }, pageOrigin);
 		assert.strictEqual(asrSetup.statusCode, 200);
 		assert.strictEqual(asrSetup.body.model_id, 'local-asr:whisper-small');
+		const foreignSetup = await requestJson(port, 'POST', '/v1/upscale/setup', { engine: 'swinir' }, { Origin: 'https://evil.example' });
+		assert.strictEqual(foreignSetup.statusCode, 403);
+		assert.ok(!foreignSetup.headers['access-control-allow-origin']);
 		const savedRelaySettings = await requestJson(port, 'POST', '/v1/relay/settings', { settings: { defaults: { chat: 'model-relay:cursor-cli:auto' }, cli_paths: { 'antigravity-cli': 'C:\\Tools\\agy.exe' } } });
 		assert.strictEqual(savedRelaySettings.statusCode, 200);
 		assert.strictEqual(savedRelaySettingsInput.cli_paths['antigravity-cli'], 'C:\\Tools\\agy.exe');
@@ -279,6 +283,9 @@ function createMockSecurity() {
 		const statusPreview = await requestPlain(port, `/v1/status/jobs/${binaryResult.local_job_id}/artifacts/0`);
 		assert.strictEqual(statusPreview.statusCode, 200);
 		assert.strictEqual(statusPreview.body.toString(), 'derived-png');
+		const corsPreview = await requestPlain(port, `/v1/status/jobs/${binaryResult.local_job_id}/artifacts/0`, { Origin: 'https://evil.example' });
+		assert.strictEqual(corsPreview.statusCode, 200);
+		assert.ok(!corsPreview.headers['access-control-allow-origin']);
 		const invalidBinaryUpscale = await requestBinary(port, 'POST', '/v1/relay/jobs/upscale', Buffer.from('protected-source-png'), { 'X-Alorbach-Request-Id': 'upscale-request' });
 		assert.strictEqual(invalidBinaryUpscale.statusCode, 400);
 

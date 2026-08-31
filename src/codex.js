@@ -534,7 +534,8 @@ function tryCopyImagePath(filePath, tempDir, index) {
 		return null;
 	}
 	const resolved = path.resolve(String(filePath || '').trim());
-	if (!resolved || !fs.existsSync(resolved)) {
+	const root = path.resolve(tempDir);
+	if (!resolved || (resolved !== root && !resolved.startsWith(`${root}${path.sep}`))) {
 		return null;
 	}
 	const mime = mimeFromImagePath(resolved);

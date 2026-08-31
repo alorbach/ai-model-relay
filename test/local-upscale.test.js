@@ -5,14 +5,47 @@ const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { INSTALL, MODELS, createLocalUpscaleDriver, modelConfig } = require('../src/local-upscale');
+const { CHECKOUT_MARKER, INSTALL, MODELS, createLocalUpscaleDriver, modelConfig } = require('../src/local-upscale');
 
 (async () => {
 	const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-local-upscale-test-'));
 	const weight = path.join(directory, 'swinir-x2.pth');
 	fs.writeFileSync(weight, Buffer.from('test-pinned-weight'));
+	fs.writeFileSync(path.join(directory, CHECKOUT_MARKER), `${INSTALL.swinir.commit}\n`);
 	const checksum = crypto.createHash('sha256').update(fs.readFileSync(weight)).digest('hex');
 	const testSwinirManifest = { swinir: { ...INSTALL.swinir, weight_sha256: checksum, weight_bytes: fs.statSync(weight).size } };
+	const cudaProbe = { status: 0, stdout: '{"available":true,"version":"2.8.0+cu128","cuda_version":"12.8","device_count":1}\n', stderr: '' };
+	function mockSetupCommands(options = {}) {
+		const commit = options.commit || INSTALL.swinir.commit;
+		const torchByIndex = options.torchByIndex || [];
+		let cudaCount = 0;
+		return async (command, args) => {
+			if (args[0] === '-m' && args[1] === 'venv' && options.venv) {
+				fs.mkdirSync(path.join(options.venv, process.platform === 'win32' ? 'Scripts' : 'bin'), { recursive: true });
+				fs.writeFileSync(path.join(options.venv, process.platform === 'win32' ? 'Scripts' : 'bin', process.platform === 'win32' ? 'python.exe' : 'python'), '');
+				return { status: 0, stdout: '', stderr: '' };
+			}
+			if (args[0] === 'clone' && options.checkout) {
+				fs.mkdirSync(options.checkout, { recursive: true });
+				fs.writeFileSync(path.join(options.checkout, options.script || 'main_test_swinir.py'), '');
+				return { status: 0, stdout: '', stderr: '' };
+			}
+			if (args[0] === '-c') {
+				cudaCount += 1;
+				if (options.onCudaProbe) return options.onCudaProbe(cudaCount, args);
+				if (torchByIndex.length) return torchByIndex[Math.min(cudaCount - 1, torchByIndex.length - 1)];
+				return cudaProbe;
+			}
+			if (args[1] === 'pip' && args.includes('freeze')) {
+				return { status: 0, stdout: 'torch==2.8.0+cu128\ntorchvision==0.23.0+cu128\n', stderr: '' };
+			}
+			if (args.includes('--constraint') && options.packageInstalls) options.packageInstalls.push(args.slice());
+			if (args[0] === 'rev-parse') return { status: 0, stdout: `${commit}\n`, stderr: '' };
+			if (args.includes('torch') && args.includes('torchvision') && options.torchInstall) return options.torchInstall;
+			if (args[0] === '-V') return { status: 0, stdout: options.pythonVersion || 'Python 3.10.11\n', stderr: '' };
+			return { status: 0, stdout: options.pythonVersion || 'Python 3.10.11\n', stderr: '' };
+		};
+	}
 	try {
 		const env = {
 			AI_MODEL_RELAY_SWINIR_MODEL_PATH: weight,
@@ -54,30 +87,24 @@ const { INSTALL, MODELS, createLocalUpscaleDriver, modelConfig } = require('../s
 		assert.ok(!driverSource.includes('setTimeout(() => settle({ [reason]: true'), 'cancel must not free the GPU slot before the runner closes');
 		assert.ok(driverSource.includes("web_ui_setup: true"), 'status-page setup is the operator install path');
 		assert.ok(!driverSource.includes('--extra-index-url'), 'CUDA torch setup must not add PyPI as an extra index');
-		assert.ok(driverSource.includes("'--force-reinstall'"), 'CUDA torch setup must replace any existing CPU wheel');
+		assert.ok(driverSource.includes("'--constraint'"), 'follow-on pip installs must pin CUDA torch instead of skipping package dependencies');
+		assert.ok(driverSource.includes("'--no-deps', '-e'"), 'the Real-ESRGAN editable checkout must stay --no-deps so its setup.py cannot replace CUDA torch');
+		assert.ok(INSTALL.swinir.commit.length === 40 && INSTALL.realesrgan.commit.length === 40, 'official checkouts must be pinned to a git commit');
+		assert.ok(runner.includes('checkout_mismatch'), 'jobs must refuse an unpinned official checkout before the pickle compatibility loader runs');
 
 		const checkout = path.join(directory, 'swinir');
 		const venv = path.join(directory, 'venv');
 		const saved = {};
 		const installedWeight = Buffer.from('ui-installed-weight');
 		const installedManifest = { swinir: { ...INSTALL.swinir, weight_sha256: crypto.createHash('sha256').update(installedWeight).digest('hex'), weight_bytes: installedWeight.length } };
+		const packageInstalls = [];
 		const setupResult = await require('../src/local-upscale').setup({
 			engine: 'swinir',
 			install: installedManifest,
 			pythonCommand: process.execPath,
 			gitCommand: 'git',
 			settings: { python_path: process.execPath, venv_path: venv, swinir_root: checkout, swinir_model_path: '', swinir_weight_sha256: '', realesrgan_root: path.join(directory, 'realesrgan'), realesrgan_model_path: '', realesrgan_weight_sha256: '' },
-			runCommand: async (command, args) => {
-				if (args[0] === '-m' && args[1] === 'venv') {
-					fs.mkdirSync(path.join(venv, process.platform === 'win32' ? 'Scripts' : 'bin'), { recursive: true });
-					fs.writeFileSync(path.join(venv, process.platform === 'win32' ? 'Scripts' : 'bin', process.platform === 'win32' ? 'python.exe' : 'python'), '');
-				}
-				if (args[0] === 'clone') {
-					fs.mkdirSync(checkout, { recursive: true });
-					fs.writeFileSync(path.join(checkout, 'main_test_swinir.py'), '');
-				}
-				return { status: 0, stdout: '', stderr: '' };
-			},
+			runCommand: mockSetupCommands({ venv, checkout, packageInstalls }),
 			downloadFile: async (url, dest) => { fs.mkdirSync(path.dirname(dest), { recursive: true }); fs.writeFileSync(dest, installedWeight); return dest; },
 			saveSettings: (next) => Object.assign(saved, next),
 		});
@@ -85,6 +112,10 @@ const { INSTALL, MODELS, createLocalUpscaleDriver, modelConfig } = require('../s
 		assert.strictEqual(setupResult.model.state, 'installed');
 		assert.ok(saved.swinir_weight_sha256);
 		assert.ok(fs.existsSync(saved.swinir_model_path));
+		assert.ok(String(setupResult.details && setupResult.details.log || '').includes('Installing CUDA PyTorch'));
+		assert.strictEqual(fs.readFileSync(path.join(checkout, CHECKOUT_MARKER), 'utf8').trim(), INSTALL.swinir.commit);
+		assert.ok(fs.existsSync(path.join(venv, 'cuda-torch-constraint.txt')));
+		assert.ok(packageInstalls.some((args) => args.includes('--constraint') && args.includes('timm') && !args.includes('--no-deps')));
 
 		const failVenv = path.join(directory, 'fail-venv');
 		const failed = await require('../src/local-upscale').setup({
@@ -92,18 +123,11 @@ const { INSTALL, MODELS, createLocalUpscaleDriver, modelConfig } = require('../s
 			pythonCommand: process.execPath,
 			gitCommand: 'git',
 			settings: { python_path: process.execPath, venv_path: failVenv, swinir_root: path.join(directory, 'fail-swinir'), swinir_model_path: '', swinir_weight_sha256: '', realesrgan_root: path.join(directory, 'fail-realesrgan'), realesrgan_model_path: '', realesrgan_weight_sha256: '' },
-			runCommand: async (command, args) => {
-				if (args[0] === '-m' && args[1] === 'venv') {
-					fs.mkdirSync(path.join(failVenv, process.platform === 'win32' ? 'Scripts' : 'bin'), { recursive: true });
-					fs.writeFileSync(path.join(failVenv, process.platform === 'win32' ? 'Scripts' : 'bin', process.platform === 'win32' ? 'python.exe' : 'python'), '');
-					return { status: 0, stdout: '', stderr: '' };
-				}
-				if (args[0] === '-V') return { status: 0, stdout: 'Python 3.13.5\n', stderr: '' };
-				if (args.includes('torch') && args.includes('torchvision')) {
-					return { status: 1, stdout: 'ERROR: Could not find a version that satisfies the requirement torch', stderr: '', error: null };
-				}
-				return { status: 0, stdout: '', stderr: '' };
-			},
+			runCommand: mockSetupCommands({
+				venv: failVenv,
+				pythonVersion: 'Python 3.13.5\n',
+				torchInstall: { status: 1, stdout: 'ERROR: Could not find a version that satisfies the requirement torch', stderr: '', error: null },
+			}),
 			downloadFile: async () => '',
 			saveSettings: () => ({}),
 		});
@@ -120,20 +144,36 @@ const { INSTALL, MODELS, createLocalUpscaleDriver, modelConfig } = require('../s
 			pythonCommand: process.execPath,
 			gitCommand: 'git',
 			settings: { python_path: process.execPath, venv_path: cpuVenv, swinir_root: path.join(directory, 'cpu-swinir'), swinir_model_path: '', swinir_weight_sha256: '', realesrgan_root: path.join(directory, 'cpu-realesrgan'), realesrgan_model_path: '', realesrgan_weight_sha256: '' },
-			runCommand: async (command, args) => {
-				if (args[0] === '-m' && args[1] === 'venv') {
-					fs.mkdirSync(path.join(cpuVenv, process.platform === 'win32' ? 'Scripts' : 'bin'), { recursive: true });
-					fs.writeFileSync(path.join(cpuVenv, process.platform === 'win32' ? 'Scripts' : 'bin', process.platform === 'win32' ? 'python.exe' : 'python'), '');
-				}
-				if (args[0] === '-c') return { status: 1, stdout: '{"available":false,"version":"2.13.0+cpu","cuda_version":null,"device_count":0}\n', stderr: '' };
-				return { status: 0, stdout: 'Python 3.10.11\n', stderr: '' };
-			},
+			runCommand: mockSetupCommands({
+				venv: cpuVenv,
+				onCudaProbe: () => ({ status: 1, stdout: '{"available":false,"version":"2.13.0+cpu","cuda_version":null,"device_count":0}\n', stderr: '' }),
+			}),
 			downloadFile: async () => '',
 			saveSettings: () => ({}),
 		});
 		assert.strictEqual(cpuTorch.success, false);
 		assert.strictEqual(cpuTorch.code, 'local_upscale_cpu_torch');
 		assert.ok(String(cpuTorch.message).includes('2.13.0+cpu'));
+
+		const replacedVenv = path.join(directory, 'replaced-venv');
+		const replacedCheckout = path.join(directory, 'replaced-swinir');
+		const replacedAfterPackages = await require('../src/local-upscale').setup({
+			engine: 'swinir',
+			pythonCommand: process.execPath,
+			gitCommand: 'git',
+			settings: { python_path: process.execPath, venv_path: replacedVenv, swinir_root: replacedCheckout, swinir_model_path: '', swinir_weight_sha256: '', realesrgan_root: path.join(directory, 'replaced-realesrgan'), realesrgan_model_path: '', realesrgan_weight_sha256: '' },
+			runCommand: mockSetupCommands({
+				venv: replacedVenv,
+				checkout: replacedCheckout,
+				onCudaProbe: (index) => (index === 1
+					? cudaProbe
+					: { status: 1, stdout: '{"available":false,"version":"2.13.0+cpu","cuda_version":null,"device_count":0}\n', stderr: '' }),
+			}),
+			downloadFile: async () => '',
+			saveSettings: () => ({}),
+		});
+		assert.strictEqual(replacedAfterPackages.success, false);
+		assert.strictEqual(replacedAfterPackages.code, 'local_upscale_cpu_torch');
 
 		const junkPath = path.join(directory, 'partial-weight.pth');
 		const junkCheckout = path.join(directory, 'junk-swinir');
@@ -151,13 +191,7 @@ const { INSTALL, MODELS, createLocalUpscaleDriver, modelConfig } = require('../s
 			pythonCommand: process.execPath,
 			gitCommand: 'git',
 			settings: { python_path: process.execPath, venv_path: junkVenv, swinir_root: junkCheckout, swinir_model_path: junkPath, swinir_weight_sha256: '', realesrgan_root: path.join(directory, 'junk-realesrgan'), realesrgan_model_path: '', realesrgan_weight_sha256: '' },
-			runCommand: async (command, args) => {
-				if (args[0] === '-m' && args[1] === 'venv') {
-					fs.mkdirSync(path.join(junkVenv, process.platform === 'win32' ? 'Scripts' : 'bin'), { recursive: true });
-					fs.writeFileSync(path.join(junkVenv, process.platform === 'win32' ? 'Scripts' : 'bin', process.platform === 'win32' ? 'python.exe' : 'python'), '');
-				}
-				return { status: 0, stdout: 'Python 3.10.11\n', stderr: '' };
-			},
+			runCommand: mockSetupCommands({ venv: junkVenv, checkout: junkCheckout }),
 			downloadFile: async (url, dest) => {
 				downloadedJunkPath = dest;
 				fs.mkdirSync(path.dirname(dest), { recursive: true });

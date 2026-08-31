@@ -87,6 +87,7 @@ assert.ok(html.includes('data-install-asr-model'));
 assert.ok(html.includes('Install model'));
 assert.ok(html.includes('id="asrSetupLog"'));
 assert.ok(html.includes('function setupAsrModel(button)'));
+assert.ok(html.includes("payload.details && payload.details.log"));
 assert.ok(html.includes('That download is explicit'));
 
 console.log('status page tests passed');

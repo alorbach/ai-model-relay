@@ -100,7 +100,16 @@ function createFakeGrok(options = {}) {
 		const first = path.join(fixture.root, 'one.png');
 		const second = path.join(fixture.root, 'two.jpg');
 		fs.writeFileSync(first, 'one'); fs.writeFileSync(second, 'two');
-		const multipleReferences = await fixture.driver.videos({ prompt: 'animate', referenced_image_paths: [first, second] });
+		const rejectedPaths = await fixture.driver.videos({ prompt: 'animate', referenced_image_paths: [first, second] });
+		assert.strictEqual(rejectedPaths.success, false);
+		assert.strictEqual(rejectedPaths.code, 'grok_reference_invalid');
+		const multipleReferences = await fixture.driver.videos({
+			prompt: 'animate',
+			reference_images: [
+				{ b64_json: Buffer.from('one').toString('base64'), mime_type: 'image/png' },
+				{ b64_json: Buffer.from('two').toString('base64'), mime_type: 'image/jpeg' },
+			],
+		});
 		assert.strictEqual(multipleReferences.success, true);
 		assert.ok(fixture.calls.some((args) => toolForArgs(args) === 'reference_to_video'));
 		const mediaArgs = fixture.calls.find((args) => toolForArgs(args) === 'image_edit');

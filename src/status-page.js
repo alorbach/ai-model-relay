@@ -1965,7 +1965,7 @@ function statusPageHtml() {
 					throw error;
 				}
 				fields.upscaleSettingsMessage.textContent = (payload.model && payload.model.label || engine) + ' is installed';
-				showSetupLog(fields.upscaleSetupLog, '');
+				showSetupLog(fields.upscaleSetupLog, payload.details && payload.details.log || '');
 				await Promise.all([loadUpscaleSettings(), refresh().catch(() => {}), loadRelaySettings().catch(() => {})]);
 			} catch (error) {
 				fields.upscaleSettingsMessage.textContent = error.message || 'Local upscale setup failed';
@@ -2153,7 +2153,7 @@ function statusPageHtml() {
 					throw error;
 				}
 				fields.asrSettingsMessage.textContent = (payload.label || modelId) + ' is installed';
-				showSetupLog(fields.asrSetupLog, '');
+				showSetupLog(fields.asrSetupLog, payload.details && payload.details.log || '');
 				await Promise.all([loadAsrSettings({ refreshRuntime: true }), refresh().catch(() => {}), loadRelaySettings().catch(() => {})]);
 			} catch (error) {
 				fields.asrSettingsMessage.textContent = error.message || 'Local ASR setup failed';

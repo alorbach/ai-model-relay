@@ -1594,7 +1594,11 @@ async function downloadHfSnapshot(pythonPath, repoId, run, emit) {
 }
 
 async function setup(options = {}) {
-	const emit = typeof options.onOutput === 'function' ? options.onOutput : () => {};
+	const logChunks = [];
+	const emit = (stream, text) => {
+		if (text) logChunks.push(String(text));
+		if (typeof options.onOutput === 'function') options.onOutput(stream, text);
+	};
 	const session = { appendSessionOutput: emit };
 	const run = options.runAsync || runAsync;
 	const ensureWhisper = options.ensureRuntime || ensureRuntime;
@@ -1615,14 +1619,28 @@ async function setup(options = {}) {
 	const repos = provider === 'qwen-asr' || provider === 'qwen-aligner'
 		? [model.repo_id, model.aligner_repo_id]
 		: [model.repo_id, model.gpu_repo_id];
+	const repoIds = [...new Set(repos.map((value) => String(value || '').trim()).filter(Boolean))];
+	if (!repoIds.length) {
+		const existing = resolveModelPath(model, '', false);
+		if (!existing) {
+			return {
+				success: false,
+				category: 'validation',
+				code: 'asr_setup_repo_missing',
+				message: 'Set a Hugging Face repository or local model path before installing this Local ASR model.',
+			};
+		}
+		invalidateProbeCache();
+		return { success: true, model_id: fullModelId(model.id), label: model.label, provider, downloaded: [], details: { log: logChunks.join('').slice(-12000) } };
+	}
 	const downloaded = [];
-	for (const repoId of [...new Set(repos.map((value) => String(value || '').trim()).filter(Boolean))]) {
+	for (const repoId of repoIds) {
 		const result = await downloadHfSnapshot(runtime.python, repoId, run, emit);
 		if (!result.success) return result;
 		downloaded.push(result);
 	}
 	invalidateProbeCache();
-	return { success: true, model_id: fullModelId(model.id), label: model.label, provider, downloaded };
+	return { success: true, model_id: fullModelId(model.id), label: model.label, provider, downloaded, details: { log: logChunks.join('').slice(-12000) } };
 }
 
 function publicSettings(options = {}) {

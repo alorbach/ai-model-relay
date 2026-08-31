@@ -70,6 +70,13 @@ def main():
     expected = str(model.get("expected_checksum", "")).lower()
     if not expected or sha256_file(model["model_path"]) != expected:
         fail("model_checksum_mismatch", "Pinned model checksum did not match; local upscale was not started.")
+    expected_commit = str(model.get("expected_commit", "")).strip().lower()
+    if len(expected_commit) != 40:
+        fail("checkout_unpinned", "The official model checkout is not pinned to a git commit.")
+    marker = Path(model.get("root", "")) / ".ai-model-relay-commit"
+    actual_commit = marker.read_text(encoding="utf-8").strip().lower() if marker.is_file() else ""
+    if actual_commit != expected_commit:
+        fail("checkout_mismatch", "The official model checkout is not the pinned git commit.")
     width = int(target.get("width", 0)); height = int(target.get("height", 0))
     if width < 1 or height < 1 or int(job.get("scale", 0)) != 2:
         fail("target_invalid", "Local upscale requires a profile target and exactly x2 scale.")

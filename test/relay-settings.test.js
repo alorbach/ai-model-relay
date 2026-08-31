@@ -38,6 +38,10 @@ try {
 	const preserved = relaySettings.saveSettings({ defaults: { chat: 'model-relay:codex:auto' } });
 	assert.strictEqual(preserved.cli_paths['antigravity-cli'], 'C:\\Tools\\agy.exe');
 
+	const pathsOnly = relaySettings.saveSettings({ cli_paths: { 'antigravity-cli': 'C:\\Tools\\agy.exe', 'codex-cli': 'C:\\Tools\\codex.exe' } });
+	assert.strictEqual(pathsOnly.defaults.chat, 'model-relay:codex:auto');
+	assert.strictEqual(pathsOnly.cli_paths['codex-cli'], 'C:\\Tools\\codex.exe');
+
 	console.log('relay settings tests passed');
 } finally {
 	security.readState = originalReadState;

@@ -1,5 +1,6 @@
 'use strict';
 
+const dns = require('dns');
 const fs = require('fs');
 const net = require('net');
 const os = require('os');
@@ -44,10 +45,25 @@ function normalizeVideoDataUrl(value) {
 	return { bytes, mime_type: mimeType, extension };
 }
 
+function ipv4FromMapped6(host) {
+	const dotted = String(host || '').match(/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i);
+	if (dotted) return dotted[1];
+	const hex = String(host || '').match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i);
+	if (!hex) return '';
+	const high = Number.parseInt(hex[1], 16);
+	const low = Number.parseInt(hex[2], 16);
+	if (!Number.isInteger(high) || !Number.isInteger(low)) return '';
+	return `${(high >> 8) & 255}.${high & 255}.${(low >> 8) & 255}.${low & 255}`;
+}
+
 function isPrivateIp(hostname) {
 	const host = String(hostname || '').replace(/^\[|\]$/g, '').toLowerCase();
 	if (host === 'localhost') {
 		return true;
+	}
+	const mapped = ipv4FromMapped6(host);
+	if (mapped) {
+		return isPrivateIp(mapped);
 	}
 	const ipVersion = net.isIP(host);
 	if (ipVersion === 4) {
@@ -63,6 +79,20 @@ function isPrivateIp(hostname) {
 		return host === '::1' || host.startsWith('fc') || host.startsWith('fd') || host.startsWith('fe80');
 	}
 	return false;
+}
+
+async function hostnameHasPrivateAddress(hostname, lookupFn = dns.promises.lookup) {
+	const host = String(hostname || '').replace(/^\[|\]$/g, '');
+	if (!host || isPrivateIp(host)) return true;
+	let records;
+	try {
+		records = await lookupFn(host, { all: true, verbatim: true });
+	} catch (error) {
+		return true;
+	}
+	const addresses = Array.isArray(records) ? records : (records ? [records] : []);
+	if (!addresses.length) return true;
+	return addresses.some((entry) => isPrivateIp(entry && entry.address ? entry.address : entry));
 }
 
 function validateRemoteMediaUrl(value) {
@@ -101,10 +131,14 @@ function framesFromPayload(payload) {
 	return rawFrames.map(normalizeFrameDataUrl).filter(Boolean).slice(0, MAX_FRAMES);
 }
 
-async function downloadMedia(url, tempDir, fetchImpl = globalThis.fetch) {
+async function downloadMedia(url, tempDir, fetchImpl = globalThis.fetch, lookupFn = dns.promises.lookup) {
 	let currentUrl = String(url || '');
 	let response;
 	for (let redirects = 0; redirects <= 3; redirects += 1) {
+		const parsed = new URL(currentUrl);
+		if (await hostnameHasPrivateAddress(parsed.hostname, lookupFn)) {
+			throw new Error('Localhost and private-network media URLs are not accepted.');
+		}
 		response = await fetchImpl(currentUrl, { redirect: 'manual' });
 		if (![301, 302, 303, 307, 308].includes(response.status)) break;
 		const location = response.headers.get('location');
@@ -136,7 +170,7 @@ async function downloadMedia(url, tempDir, fetchImpl = globalThis.fetch) {
 	return mediaPath;
 }
 
-async function materializeMedia(payload = {}, tempDir, fetchImpl = globalThis.fetch) {
+async function materializeMedia(payload = {}, tempDir, fetchImpl = globalThis.fetch, lookupFn = dns.promises.lookup) {
 	if (payload.media_data_url) {
 		const video = normalizeVideoDataUrl(payload.media_data_url);
 		if (!video) return { error: 'Provide a bounded MP4, MOV, WebM, or AVI data URL for media analysis.' };
@@ -147,7 +181,7 @@ async function materializeMedia(payload = {}, tempDir, fetchImpl = globalThis.fe
 	if (payload.media_url) {
 		const validation = validateRemoteMediaUrl(payload.media_url);
 		if (!validation.ok) return { error: validation.message };
-		return { path: await downloadMedia(validation.url, tempDir, fetchImpl), source: 'url' };
+		return { path: await downloadMedia(validation.url, tempDir, fetchImpl, lookupFn), source: 'url' };
 	}
 	return null;
 }
@@ -233,6 +267,8 @@ async function analyze(payload = {}, codexAdapter, session = {}) {
 		return result;
 	} catch (error) {
 		return { success: false, code: 'media_analysis_failed', category: 'media_processing', retryable: false, message: error.message || String(error) };
+	} finally {
+		try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch (cleanupError) {}
 	}
 }
 
@@ -240,6 +276,7 @@ module.exports = {
 	analyze,
 	capabilities,
 	framesFromPayload,
+	hostnameHasPrivateAddress,
 	isPrivateIp,
 	materializeMedia,
 	normalizeVideoDataUrl,

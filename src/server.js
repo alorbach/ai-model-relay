@@ -420,16 +420,72 @@ function errorStatusForResult(result) {
 	if (result && result.category === 'validation') {
 		return 400;
 	}
-	if (result && result.category === 'cancelled') {
+	if (result && (result.category === 'cancelled' || result.category === 'busy' || result.code === 'setup_busy')) {
 		return 409;
 	}
 	if (result && result.category === 'rate_limit') {
 		return 429;
 	}
+	if (result && result.category === 'timeout') {
+		return 504;
+	}
 	if (result && result.category === 'configuration') {
 		return 503;
 	}
 	return 500;
+}
+
+const STATUS_PAGE_MUTATORS = new Set([
+	'/v1/asr/settings',
+	'/v1/asr/setup',
+	'/v1/upscale/settings',
+	'/v1/upscale/setup',
+	'/v1/music-analysis/settings',
+	'/v1/music-analysis/setup',
+]);
+const setupLocks = new Set();
+
+function isLocalPageOrigin(req, origin) {
+	if (!origin) return true;
+	let parsed;
+	try { parsed = new URL(origin); } catch (error) { return false; }
+	if (parsed.protocol !== 'http:') return false;
+	const localHosts = new Set(['127.0.0.1', 'localhost', '::1']);
+	if (!localHosts.has(parsed.hostname)) return false;
+	const hostHeader = String(req.headers.host || '').trim();
+	if (!hostHeader) return false;
+	let requestHost;
+	try { requestHost = new URL(`http://${hostHeader}`); } catch (error) { return false; }
+	const originPort = parsed.port || (parsed.protocol === 'http:' ? '80' : '443');
+	const requestPort = requestHost.port || '80';
+	return localHosts.has(requestHost.hostname) && originPort === requestPort;
+}
+
+function requireLocalPageOrigin(req, res, origin) {
+	if (isLocalPageOrigin(req, origin)) return true;
+	sendErrorJson(req, res, 403, { success: false, message: 'Status-page install and settings are only accepted from the local Relay page.' });
+	return false;
+}
+
+function acquireSetupLock(key) {
+	if (setupLocks.has(key)) return false;
+	setupLocks.add(key);
+	return true;
+}
+
+function releaseSetupLock(key) {
+	setupLocks.delete(key);
+}
+
+async function withSetupLock(key, work) {
+	if (!acquireSetupLock(key)) {
+		return { success: false, category: 'busy', code: 'setup_busy', message: 'Another model install is already running. Wait for it to finish, then retry.' };
+	}
+	try {
+		return await work();
+	} finally {
+		releaseSetupLock(key);
+	}
 }
 
 async function route(req, res, context) {
@@ -442,12 +498,19 @@ async function route(req, res, context) {
 		return;
 	}
 
+	const url = new URL(req.url, 'http://127.0.0.1');
 	if (req.method === 'OPTIONS') {
+		if (STATUS_PAGE_MUTATORS.has(url.pathname)) {
+			if (!isLocalPageOrigin(req, origin)) {
+				sendErrorJson(req, res, 403, { success: false, message: 'Status-page install and settings are only accepted from the local Relay page.' });
+				return;
+			}
+			sendJson(res, 204, {}, origin);
+			return;
+		}
 		sendJson(res, 204, {}, origin || pairedOriginForCors(req, bridgeSecurity));
 		return;
 	}
-
-	const url = new URL(req.url, 'http://127.0.0.1');
 	if (req.method === 'GET' && url.pathname === '/favicon.ico') {
 		sendFavicon(res);
 		return;
@@ -460,10 +523,10 @@ async function route(req, res, context) {
 	if (req.method === 'GET' && artifactMatch) {
 		const artifact = jobManager.artifact(artifactMatch[1], artifactMatch[2]);
 		if (!artifact) {
-			sendJson(res, 404, { success: false, message: 'Generated job artifact was not found.' }, origin || pairedOriginForCors(req, bridgeSecurity));
+			sendJson(res, 404, { success: false, message: 'Generated job artifact was not found.' });
 			return;
 		}
-		sendArtifact(res, artifact, origin || pairedOriginForCors(req, bridgeSecurity));
+		sendArtifact(res, artifact);
 		return;
 	}
 	const relayArtifactMatch = url.pathname.match(/^\/v1\/relay\/jobs\/([^/]+)\/artifact$/);
@@ -590,6 +653,10 @@ async function route(req, res, context) {
 		return;
 	}
 
+	if (STATUS_PAGE_MUTATORS.has(url.pathname) && !requireLocalPageOrigin(req, res, origin)) {
+		return;
+	}
+
 	if (url.pathname === '/v1/relay/jobs/upscale/cancel') {
 		const pairedOrigin = requirePairing(req, res, bridgeSecurity);
 		if (!pairedOrigin) return;
@@ -648,7 +715,7 @@ async function route(req, res, context) {
 			sendErrorJson(req, res, 500, { success: false, message: 'Local ASR setup is unavailable.' }, origin);
 			return;
 		}
-		const result = await context.codex.setupAsr({ model_id: body.model_id || body.model || '', runtime: body.runtime || '' });
+		const result = await withSetupLock('asr', () => context.codex.setupAsr({ model_id: body.model_id || body.model || '', runtime: body.runtime || '' }));
 		context.statusCache.sync();
 		context.statusEvents.broadcast('status', statusPayload(context));
 		context.statusEvents.broadcast('capabilities', capabilitiesPayload(context));
@@ -676,7 +743,7 @@ async function route(req, res, context) {
 			sendErrorJson(req, res, 500, { success: false, message: 'Music analysis setup is unavailable.' }, origin);
 			return;
 		}
-		const result = await context.musicAnalysis.setup();
+		const result = await withSetupLock('music-analysis', () => context.musicAnalysis.setup());
 		context.statusCache.sync();
 		context.statusEvents.broadcast('status', statusPayload(context));
 		context.statusEvents.broadcast('capabilities', capabilitiesPayload(context));
@@ -707,7 +774,7 @@ async function route(req, res, context) {
 			sendErrorJson(req, res, 500, { success: false, message: 'Local upscale setup is unavailable.' }, origin);
 			return;
 		}
-		const result = await context.localUpscale.setup({ engine: body.engine || 'swinir' });
+		const result = await withSetupLock('upscale', () => context.localUpscale.setup({ engine: body.engine || 'swinir' }));
 		const driver = context.backends && context.backends.getDriverById ? context.backends.getDriverById('local-upscale') : null;
 		if (driver && driver.refresh) await driver.refresh();
 		context.statusCache.sync();

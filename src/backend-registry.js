@@ -21,6 +21,12 @@ function splitArgs(value) {
 	return String(value || '').match(/(?:[^\s"]+|"[^"]*")+/g)?.map((part) => part.replace(/^"|"$/g, '')) || [];
 }
 
+function pathIsInside(parent, candidate) {
+	const root = path.resolve(String(parent || ''));
+	const target = path.resolve(String(candidate || ''));
+	return target === root || target.startsWith(`${root}${path.sep}`);
+}
+
 function textFromMessages(messages = []) {
 	return (Array.isArray(messages) ? messages : []).map((message) => {
 		const role = message && message.role ? String(message.role) : 'user';
@@ -417,6 +423,7 @@ function createGrokCliDriver(options = {}) {
 			if (!write(image)) return { error: 'Grok media references must be PNG, JPEG, or WebP data URLs or { b64_json, mime_type } objects.' };
 		}
 		for (const source of paths) {
+			if (!pathIsInside(inputDir, source)) return { error: 'Grok media reference paths must be files the Relay created for this request.' };
 			try {
 				const bytes = fs.readFileSync(String(source));
 				const extension = path.extname(String(source)).toLowerCase();
@@ -640,6 +647,7 @@ function createAntigravityCliDriver(mediaAnalysis, options = {}) {
 			if (!write(image)) return { error: 'Antigravity image references must be PNG, JPEG, or WebP data URLs or { b64_json, mime_type } objects smaller than 20 MB.' };
 		}
 		for (const source of sourcePaths) {
+			if (!pathIsInside(inputDir, source)) return { error: 'Antigravity image reference paths must be files the Relay created for this request.' };
 			try {
 				const bytes = fs.readFileSync(String(source));
 				const extension = path.extname(String(source)).toLowerCase();
@@ -685,6 +693,10 @@ function createAntigravityCliDriver(mediaAnalysis, options = {}) {
 	}
 
 	function resultFailure(result, operation) {
+		if (result && result.success) {
+			snapshot = { ...snapshot, authenticated: true, state: 'ready', diagnostic: 'Ready.' };
+			return null;
+		}
 		const details = result && result.details && typeof result.details === 'object' ? result.details : {};
 		const output = [result && result.message, result && result.text, result && result.stdout, result && result.stderr, details.message, details.stdout, details.stderr]
 			.filter((value) => typeof value === 'string' && value.trim())
@@ -702,10 +714,6 @@ function createAntigravityCliDriver(mediaAnalysis, options = {}) {
 				retryable: true,
 				details: { provider: 'antigravity-cli', upstream_status: /\b429\b/.test(output) ? 429 : undefined },
 			};
-		}
-		if (result && result.success) {
-			snapshot = { ...snapshot, authenticated: true, state: 'ready', diagnostic: 'Ready.' };
-			return null;
 		}
 		const message = String(result && result.message || 'Antigravity CLI request failed.');
 		if (/not logged in|not authenticated|no auth credentials|login required|sign in/i.test(message)) {

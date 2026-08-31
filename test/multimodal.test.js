@@ -1,9 +1,12 @@
 'use strict';
 
 const assert = require('assert');
+const fs = require('fs');
 const http = require('http');
+const os = require('os');
+const path = require('path');
 const { createServer } = require('../src/server');
-const { framesFromPayload, validateRemoteMediaUrl } = require('../src/media-analysis');
+const { framesFromPayload, hostnameHasPrivateAddress, materializeMedia, validateRemoteMediaUrl } = require('../src/media-analysis');
 
 const framePng = 'data:image/png;base64,iVBORw0KGgo=';
 
@@ -87,7 +90,24 @@ async function withServer(options, callback) {
 (async () => {
 	assert.strictEqual(validateRemoteMediaUrl('http://example.com/video.mp4').ok, false);
 	assert.strictEqual(validateRemoteMediaUrl('https://127.0.0.1/video.mp4').ok, false);
+	assert.strictEqual(validateRemoteMediaUrl('https://[::ffff:127.0.0.1]/video.mp4').ok, false);
 	assert.strictEqual(validateRemoteMediaUrl('https://example.com/video.mp4').ok, true);
+	assert.strictEqual(await hostnameHasPrivateAddress('rebind.example', async () => [{ address: '127.0.0.1', family: 4 }]), true);
+	assert.strictEqual(await hostnameHasPrivateAddress('rebind.example', async () => [{ address: '::ffff:169.254.169.254', family: 6 }]), true);
+	const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-media-ssrf-'));
+	try {
+		await assert.rejects(
+			() => materializeMedia(
+				{ media_url: 'https://rebind.example/video.mp4' },
+				tmp,
+				async () => { throw new Error('fetch should not run for a private DNS result'); },
+				async () => [{ address: '169.254.169.254', family: 4 }],
+			),
+			/private-network/i,
+		);
+	} finally {
+		fs.rmSync(tmp, { recursive: true, force: true });
+	}
 	assert.strictEqual(framesFromPayload({ frames: Array(10).fill(framePng) }).length, 6);
 
 	const video = {

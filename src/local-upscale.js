@@ -19,6 +19,9 @@ const security = require('./security');
 
 const MAX_BYTES = 64 * 1024 * 1024;
 const SETUP_TIMEOUT_MS = Number(process.env.AI_MODEL_RELAY_UPSCALE_SETUP_TIMEOUT_MS || 1800000);
+const DOWNLOAD_TIMEOUT_MS = Number(process.env.AI_MODEL_RELAY_UPSCALE_DOWNLOAD_TIMEOUT_MS || 600000);
+const CHECKOUT_MARKER = '.ai-model-relay-commit';
+const TORCH_PROBE = 'import json,torch; info={"available":bool(torch.cuda.is_available()),"version":getattr(torch,"__version__",""),"cuda_version":getattr(getattr(torch,"version",None),"cuda",None),"device_count":int(torch.cuda.device_count()) if hasattr(torch,"cuda") else 0}; print(json.dumps(info)); raise SystemExit(0 if info["available"] else 1)';
 const DEFAULT_TORCH_INDEX = process.env.AI_MODEL_RELAY_UPSCALE_TORCH_INDEX_URL || 'https://download.pytorch.org/whl/cu128';
 const DEFAULT_PYTHON310 = path.join(os.homedir(), 'AppData', 'Local', 'Programs', 'Python', 'Python310', 'python.exe');
 const DEFAULT_PYTHON312 = path.join(os.homedir(), 'AppData', 'Local', 'Programs', 'Python', 'Python312', 'python.exe');
@@ -30,6 +33,7 @@ const INSTALL = {
 	swinir: {
 		engine: 'swinir',
 		repo: 'https://github.com/JingyunLiang/SwinIR.git',
+		commit: '6545850fbf8df298df73d81f3e8cba638787c8bd',
 		script: 'main_test_swinir.py',
 		weight_name: '001_classicalSR_DF2K_s64w8_SwinIR-M_x2.pth',
 		weight_url: 'https://github.com/JingyunLiang/SwinIR/releases/download/v0.0/001_classicalSR_DF2K_s64w8_SwinIR-M_x2.pth',
@@ -40,12 +44,13 @@ const INSTALL = {
 	realesrgan: {
 		engine: 'realesrgan',
 		repo: 'https://github.com/xinntao/Real-ESRGAN.git',
+		commit: 'a4abfb2979a7bbff3f69f58f58ae324608821e27',
 		script: 'inference_realesrgan.py',
 		weight_name: 'RealESRGAN_x2plus.pth',
 		weight_url: 'https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.1/RealESRGAN_x2plus.pth',
 		weight_bytes: 67061725,
 		weight_sha256: '49fafd45f8fd7aa8d31ab2a22d14d91b536c34494a5cfe31eb5d89c2fa266abb',
-		packages: ['basicsr', 'facexlib', 'gfpgan', 'opencv-python-headless', 'pillow', 'tqdm'],
+		packages: ['numpy', 'basicsr', 'facexlib', 'gfpgan', 'opencv-python-headless', 'pillow', 'tqdm'],
 	},
 };
 
@@ -130,8 +135,56 @@ function modelConfig(id, env = process.env, manifests = INSTALL) {
 	const expectedChecksum = cleanPath(manifest.weight_sha256).toLowerCase();
 	const expectedBytes = Number(manifest.weight_bytes || 0);
 	const actualBytes = files.model_path && fs.existsSync(files.model_path) ? fs.statSync(files.model_path).size : 0;
+	const expectedCommit = String(manifest.commit || '').trim().toLowerCase();
+	const actualCommit = readCheckoutCommit(files.root);
+	const checkoutValid = /^[a-f0-9]{40}$/.test(expectedCommit) && actualCommit === expectedCommit;
 	const manifestValid = /^[a-f0-9]{64}$/.test(expectedChecksum) && actualChecksum && actualChecksum === expectedChecksum && (!expectedBytes || actualBytes === expectedBytes);
-	return { ...model, model_path: files.model_path, root: files.root, expected_checksum: expectedChecksum, expected_bytes: expectedBytes, actual_checksum: actualChecksum, actual_bytes: actualBytes, installed: !!files.model_path && fs.existsSync(files.model_path), manifest_valid: !!manifestValid, state: !files.model_path || !fs.existsSync(files.model_path) ? 'not_installed' : (!/^[a-f0-9]{64}$/.test(expectedChecksum) ? 'manifest_missing' : (!manifestValid ? 'checksum_mismatch' : 'installed')) };
+	return {
+		...model,
+		model_path: files.model_path,
+		root: files.root,
+		expected_checksum: expectedChecksum,
+		expected_bytes: expectedBytes,
+		actual_checksum: actualChecksum,
+		actual_bytes: actualBytes,
+		expected_commit: expectedCommit,
+		actual_commit: actualCommit,
+		checkout_valid: checkoutValid,
+		installed: !!files.model_path && fs.existsSync(files.model_path),
+		manifest_valid: !!manifestValid,
+		state: !files.model_path || !fs.existsSync(files.model_path) ? 'not_installed' : (!/^[a-f0-9]{64}$/.test(expectedChecksum) ? 'manifest_missing' : (!manifestValid ? 'checksum_mismatch' : (!checkoutValid ? 'checkout_unpinned' : 'installed'))),
+	};
+}
+
+function readCheckoutCommit(root) {
+	try {
+		const value = String(fs.readFileSync(path.join(root, CHECKOUT_MARKER), 'utf8') || '').trim().toLowerCase();
+		return /^[a-f0-9]{40}$/.test(value) ? value : '';
+	} catch (error) {
+		return '';
+	}
+}
+
+function parseTorchProbe(result) {
+	let probe = {};
+	try { probe = JSON.parse(String(result && result.stdout || '').trim().split(/\r?\n/).filter(Boolean).pop() || '{}'); } catch (error) { probe = {}; }
+	const version = String(probe.version || '').toLowerCase();
+	const cpuWheel = version.includes('+cpu') || (!probe.cuda_version && version && !probe.available);
+	const ok = !cpuWheel && !!(result && !result.error && result.status === 0 && probe.available);
+	return { probe, version, cpuWheel, ok };
+}
+
+function probeTorchStatus(python) {
+	if (!python || !fs.existsSync(python)) return { ok: false, state: 'python_missing', version: '', probe: {} };
+	try {
+		const result = spawnSync(python, ['-c', TORCH_PROBE], { encoding: 'utf8', shell: false, windowsHide: true, timeout: 15000 });
+		const parsed = parseTorchProbe(result);
+		if (parsed.cpuWheel) return { ok: false, state: 'cpu_torch', version: parsed.version, probe: parsed.probe };
+		if (!parsed.ok) return { ok: false, state: 'cuda_unavailable', version: parsed.version, probe: parsed.probe };
+		return { ok: true, state: 'cuda', version: parsed.version, probe: parsed.probe };
+	} catch (error) {
+		return { ok: false, state: 'torch_probe_failed', version: '', probe: {} };
+	}
 }
 
 function pythonCommand(env = process.env) {
@@ -178,7 +231,7 @@ function runCommand(command, args, options = {}) {
 		const finish = (value) => { if (settled) return; settled = true; clearTimeout(timer); resolve(value); };
 		try { child = spawn(command, args, { cwd: options.cwd, env: options.env, shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }); }
 		catch (spawnError) { resolve({ status: null, stdout: '', stderr: '', error: spawnError }); return; }
-		const timer = setTimeout(() => { try { child.kill(); } catch (killError) {} finish({ status: null, stdout: stdout.value(), stderr: stderr.value(), error: new Error('Local upscale setup timed out.') }); }, Number(options.timeout || SETUP_TIMEOUT_MS));
+		const timer = setTimeout(() => { killProcessTree(child); finish({ status: null, stdout: stdout.value(), stderr: stderr.value(), error: new Error('Local upscale setup timed out.') }); }, Number(options.timeout || SETUP_TIMEOUT_MS));
 		if (typeof timer.unref === 'function') timer.unref();
 		child.stdout.on('data', (chunk) => { const text = String(chunk || ''); stdout.append(text); emit('stdout', text); });
 		child.stderr.on('data', (chunk) => { const text = String(chunk || ''); stderr.append(text); emit('stderr', text); });
@@ -187,23 +240,45 @@ function runCommand(command, args, options = {}) {
 	});
 }
 
-function downloadHttpsFile(url, destination, redirects = 0) {
+function downloadHttpsFile(url, destination, redirects = 0, limits = {}) {
 	return new Promise((resolve, reject) => {
 		if (redirects > 5) { reject(new Error('Weight download followed too many redirects.')); return; }
+		const maxBytes = Number(limits.maxBytes || 0) > 0 ? Number(limits.maxBytes) : 256 * 1024 * 1024;
+		const timeoutMs = Number(limits.timeoutMs || DOWNLOAD_TIMEOUT_MS);
 		const client = String(url).startsWith('http://') ? http : https;
 		const req = client.get(url, { headers: { 'User-Agent': 'ai-model-relay' } }, (res) => {
 			if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
 				res.resume();
-				downloadHttpsFile(new URL(res.headers.location, url).toString(), destination, redirects + 1).then(resolve, reject);
+				downloadHttpsFile(new URL(res.headers.location, url).toString(), destination, redirects + 1, limits).then(resolve, reject);
 				return;
 			}
 			if (res.statusCode !== 200) { res.resume(); reject(new Error(`Weight download failed with HTTP ${res.statusCode}.`)); return; }
+			const declared = Number.parseInt(String(res.headers['content-length'] || ''), 10);
+			if (Number.isFinite(declared) && declared > maxBytes) { res.resume(); reject(new Error('Weight download exceeded the pinned byte size.')); return; }
 			fs.mkdirSync(path.dirname(destination), { recursive: true });
 			const out = fs.createWriteStream(destination);
-			res.pipe(out);
-			out.on('finish', () => out.close(() => resolve(destination)));
-			out.on('error', reject);
+			let received = 0;
+			let failed = false;
+			const fail = (error) => {
+				if (failed) return;
+				failed = true;
+				try { req.destroy(); } catch (destroyError) {}
+				try { out.destroy(); } catch (destroyError) {}
+				try { fs.unlinkSync(destination); } catch (unlinkError) {}
+				reject(error);
+			};
+			res.on('data', (chunk) => {
+				received += chunk.length;
+				if (received > maxBytes) { fail(new Error('Weight download exceeded the pinned byte size.')); return; }
+				if (!out.write(chunk)) res.pause();
+			});
+			out.on('drain', () => res.resume());
+			res.on('end', () => { if (!failed) out.end(); });
+			out.on('finish', () => { if (!failed) out.close(() => resolve(destination)); });
+			out.on('error', fail);
+			res.on('error', fail);
 		});
+		req.setTimeout(timeoutMs, () => { req.destroy(); reject(new Error('Weight download timed out.')); });
 		req.on('error', reject);
 	});
 }
@@ -240,14 +315,76 @@ function discoverBasePython(config = settings()) {
 	return '';
 }
 
+function torchConstraintText(freezeStdout, probeVersion) {
+	const pinned = String(freezeStdout || '')
+		.split(/\r?\n/)
+		.map((line) => line.trim())
+		.filter((line) => /^(torch|torchvision|torchaudio)==/i.test(line));
+	if (pinned.length) return `${pinned.join('\n')}\n`;
+	const version = String(probeVersion || '').trim();
+	return version ? `torch==${version}\n` : '';
+}
+
+async function evaluateCudaTorch(run, venvPython, emit, pythonVersion) {
+	const cuda = await run(venvPython, ['-c', TORCH_PROBE], { timeout: 60000, onOutput: emit });
+	const parsed = parseTorchProbe(cuda);
+	if (parsed.cpuWheel) {
+		return setupFailure('local_upscale_cpu_torch', `pip installed a CPU PyTorch wheel (${parsed.probe.version}) instead of a CUDA build from ${DEFAULT_TORCH_INDEX}. Local upscale does not fall back to CPU.`, cuda, { python: venvPython, python_version: pythonVersion, index_url: DEFAULT_TORCH_INDEX, torch: parsed.probe });
+	}
+	if (!parsed.ok) {
+		return setupFailure('local_upscale_cuda_unavailable', `CUDA PyTorch ${parsed.probe.version || ''} is installed but torch.cuda is not usable (CUDA ${parsed.probe.cuda_version || 'missing'}). CPU fallback is disabled.`, cuda, { python: venvPython, python_version: pythonVersion, index_url: DEFAULT_TORCH_INDEX, torch: parsed.probe });
+	}
+	return { success: true, torch: parsed.probe };
+}
+
+async function readGitHead(run, git, root) {
+	if (!git) return readCheckoutCommit(root);
+	const result = await run(git, ['rev-parse', 'HEAD'], { cwd: root, timeout: 15000 });
+	const head = String(result && result.stdout || '').trim().toLowerCase();
+	return /^[a-f0-9]{40}$/.test(head) ? head : readCheckoutCommit(root);
+}
+
+async function ensurePinnedCheckout(run, git, root, spec, emit) {
+	const commit = String(spec.commit || '').trim().toLowerCase();
+	if (!/^[a-f0-9]{40}$/.test(commit)) return setupFailure('local_upscale_checkout_unpinned', `The ${spec.engine} checkout is missing a pinned git commit.`);
+	const scriptPath = path.join(root, spec.script);
+	if (!fs.existsSync(scriptPath)) {
+		if (!git) return setupFailure('local_upscale_git_missing', 'git is required on PATH to clone the official upscale checkout.');
+		emit('stdout', `Cloning ${spec.repo} at ${commit}\n`);
+		fs.mkdirSync(path.dirname(root), { recursive: true });
+		const cloned = await run(git, ['clone', spec.repo, root], { timeout: SETUP_TIMEOUT_MS, onOutput: emit });
+		if (cloned.error || cloned.status !== 0) return setupFailure('local_upscale_clone_failed', `Could not clone ${spec.engine} from GitHub.`, cloned, { repo: spec.repo, destination: root, commit });
+	}
+	if (!fs.existsSync(scriptPath)) return { success: false, category: 'configuration', code: 'local_upscale_checkout_missing', message: `The official ${spec.engine} checkout is missing ${spec.script}.` };
+	let head = await readGitHead(run, git, root);
+	if (head !== commit) {
+		if (!git) return setupFailure('local_upscale_checkout_unpinned', `The ${spec.engine} checkout is not the pinned commit ${commit}.`);
+		emit('stdout', `Checking out pinned ${spec.engine} commit ${commit}\n`);
+		await run(git, ['fetch', '--depth', '1', 'origin', commit], { cwd: root, timeout: SETUP_TIMEOUT_MS, onOutput: emit });
+		const checked = await run(git, ['checkout', '--force', commit], { cwd: root, timeout: SETUP_TIMEOUT_MS, onOutput: emit });
+		if (checked.error || checked.status !== 0) return setupFailure('local_upscale_checkout_pin_failed', `Could not check out the pinned ${spec.engine} commit.`, checked, { repo: spec.repo, commit });
+		head = await readGitHead(run, git, root);
+	}
+	if (head !== commit) return setupFailure('local_upscale_checkout_mismatch', `The ${spec.engine} checkout HEAD did not match the pinned commit ${commit}.`, {}, { repo: spec.repo, commit, head });
+	fs.mkdirSync(root, { recursive: true });
+	fs.writeFileSync(path.join(root, CHECKOUT_MARKER), `${commit}\n`);
+	return null;
+}
+
 async function setup(options = {}) {
 	const engine = String(options.engine || '').trim() || 'swinir';
 	const manifests = options.install || INSTALL;
 	const spec = manifests[engine];
 	if (!spec) return { success: false, category: 'validation', code: 'local_upscale_engine_invalid', message: 'Choose SwinIR or Real-ESRGAN on the status page to install a local CUDA upscale model.' };
-	const emit = typeof options.onOutput === 'function' ? options.onOutput : () => {};
+	const logChunks = [];
+	const emit = (stream, text) => {
+		if (text) logChunks.push(String(text));
+		if (typeof options.onOutput === 'function') options.onOutput(stream, text);
+	};
+	const collectedLog = () => logChunks.join('').slice(-12000);
 	const run = options.runCommand || runCommand;
-	const download = options.downloadFile || downloadHttpsFile;
+	const maxDownloadBytes = Math.max(Number(spec.weight_bytes || 0) * 2, 64 * 1024 * 1024);
+	const download = options.downloadFile || ((url, dest) => downloadHttpsFile(url, dest, 0, { maxBytes: maxDownloadBytes, timeoutMs: DOWNLOAD_TIMEOUT_MS }));
 	const persist = options.saveSettings || saveSettings;
 	const git = options.gitCommand || resolveCommand(['git']);
 	const config = options.settings || settings();
@@ -268,29 +405,23 @@ async function setup(options = {}) {
 	emit('stdout', `Installing CUDA PyTorch for local upscale (${pythonVersion || venvPython}) from ${DEFAULT_TORCH_INDEX} only.\n`);
 	const torch = await run(venvPython, ['-m', 'pip', 'install', '--disable-pip-version-check', '--progress-bar', 'off', '--force-reinstall', '--no-cache-dir', 'torch', 'torchvision', '--index-url', DEFAULT_TORCH_INDEX], { timeout: SETUP_TIMEOUT_MS, onOutput: emit });
 	if (torch.error || torch.status !== 0) return setupFailure('local_upscale_torch_failed', 'CUDA PyTorch could not be installed for local upscale. CPU fallback is disabled.', torch, { python: venvPython, python_version: pythonVersion, index_url: DEFAULT_TORCH_INDEX });
-	const cuda = await run(venvPython, ['-c', 'import json,torch; info={"available":bool(torch.cuda.is_available()),"version":getattr(torch,"__version__",""),"cuda_version":getattr(getattr(torch,"version",None),"cuda",None),"device_count":int(torch.cuda.device_count()) if hasattr(torch,"cuda") else 0}; print(json.dumps(info)); raise SystemExit(0 if info["available"] else 1)'], { timeout: 60000, onOutput: emit });
-	let torchProbe = {};
-	try { torchProbe = JSON.parse(String(cuda.stdout || '').trim().split(/\r?\n/).filter(Boolean).pop() || '{}'); } catch (error) { torchProbe = {}; }
-	const torchVersion = String(torchProbe.version || '').toLowerCase();
-	if (torchVersion.includes('+cpu') || (!torchProbe.cuda_version && torchVersion && !torchProbe.available)) {
-		return setupFailure('local_upscale_cpu_torch', `pip installed a CPU PyTorch wheel (${torchProbe.version}) instead of a CUDA build from ${DEFAULT_TORCH_INDEX}. Local upscale does not fall back to CPU.`, cuda, { python: venvPython, python_version: pythonVersion, index_url: DEFAULT_TORCH_INDEX, torch: torchProbe });
-	}
-	if (cuda.error || cuda.status !== 0) return setupFailure('local_upscale_cuda_unavailable', `CUDA PyTorch ${torchProbe.version || ''} is installed but torch.cuda is not usable (CUDA ${torchProbe.cuda_version || 'missing'}). CPU fallback is disabled.`, cuda, { python: venvPython, python_version: pythonVersion, index_url: DEFAULT_TORCH_INDEX, torch: torchProbe });
+	const firstProbe = await evaluateCudaTorch(run, venvPython, emit, pythonVersion);
+	if (!firstProbe.success) return firstProbe;
+	const freeze = await run(venvPython, ['-m', 'pip', 'freeze'], { timeout: 30000, onOutput: emit });
+	const constraintText = torchConstraintText(freeze && freeze.stdout, firstProbe.torch && firstProbe.torch.version);
+	if (!/^torch==/im.test(constraintText)) return setupFailure('local_upscale_torch_constraint_failed', 'CUDA PyTorch was installed but could not be pinned before follow-on package installs.', freeze, { python: venvPython, python_version: pythonVersion, torch: firstProbe.torch });
+	const constraintPath = path.join(config.venv_path, 'cuda-torch-constraint.txt');
+	fs.mkdirSync(config.venv_path, { recursive: true });
+	fs.writeFileSync(constraintPath, constraintText);
 	if (spec.packages.length) {
-		const packages = await run(venvPython, ['-m', 'pip', 'install', '--disable-pip-version-check', '--progress-bar', 'off', ...spec.packages], { timeout: SETUP_TIMEOUT_MS, onOutput: emit });
-		if (packages.error || packages.status !== 0) return setupFailure('local_upscale_packages_failed', `Could not install ${spec.engine} Python packages.`, packages, { python: venvPython, python_version: pythonVersion });
+		emit('stdout', `Installing ${spec.engine} packages with CUDA PyTorch pinned at ${String(firstProbe.torch && firstProbe.torch.version || 'installed')}.\n`);
+		const packages = await run(venvPython, ['-m', 'pip', 'install', '--disable-pip-version-check', '--progress-bar', 'off', '--constraint', constraintPath, ...spec.packages], { timeout: SETUP_TIMEOUT_MS, onOutput: emit });
+		if (packages.error || packages.status !== 0) return setupFailure('local_upscale_packages_failed', `Could not install ${spec.engine} Python packages.`, packages, { python: venvPython, python_version: pythonVersion, constraint: constraintPath });
 	}
 	const key = engine === 'swinir' ? 'swinir' : 'realesrgan';
 	const root = config[`${key}_root`];
-	const scriptPath = path.join(root, spec.script);
-	if (!fs.existsSync(scriptPath)) {
-		if (!git) return setupFailure('local_upscale_git_missing', 'git is required on PATH to clone the official upscale checkout.');
-		emit('stdout', `Cloning ${spec.repo}\n`);
-		fs.mkdirSync(path.dirname(root), { recursive: true });
-		const cloned = await run(git, ['clone', '--depth', '1', spec.repo, root], { timeout: SETUP_TIMEOUT_MS, onOutput: emit });
-		if (cloned.error || cloned.status !== 0) return setupFailure('local_upscale_clone_failed', `Could not clone ${spec.engine} from GitHub.`, cloned, { repo: spec.repo, destination: root });
-	}
-	if (!fs.existsSync(scriptPath)) return { success: false, category: 'configuration', code: 'local_upscale_checkout_missing', message: `The official ${spec.engine} checkout is missing ${spec.script}.` };
+	const pinned = await ensurePinnedCheckout(run, git, root, spec, emit);
+	if (pinned) return pinned;
 	// Real-ESRGAN's checkout generates realesrgan/version.py during package
 	// installation.  Cloning alone leaves the official inference script unable
 	// to import its own package, even when the pinned weight is present.
@@ -298,6 +429,8 @@ async function setup(options = {}) {
 		const editable = await run(venvPython, ['-m', 'pip', 'install', '--disable-pip-version-check', '--no-deps', '-e', root], { cwd: root, timeout: SETUP_TIMEOUT_MS, onOutput: emit });
 		if (editable.error || editable.status !== 0) return setupFailure('local_upscale_realesrgan_package_failed', 'Could not install the official Real-ESRGAN checkout into the local upscale environment.', editable, { python: venvPython, root });
 	}
+	const afterPackages = await evaluateCudaTorch(run, venvPython, emit, pythonVersion);
+	if (!afterPackages.success) return afterPackages;
 	const modelPath = config[`${key}_model_path`] || path.join(security.stateDir, 'upscale', 'weights', spec.weight_name);
 	const expected = String(spec.weight_sha256 || '').toLowerCase();
 	const expectedBytes = Number(spec.weight_bytes || 0);
@@ -319,7 +452,7 @@ async function setup(options = {}) {
 		[`${key}_weight_sha256`]: checksum,
 	});
 	const modelId = engine === 'swinir' ? 'model-relay:local-upscale:swinir-classical-x2' : 'model-relay:local-upscale:realesrgan-x2plus';
-	return { success: true, engine, settings: saved, model: { id: modelId, label: MODELS[modelId].label, state: 'installed', manifest_valid: true } };
+	return { success: true, engine, settings: saved, model: { id: modelId, label: MODELS[modelId].label, state: 'installed', manifest_valid: true, checkout_valid: true }, details: { python: venvPython, python_version: pythonVersion, index_url: DEFAULT_TORCH_INDEX, log: collectedLog(), torch: afterPackages.torch } };
 }
 
 function killProcessTree(child) {
@@ -349,10 +482,26 @@ function createLocalUpscaleDriver(options = {}) {
 	function inspect() {
 		const python = pythonCommand(env);
 		const gpu = gpuStatus();
+		const torch = probeTorchStatus(python);
 		const models = Object.keys(MODELS).map((id) => modelConfig(id, env, manifests));
 		const runnersReady = fs.existsSync(runner) && !!python;
-		const ready = runnersReady && gpu.available && models.some((model) => model.manifest_valid);
-		snapshot = { id: 'local-upscale', label: 'Local CUDA Upscale', kind: 'local-runtime', ready, state: ready ? 'ready' : 'not_ready', diagnostic: ready ? 'CUDA and at least one pinned local upscale model are ready.' : 'Use Settings to install a local CUDA upscale model; jobs never download weights or fall back to CPU.', python: python ? '<detected>' : '', gpu, models: models.map((model) => ({ id: model.id, label: model.label, engine: model.engine, installed: model.installed, manifest_valid: model.manifest_valid, state: model.state })) };
+		const ready = runnersReady && gpu.available && torch.ok && models.some((model) => model.manifest_valid && model.checkout_valid);
+		snapshot = {
+			id: 'local-upscale',
+			label: 'Local CUDA Upscale',
+			kind: 'local-runtime',
+			ready,
+			state: ready ? 'ready' : 'not_ready',
+			diagnostic: ready
+				? 'CUDA PyTorch and at least one pinned local upscale checkout are ready.'
+				: (torch.state === 'cpu_torch'
+					? `The upscale venv has CPU PyTorch (${torch.version || 'unknown'}); jobs never fall back to CPU.`
+					: 'Use Settings to install a local CUDA upscale model; jobs never download weights or fall back to CPU.'),
+			python: python ? '<detected>' : '',
+			gpu,
+			torch: { available: torch.ok, state: torch.state, version: torch.version || '' },
+			models: models.map((model) => ({ id: model.id, label: model.label, engine: model.engine, installed: model.installed, manifest_valid: model.manifest_valid, checkout_valid: model.checkout_valid, state: model.state })),
+		};
 		return snapshot;
 	}
 	/*
@@ -366,12 +515,12 @@ function createLocalUpscaleDriver(options = {}) {
 		id: 'local-upscale', label: 'Local CUDA Upscale', kind: 'local-runtime', job_types: ['upscale'],
 		checkStatus: () => ({ success: snapshot.ready, message: snapshot.diagnostic, details: snapshot }),
 		capabilities: () => ({ ...snapshot, job_types: ['upscale'], features: { local_upscale: true, binary_transfer: true, cuda_only: true, cpu_fallback: false, cancellation: true, max_gpu_jobs: 1, web_ui_setup: true } }),
-		models: () => Object.keys(MODELS).map((id) => ({ id, type: 'image', backend: 'local-upscale', ready: !!snapshot.models.find((model) => model.id === id && model.manifest_valid) && !!snapshot.gpu.available, job_types: ['upscale'], label: MODELS[id].label })),
+		models: () => Object.keys(MODELS).map((id) => ({ id, type: 'image', backend: 'local-upscale', ready: !!snapshot.models.find((model) => model.id === id && model.manifest_valid && model.checkout_valid) && !!snapshot.gpu.available && !!(snapshot.torch && snapshot.torch.available), job_types: ['upscale'], label: MODELS[id].label })),
 		refresh: async () => inspect(),
 		async upscale(payload = {}, session = {}) {
 			const state = inspect();
 			const model = modelConfig(payload.model, env, manifests);
-			if (!model || !model.manifest_valid || !state.gpu.available) return { success: false, category: 'configuration', code: 'local_upscale_not_ready', message: 'Pinned model or CUDA readiness is unavailable. CPU fallback is disabled.', details: { state: model ? model.state : 'unknown_model', gpu: state.gpu.state } };
+			if (!model || !model.manifest_valid || !model.checkout_valid || !state.gpu.available || !(state.torch && state.torch.available)) return { success: false, category: 'configuration', code: 'local_upscale_not_ready', message: 'Pinned model, pinned checkout, or CUDA readiness is unavailable. CPU fallback is disabled.', details: { state: model ? model.state : 'unknown_model', gpu: state.gpu.state, torch: state.torch && state.torch.state } };
 			const source = Buffer.isBuffer(payload.source_bytes) ? payload.source_bytes : null;
 			if (!source || !source.length || source.length > MAX_BYTES || !['image/png', 'image/jpeg', 'image/webp'].includes(String(payload.source_mime_type || '').toLowerCase())) return { success: false, category: 'validation', code: 'local_upscale_source_invalid', message: 'The local upscale source must be a bounded PNG, JPEG, or WebP binary.' };
 			const workdir = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-model-relay-upscale-'));
@@ -420,4 +569,4 @@ function createLocalUpscaleDriver(options = {}) {
 	};
 }
 
-module.exports = { MAX_BYTES, MODELS, INSTALL, createLocalUpscaleDriver, gpuStatus, modelConfig, publicSettings, saveSettings, settings, setup };
+module.exports = { MAX_BYTES, MODELS, INSTALL, CHECKOUT_MARKER, createLocalUpscaleDriver, gpuStatus, modelConfig, probeTorchStatus, publicSettings, saveSettings, settings, setup };

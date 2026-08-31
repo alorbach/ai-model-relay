@@ -235,6 +235,17 @@ function createQwenSnapshot(snapshot) {
 	assert.strictEqual(setupDownloadFailed.success, false);
 	assert.strictEqual(setupDownloadFailed.code, 'asr_model_download_failed');
 	assert.ok(String(setupDownloadFailed.details.log).includes('huggingface_hub'));
+
+	const emptyRepo = await asr.setup({
+		model_id: 'empty-custom',
+		settings: asr.normalizeSettings({
+			models: [{ id: 'empty-custom', enabled: true, repo_id: '', gpu_repo_id: '' }],
+		}),
+		ensureRuntime: async () => ({ success: true, python: 'python' }),
+		runAsync: async () => { throw new Error('empty repo setup must not download'); },
+	});
+	assert.strictEqual(emptyRepo.success, false);
+	assert.strictEqual(emptyRepo.code, 'asr_setup_repo_missing');
 	console.log('asr tests passed');
 })().catch((error) => {
 	console.error(error);

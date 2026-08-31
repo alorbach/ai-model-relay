@@ -33,6 +33,15 @@ const tinyPng = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8
 	assert.strictEqual(fromPaths.length, 1);
 	assert.strictEqual(fromPaths[0].source_path, path.resolve(imagePath));
 
+	const outside = path.join(os.tmpdir(), `relay-outside-ref-${Date.now()}.png`);
+	fs.writeFileSync(outside, Buffer.from(tinyPng, 'base64'));
+	try {
+		const rejectedOutside = collectImageAttachments({ referenced_image_paths: [outside] }, tempDir);
+		assert.strictEqual(rejectedOutside.length, 0);
+	} finally {
+		fs.rmSync(outside, { force: true });
+	}
+
 	const fromFrames = collectImageAttachments({
 		frames: [`data:image/png;base64,${tinyPng}`],
 	}, tempDir);
