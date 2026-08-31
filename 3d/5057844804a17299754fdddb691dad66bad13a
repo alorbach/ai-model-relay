@@ -1,0 +1,29 @@
+docs/architecture.md
+  s_66a384a8a418ee::t_6cc93c868a2f9c 29,61
+test/codex-runner.test.js
+  s_66a384a8a418ee::t_952219592452fa 9,121-132
+  s_66a384a8a418ee::t_6cc93c868a2f9c 96-120,133-135
+  s_66a384a8a418ee::t_fe9523c4030d3c 6-8
+  s_66a384a8a418ee::t_25235c3853b72c 136
+src/codex.js
+  s_66a384a8a418ee::t_6191088928b2fe 992-993,996-1003
+  s_66a384a8a418ee::t_6cc93c868a2f9c 899,904,907,947-959,965-966,968-991,1004-1028,1096,1122-1125,1364,1367,1369
+  s_66a384a8a418ee::t_67111e0ebcb6f3 960-964,967,994-995,1113-1119
+  s_66a384a8a418ee::t_952219592452fa 17,883-884,896,898,900-903,905-906,914-946,1157-1161,1370
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "3d5057844804a17299754fdddb691dad66bad13a",
+  "prompts": {},
+  "sessions": {
+    "s_66a384a8a418ee": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0583f-8e85-7db1-886d-02293ade9cd8",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": null
+    }
+  }
+}
