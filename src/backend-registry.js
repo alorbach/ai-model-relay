@@ -25,7 +25,9 @@ function splitArgs(value) {
 function pathIsInside(parent, candidate) {
 	const root = path.resolve(String(parent || ''));
 	const target = path.resolve(String(candidate || ''));
-	return target === root || target.startsWith(`${root}${path.sep}`);
+	const comparableRoot = process.platform === 'win32' ? root.toLowerCase() : root;
+	const comparableTarget = process.platform === 'win32' ? target.toLowerCase() : target;
+	return comparableTarget === comparableRoot || comparableTarget.startsWith(`${comparableRoot}${path.sep}`);
 }
 
 function textFromMessages(messages = []) {
@@ -894,7 +896,7 @@ function createAntigravityCliDriver(mediaAnalysis, options = {}) {
 				if (scanned >= maxEntries) return;
 				scanned += 1;
 				const target = path.resolve(folder, entry.name);
-				if (target !== root && !target.startsWith(`${root}${path.sep}`)) continue;
+				if (target !== root && !pathIsInside(root, target)) continue;
 				if (entry.isDirectory()) { walk(target, depth + 1); continue; }
 				if (!entry.isFile()) continue;
 				const extension = path.extname(entry.name).toLowerCase();
@@ -960,9 +962,61 @@ function createAntigravityCliDriver(mediaAnalysis, options = {}) {
 		return '';
 	}
 
+	function findImagePathMarker(value, seen = new Set(), depth = 0) {
+		if (typeof value === 'string') {
+			if (depth < 2) {
+				try {
+					const parsed = JSON.parse(value);
+					const nested = findImagePathMarker(parsed, seen, depth + 1);
+					if (nested) return nested;
+				} catch (error) {}
+			}
+			const marker = /(?:^|\r?\n)\s*IMAGE_PATH:\s*(.*?)(?:\r?\n|$)/im.exec(value);
+			return marker ? { present: true, path: marker[1].trim() } : null;
+		}
+		if (!value || typeof value !== 'object' || seen.has(value)) return null;
+		seen.add(value);
+		const preferredKeys = ['text', 'stdout', 'stderr', 'response', 'result', 'output', 'content', 'message', 'details'];
+		const keys = Array.isArray(value)
+			? Object.keys(value)
+			: [...preferredKeys, ...Object.keys(value).filter((key) => !preferredKeys.includes(key))];
+		for (const key of keys) {
+			const nested = findImagePathMarker(value[key], seen, depth);
+			if (nested) return nested;
+		}
+		return null;
+	}
+
+	function validateGeneratedImagePath(candidate, workspace) {
+		const raw = String(candidate || '').trim();
+		if (!raw) return { error: 'Antigravity returned an empty IMAGE_PATH marker.' };
+		const target = path.resolve(raw);
+		if (!pathIsInside(stateRoot, target) && !pathIsInside(workspace, target)) {
+			return { error: 'Antigravity IMAGE_PATH must point inside the Antigravity state root or request workspace.' };
+		}
+		let stat;
+		try { stat = fs.statSync(target); } catch (error) { return { error: 'Antigravity IMAGE_PATH does not point to an existing file.' }; }
+		if (!stat.isFile()) return { error: 'Antigravity IMAGE_PATH must point to a file.' };
+		const extension = path.extname(target).toLowerCase();
+		if (!['.png', '.jpg', '.jpeg', '.webp'].includes(extension)) return { error: 'Antigravity IMAGE_PATH must point to a PNG, JPEG, or WebP file.' };
+		if (stat.size <= 0 || stat.size > MAX_IMAGE_REFERENCE_BYTES) return { error: 'Antigravity IMAGE_PATH must point to a non-empty image no larger than 20 MB.' };
+		try {
+			const realTarget = fs.realpathSync(target);
+			const realRoots = [stateRoot, workspace].map((root) => {
+				try { return fs.realpathSync(root); } catch (error) { return ''; }
+			}).filter(Boolean);
+			if (!realRoots.some((root) => pathIsInside(root, realTarget))) return { error: 'Antigravity IMAGE_PATH must point inside the Antigravity state root or request workspace.' };
+		} catch (error) {
+			return { error: 'Antigravity IMAGE_PATH could not be validated.' };
+		}
+		return { path: target, size: stat.size };
+	}
+
 	async function runPrompt(workspace, prompt, timeoutMs, session, operation = 'CLI request') {
 		const args = ['-p', prompt];
 		if (snapshot.print_json_supported) args.push('--output-format', 'json');
+		// Keep -p invocations free of --model/--effort until a concrete, verified
+		// Antigravity flag contract exists; prefer auto over risking a hanging job.
 		const result = await commandRunner(snapshot.command, args, '', session, { ...options, cwd: workspace, timeoutMs });
 		return resultFailure(result, operation) || result;
 	}
@@ -1001,7 +1055,9 @@ function createAntigravityCliDriver(mediaAnalysis, options = {}) {
 				return snapshot;
 			}
 			const printJsonSupported = /--output-format/i.test(helpText);
-			snapshot = { ...snapshot, ...detected, print_json_supported: printJsonSupported, ready: snapshot.authenticated !== false, authenticated: snapshot.authenticated, state: snapshot.authenticated === false ? 'not_authenticated' : 'ready', diagnostic: snapshot.authenticated === false ? 'Not authenticated.' : (printJsonSupported ? 'Ready; authentication will be confirmed on the first request.' : 'Ready; CLI print-mode text output will be normalized locally.') };
+			const modelSupported = /(?:^|[\s,])--model\b/i.test(helpText);
+			const effortSupported = /(?:^|[\s,])--effort\b/i.test(helpText);
+			snapshot = { ...snapshot, ...detected, print_json_supported: printJsonSupported, model_supported: modelSupported, effort_supported: effortSupported, ready: snapshot.authenticated !== false, authenticated: snapshot.authenticated, state: snapshot.authenticated === false ? 'not_authenticated' : 'ready', diagnostic: snapshot.authenticated === false ? 'Not authenticated.' : (printJsonSupported ? 'Ready; authentication will be confirmed on the first request.' : 'Ready; CLI print-mode text output will be normalized locally.') };
 			return snapshot;
 		},
 		async chat(payload = {}, session = {}) {
@@ -1030,19 +1086,35 @@ function createAntigravityCliDriver(mediaAnalysis, options = {}) {
 				const imageName = `relay-${Date.now()}-${randomUUID()}`;
 				const referenceInstruction = references.paths.length ? ` Use these exact ImagePaths: ${JSON.stringify(references.paths)}.` : ' Do not use ImagePaths.';
 				const preferences = antigravityImageToolGuidance(payload);
-				const prompt = `Call generate_image exactly once with ImageName ${JSON.stringify(imageName)}.${referenceInstruction} Do not call shell, file, browser, subagent, or any other tools.${preferences ? ` ${preferences}` : ''} User image request: ${String(payload.prompt || '').trim().slice(0, 24000)}`;
+				const prompt = `Call generate_image exactly once with ImageName ${JSON.stringify(imageName)}.${referenceInstruction} After the tool runs, print a single line exactly in this form: IMAGE_PATH: <absolute path to the saved image> and nothing else of that form. Do not call shell, file, browser, subagent, or any other tools.${preferences ? ` ${preferences}` : ''} User image request: ${String(payload.prompt || '').trim().slice(0, 24000)}`;
 				const startedAt = Date.now();
 				const result = await runPrompt(workspace, prompt, imageTimeoutMs, session, 'image-generation');
 				if (!result.success) return result;
-				const images = findGeneratedImages(imageName, startedAt);
+				const marker = findImagePathMarker(result);
+				let images;
+				if (marker) {
+					const validated = validateGeneratedImagePath(marker.path, workspace);
+					if (validated.error) return { success: false, category: 'output_detection', code: 'antigravity_image_artifact_invalid', message: validated.error };
+					images = [validated];
+				} else {
+					images = findGeneratedImages(imageName, startedAt);
+				}
 				if (!images.length) return { success: false, category: 'output_detection', code: 'antigravity_image_artifact_missing', message: 'Antigravity CLI completed without creating the requested image artifact.' };
+				const data = [];
+				for (const image of images) {
+					try {
+						const bytes = fs.readFileSync(image.path);
+						if (!bytes.length || bytes.length > MAX_IMAGE_REFERENCE_BYTES) return { success: false, category: 'output_detection', code: 'antigravity_image_artifact_invalid', message: 'Antigravity generated an empty or oversized image artifact.' };
+						const extension = path.extname(image.path).toLowerCase();
+						data.push({ b64_json: bytes.toString('base64'), mime_type: extension === '.png' ? 'image/png' : (extension === '.webp' ? 'image/webp' : 'image/jpeg') });
+					} catch (error) {
+						return { success: false, category: 'output_detection', code: 'antigravity_image_artifact_missing', message: 'Antigravity CLI completed without creating the requested image artifact.' };
+					}
+				}
 				return {
 					success: true,
 					response: {
-						data: images.map((image) => {
-							const extension = path.extname(image.path).toLowerCase();
-							return { b64_json: fs.readFileSync(image.path).toString('base64'), mime_type: extension === '.png' ? 'image/png' : (extension === '.webp' ? 'image/webp' : 'image/jpeg') };
-						}),
+						data,
 						provider_details: { provider: 'antigravity-cli', tool: 'generate_image', artifact_imported: true, reference_images: references.paths.length },
 					},
 				};

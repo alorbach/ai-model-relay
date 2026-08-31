@@ -5,6 +5,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const process = require('process');
+const { randomUUID } = require('crypto');
 const { EventEmitter } = require('events');
 const { PassThrough } = require('stream');
 const {
@@ -493,6 +494,7 @@ function captureCliSpawn(calls) {
 		const antigravityPrompts = [];
 		const antigravityPromptFiles = [];
 		const antigravityCommands = [];
+		let outsideMarker = '';
 	let antigravityCandidates = [];
 	const antigravityOptions = {
 		stateRoot: antigravityRoot,
@@ -512,10 +514,11 @@ function captureCliSpawn(calls) {
 			const name = /ImageName\s+("[^"]+")/.exec(prompt);
 			if (name) {
 				const imageName = JSON.parse(name[1]);
-				const artifactDir = path.join(antigravityRoot, 'brain', 'test-artifacts');
+				const artifactDir = runOptions.cwd ? runOptions.cwd : path.join(antigravityRoot, 'brain', 'test-artifacts');
 				fs.mkdirSync(artifactDir, { recursive: true });
-				fs.writeFileSync(path.join(artifactDir, `${imageName.replace(/-/g, '_')}_${Date.now()}.png`), Buffer.from('generated image'));
-				return { success: true, text: JSON.stringify({ text: 'image created' }) };
+				const artifactPath = runOptions.cwd ? path.join(artifactDir, 'generated-image.png') : path.join(artifactDir, `${imageName.replace(/-/g, '_')}_${Date.now()}.png`);
+				fs.writeFileSync(artifactPath, Buffer.from('generated image'));
+				return { success: true, text: JSON.stringify({ text: runOptions.cwd ? `image created\nIMAGE_PATH: ${artifactPath}` : 'image created' }) };
 			}
 			return { success: true, text: JSON.stringify({ text: 'Antigravity answer' }) };
 		},
@@ -555,9 +558,36 @@ function captureCliSpawn(calls) {
 		assert.strictEqual(antigravityImage.response.data[0].mime_type, 'image/png');
                                 assert.strictEqual(antigravityImage.response.provider_details.tool, 'generate_image');
                                 assert.ok(antigravityPrompts.some((prompt) => prompt.includes('ImagePaths')));
+                                assert.ok(antigravityPrompts.some((prompt) => prompt.includes('IMAGE_PATH: <absolute path to the saved image>')));
                                 assert.ok(antigravityPrompts.some((prompt) => prompt.includes('aspectRatio "16:9"')));
                                 assert.ok(antigravityPrompts.some((prompt) => prompt.includes('imageSize "2K"')));
 				assert.ok(antigravityCommands.some((args) => args[0] === '-p' && !args.includes('-o') && !args.includes('--output-format')));
+		if (process.platform === 'win32') {
+			const caseVariantPath = path.join(antigravityRoot, 'brain', 'case-variant.png');
+			fs.mkdirSync(path.dirname(caseVariantPath), { recursive: true });
+			fs.writeFileSync(caseVariantPath, Buffer.from('case-variant image'));
+			const caseVariantMarker = caseVariantPath.replace(/[A-Z]/g, (letter) => letter.toLowerCase());
+			const caseVariantDriver = createAntigravityCliDriver(mediaAnalysis, {
+				...antigravityOptions,
+				runTextCommand: async (command, args) => args[0] === '--help'
+					? { success: true, text: '', stderr: 'Usage: agy.exe --print PROMPT\n  -p  Short alias for --print' }
+					: { success: true, text: JSON.stringify({ wrapper: { text: `IMAGE_PATH: ${caseVariantMarker}` } }) },
+			});
+			const caseVariantImage = await caseVariantDriver.images({ prompt: 'case variant marker' });
+			assert.strictEqual(caseVariantImage.success, true);
+			assert.strictEqual(Buffer.from(caseVariantImage.response.data[0].b64_json, 'base64').toString(), 'case-variant image');
+		}
+		const arrayMarkerPath = path.join(antigravityRoot, 'array-marker.png');
+		fs.writeFileSync(arrayMarkerPath, Buffer.from('array marker image'));
+		const arrayMarkerDriver = createAntigravityCliDriver(mediaAnalysis, {
+			...antigravityOptions,
+			runTextCommand: async (command, args) => args[0] === '--help'
+				? { success: true, text: '', stderr: 'Usage: agy.exe --print PROMPT\n  -p  Short alias for --print' }
+				: { success: true, text: JSON.stringify([{ arbitrary: [{ text: `IMAGE_PATH: ${arrayMarkerPath}` }] }]) },
+		});
+		const arrayMarkerImage = await arrayMarkerDriver.images({ prompt: 'array marker' });
+		assert.strictEqual(arrayMarkerImage.success, true);
+		assert.strictEqual(Buffer.from(arrayMarkerImage.response.data[0].b64_json, 'base64').toString(), 'array marker image');
 		const antigravityMedia = await antigravity['media.analyze']({
 			prompt: 'describe this test video',
 			media_data_url: `data:video/mp4;base64,${Buffer.from('mp4 test video').toString('base64')}`,
@@ -571,6 +601,56 @@ function captureCliSpawn(calls) {
 		fs.writeFileSync(outsideImage, Buffer.from('secret'));
 		const rejectedPaths = await antigravity.images({ prompt: 'steal', referenced_image_paths: [outsideImage] });
 		assert.strictEqual(rejectedPaths.code, 'antigravity_reference_invalid');
+
+		const fallbackRoot = path.join(antigravityRoot, 'fallback-state');
+		const fallbackDriver = createAntigravityCliDriver(mediaAnalysis, {
+			...antigravityOptions,
+			stateRoot: fallbackRoot,
+			runTextCommand: async (command, args) => {
+				if (args[0] === '--help') return { success: true, text: '', stderr: 'Usage: agy.exe --print PROMPT\n  -p  Short alias for --print' };
+				const prompt = args[1];
+				const name = /ImageName\s+("[^"]+")/.exec(prompt);
+				const imageName = JSON.parse(name[1]);
+				const artifactDir = path.join(fallbackRoot, 'brain', 'fallback-artifacts');
+				fs.mkdirSync(artifactDir, { recursive: true });
+				fs.writeFileSync(path.join(artifactDir, `${imageName}_${Date.now()}.png`), Buffer.from('fallback image'));
+				return { success: true, text: JSON.stringify({ text: 'image created without marker' }) };
+			},
+		});
+		const fallbackImage = await fallbackDriver.images({ prompt: 'fallback image' });
+		assert.strictEqual(fallbackImage.success, true);
+		assert.strictEqual(Buffer.from(fallbackImage.response.data[0].b64_json, 'base64').toString(), 'fallback image');
+		if (process.platform === 'win32') {
+			const fallbackCaseRoot = fallbackRoot.replace(/[A-Z]/g, (letter) => letter.toLowerCase());
+			const fallbackCaseDriver = createAntigravityCliDriver(mediaAnalysis, {
+				...antigravityOptions,
+				stateRoot: fallbackCaseRoot,
+				runTextCommand: async (command, args) => {
+					if (args[0] === '--help') return { success: true, text: '', stderr: 'Usage: agy.exe --print PROMPT\n  -p  Short alias for --print' };
+					const prompt = args[1];
+					const name = /ImageName\s+("[^"]+")/.exec(prompt);
+					const imageName = JSON.parse(name[1]);
+					const artifactDir = path.join(fallbackCaseRoot, 'brain', 'fallback-case-artifacts');
+					fs.mkdirSync(artifactDir, { recursive: true });
+					fs.writeFileSync(path.join(artifactDir, `${imageName}_${Date.now()}.png`), Buffer.from('fallback case image'));
+					return { success: true, text: JSON.stringify({ text: 'image created without marker' }) };
+				},
+			});
+			const fallbackCaseImage = await fallbackCaseDriver.images({ prompt: 'fallback case image' });
+			assert.strictEqual(fallbackCaseImage.success, true);
+			assert.strictEqual(Buffer.from(fallbackCaseImage.response.data[0].b64_json, 'base64').toString(), 'fallback case image');
+		}
+
+		outsideMarker = path.join(os.tmpdir(), `ai-model-relay-antigravity-outside-${randomUUID()}.png`);
+		fs.writeFileSync(outsideMarker, Buffer.from('outside marker'));
+		const invalidMarkerDriver = createAntigravityCliDriver(mediaAnalysis, {
+			...antigravityOptions,
+			runTextCommand: async (command, args) => args[0] === '--help'
+				? { success: true, text: '', stderr: 'Usage: agy.exe --print PROMPT\n  -p  Short alias for --print' }
+				: { success: true, text: JSON.stringify({ text: `IMAGE_PATH: ${outsideMarker}` }) },
+		});
+		const invalidMarker = await invalidMarkerDriver.images({ prompt: 'outside marker' });
+		assert.strictEqual(invalidMarker.code, 'antigravity_image_artifact_invalid');
 
 		const missingArtifact = createAntigravityCliDriver(mediaAnalysis, {
 			...antigravityOptions,
@@ -670,6 +750,7 @@ function captureCliSpawn(calls) {
 			await configuredPathRegistry.list().find((driver) => driver.id === 'antigravity-cli').refresh();
 			assert.strictEqual(configuredCandidates[0], 'C:\\Tools\\agy.exe');
 		} finally {
+		if (outsideMarker) fs.rmSync(outsideMarker, { force: true });
 		fs.rmSync(antigravityRoot, { recursive: true, force: true });
 	}
 
