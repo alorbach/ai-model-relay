@@ -14,6 +14,7 @@ let configuredCodexBinary = '';
 const codexHome = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
 const authPath = path.join(codexHome, 'auth.json');
 const generatedImagesDir = path.join(codexHome, 'generated_images');
+const MAX_CODEX_IMAGE_BYTES = 20 * 1024 * 1024;
 let execHelpSnapshot = null;
 
 function collectCodexExe(root, matches, depth = 0) {
@@ -879,6 +880,8 @@ function listGeneratedImages(dir) {
 	if (!fs.existsSync(dir)) {
 		return results;
 	}
+	let rootRealPath;
+	try { rootRealPath = fs.realpathSync(dir); } catch (error) { return results; }
 	const stack = [dir];
 	while (stack.length) {
 		const current = stack.pop();
@@ -890,20 +893,139 @@ function listGeneratedImages(dir) {
 		}
 		for (const entry of entries) {
 			const fullPath = path.join(current, entry.name);
-			if (entry.isDirectory()) {
+			if (entry.isDirectory() && !entry.isSymbolicLink()) {
 				stack.push(fullPath);
-			} else if (/\.(png|jpe?g|webp)$/i.test(entry.name)) {
-				const stat = fs.statSync(fullPath);
-				results.push({ path: fullPath, mtimeMs: stat.mtimeMs });
+			} else if (!entry.isSymbolicLink() && /\.(png|jpe?g|webp)$/i.test(entry.name)) {
+				try {
+					const realPath = fs.realpathSync(fullPath);
+					const comparableRoot = process.platform === 'win32' ? rootRealPath.toLowerCase() : rootRealPath;
+					const comparablePath = process.platform === 'win32' ? realPath.toLowerCase() : realPath;
+					if (comparablePath !== comparableRoot && !comparablePath.startsWith(`${comparableRoot}${path.sep}`)) continue;
+					const stat = fs.statSync(fullPath);
+					if (!stat.isFile()) continue;
+					results.push({ path: fullPath, mtimeMs: stat.mtimeMs, size: stat.size });
+				} catch (error) {}
 			}
 		}
 	}
 	return results;
 }
 
-function detectNewImage(before, after) {
-	const known = new Set(before.map((item) => item.path.toLowerCase()));
-	return after.filter((item) => !known.has(item.path.toLowerCase())).sort((a, b) => b.mtimeMs - a.mtimeMs);
+function readGeneratedImage(dir, candidate) {
+	let rootRealPath;
+	let realPath;
+	try {
+		rootRealPath = fs.realpathSync(dir);
+		const resolvedCandidate = path.resolve(String(candidate || ''));
+		realPath = fs.realpathSync(resolvedCandidate);
+		const comparableRoot = process.platform === 'win32' ? rootRealPath.toLowerCase() : rootRealPath;
+		const comparablePath = process.platform === 'win32' ? realPath.toLowerCase() : realPath;
+		if (comparablePath !== comparableRoot && !comparablePath.startsWith(`${comparableRoot}${path.sep}`)) return { error: 'Codex generated image was outside the generated image directory.' };
+		const initialLinkStat = fs.lstatSync(resolvedCandidate);
+		if (!initialLinkStat.isFile() || initialLinkStat.isSymbolicLink()) return { error: 'Codex generated image was not a regular file.' };
+		const initialStat = fs.statSync(resolvedCandidate);
+		if (!initialStat.isFile()) return { error: 'Codex generated image was not a regular file.' };
+		if (initialStat.size <= 0 || initialStat.size > MAX_CODEX_IMAGE_BYTES) return { error: 'Codex generated image exceeded the 20 MB size limit.' };
+		const descriptor = fs.openSync(resolvedCandidate, 'r');
+		try {
+			const descriptorStat = fs.fstatSync(descriptor);
+			if (!descriptorStat.isFile() || descriptorStat.size !== initialStat.size || descriptorStat.size > MAX_CODEX_IMAGE_BYTES) return { error: 'Codex generated image changed during validation.' };
+			const bytes = fs.readFileSync(descriptor);
+			const finalLinkStat = fs.lstatSync(resolvedCandidate);
+			const finalRealPath = fs.realpathSync(resolvedCandidate);
+			if (!finalLinkStat.isFile() || finalLinkStat.isSymbolicLink() || imagePathKey(finalRealPath) !== imagePathKey(realPath)) return { error: 'Codex generated image changed during validation.' };
+			if (bytes.length <= 0 || bytes.length > MAX_CODEX_IMAGE_BYTES) return { error: 'Codex generated image exceeded the 20 MB size limit.' };
+			return { bytes };
+		} finally {
+			fs.closeSync(descriptor);
+		}
+	} catch (error) {
+		return { error: 'Codex generated image could not be read safely.' };
+	}
+}
+
+function imagePathKey(value) {
+	const resolved = path.resolve(String(value || '').trim());
+	return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+}
+
+const imageEventPathKeys = new Set([
+	'path',
+	'file_path',
+	'filepath',
+	'image_path',
+	'imagepath',
+	'output_path',
+	'outputpath',
+	'output_file',
+	'outputfile',
+	'artifact_path',
+	'artifactpath',
+	'file',
+	'file_name',
+	'filename',
+	'image',
+]);
+
+function collectImageEventPaths(value, paths = [], seen = new Set()) {
+	if (!value || typeof value !== 'object' || seen.has(value)) {
+		return paths;
+	}
+	seen.add(value);
+	if (Array.isArray(value)) {
+		for (const item of value) {
+			collectImageEventPaths(item, paths, seen);
+		}
+		return paths;
+	}
+	for (const [key, nested] of Object.entries(value)) {
+		const normalizedKey = String(key).toLowerCase().replace(/[-\s]/g, '_');
+		if (imageEventPathKeys.has(normalizedKey) && typeof nested === 'string' && nested.trim()) {
+			paths.push(nested.trim());
+		}
+		collectImageEventPaths(nested, paths, seen);
+	}
+	return paths;
+}
+
+function imagePathsFromJsonEvents(structured) {
+	const paths = [];
+	const seen = new Set();
+	const source = structured && Array.isArray(structured.events) ? structured.events : structured;
+	for (const value of collectImageEventPaths(source || [])) {
+		const resolved = path.resolve(String(value || '').trim());
+		const key = imagePathKey(resolved);
+		if (!seen.has(key)) {
+			seen.add(key);
+			paths.push(resolved);
+		}
+	}
+	return paths;
+}
+
+function detectNewImage(before, after, options = {}) {
+	const settings = typeof options === 'number' ? { startedAt: options } : (options || {});
+	const startedAt = Number(settings.startedAt || 0);
+	const known = new Set((Array.isArray(before) ? before : []).map((item) => imagePathKey(item && item.path)));
+	const fresh = (Array.isArray(after) ? after : [])
+		.filter((item) => item && item.path && !known.has(imagePathKey(item.path)))
+		.filter((item) => !startedAt || Number(item.mtimeMs) >= startedAt)
+		.sort((a, b) => Number(b.mtimeMs || 0) - Number(a.mtimeMs || 0));
+	if (!Array.isArray(settings.namedPaths) || !settings.namedPaths.length) {
+		return fresh;
+	}
+	const freshByPath = new Map(fresh.map((item) => [imagePathKey(item.path), item]));
+	const preferred = [];
+	const selected = new Set();
+	for (const namedPath of settings.namedPaths) {
+		const key = imagePathKey(namedPath);
+		const match = freshByPath.get(key);
+		if (match && !selected.has(key)) {
+			preferred.push(match);
+			selected.add(key);
+		}
+	}
+	return [...preferred, ...fresh.filter((item) => !selected.has(imagePathKey(item.path)))];
 }
 
 function imagePrompt(payload, attachments = []) {
@@ -971,6 +1093,7 @@ async function images(payload, session = {}) {
 			attachment_count: attachments.length,
 			temp_dir: tempDir,
 			output_file: outputFile,
+			image_detection_initial_file_count: before.length,
 		});
 	}
 	const args = [
@@ -987,9 +1110,19 @@ async function images(payload, session = {}) {
 	}
 	args.push('-');
 	if (typeof session.appendSessionInput === 'function') session.appendSessionInput('stdin', promptText);
+	const expectedStartTime = Date.now();
+	if (debugLog) {
+		debugLog.writeJson('image_detection', {
+			image_detection_start_time: expectedStartTime,
+			image_detection_initial_file_count: before.length,
+		});
+	}
 	const run = await runCodexExec(args, { cwd: tempDir, timeout: Number(process.env.ALORBACH_CODEX_IMAGE_TIMEOUT_MS || 1800000), onOutput: session.appendSessionOutput, input: promptText });
 	const after = listGeneratedImages(generatedImagesDir);
-	const newImages = detectNewImage(before, after);
+	const newImages = detectNewImage(before, after, {
+		startedAt: expectedStartTime,
+		namedPaths: imagePathsFromJsonEvents(run.structured),
+	});
 	const stdout = (run.stdout || '').trim();
 	const stderr = (run.stderr || '').trim();
 	if (debugLog) {
@@ -1021,7 +1154,11 @@ async function images(payload, session = {}) {
 		failure.details = { ...(failure.details || {}), debug_log_dir: debugLog && debugLog.dir || '' };
 		return failure;
 	}
-	const bytes = fs.readFileSync(newImages[0].path);
+	const imageRead = readGeneratedImage(generatedImagesDir, newImages[0].path);
+	if (imageRead.error) {
+		return { success: false, code: 'codex_image_output_invalid', category: 'codex_cli', message: imageRead.error, details: { debug_log_dir: debugLog && debugLog.dir || '' } };
+	}
+	const bytes = imageRead.bytes;
 	const mimeType = mimeFromImagePath(newImages[0].path);
 	if (!['image/png', 'image/jpeg', 'image/webp'].includes(mimeType)) {
 		return { success: false, code: 'codex_image_output_format_invalid', category: 'codex_cli', message: 'Codex CLI returned an unsupported image file format.', details: { debug_log_dir: debugLog && debugLog.dir || '' } };
@@ -1224,9 +1361,13 @@ module.exports = {
 	codexJsonUnsupported,
 	codexOutputSchemaUnsupported,
 	collectImageAttachments,
+	detectNewImage,
 	execCapabilities,
 	imagePrompt,
+	imagePathsFromJsonEvents,
 	images,
+	listGeneratedImages,
+	readGeneratedImage,
 	messagesToPrompt,
 	models,
 	parseCodexJsonEvents,

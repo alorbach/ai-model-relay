@@ -3,7 +3,10 @@
 process.env.ALORBACH_CODEX_BINARY = process.execPath;
 
 const assert = require('assert');
-const { buildChatArgs, codexImageFailureFromOutput, codexJsonUnsupported, codexOutputSchemaUnsupported, parseCodexJsonEvents, runCodexAsync } = require('../src/codex');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const { buildChatArgs, codexImageFailureFromOutput, codexJsonUnsupported, codexOutputSchemaUnsupported, detectNewImage, imagePathsFromJsonEvents, listGeneratedImages, parseCodexJsonEvents, readGeneratedImage, runCodexAsync } = require('../src/codex');
 
 (async () => {
 	const input = `start\n${'x'.repeat(128 * 1024)}\nend`;
@@ -89,6 +92,47 @@ const { buildChatArgs, codexImageFailureFromOutput, codexJsonUnsupported, codexO
 	assert.strictEqual(codexJsonUnsupported({ status: 1, stderr: 'model failed' }), false);
 	assert.strictEqual(codexOutputSchemaUnsupported({ status: 2, stderr: "error: unexpected argument '--output-schema'" }), true);
 	assert.strictEqual(codexOutputSchemaUnsupported({ status: 1, stderr: 'model failed' }), false);
+
+	const imageRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-image-detection-test-'));
+	try {
+		const existingPath = path.join(imageRoot, 'existing.png');
+		fs.writeFileSync(existingPath, Buffer.from('existing image'));
+		const before = listGeneratedImages(imageRoot);
+		const expectedStartTime = Date.now();
+		const stalePath = path.join(imageRoot, 'stale.png');
+		fs.writeFileSync(stalePath, Buffer.from('stale image'));
+		fs.utimesSync(stalePath, new Date(expectedStartTime - 1000), new Date(expectedStartTime - 1000));
+		const namedPath = path.join(imageRoot, 'named.png');
+		fs.writeFileSync(namedPath, Buffer.from('named image'));
+		fs.utimesSync(namedPath, new Date(expectedStartTime + 1000), new Date(expectedStartTime + 1000));
+		const newestPath = path.join(imageRoot, 'newest.png');
+		fs.writeFileSync(newestPath, Buffer.from('newest image'));
+		fs.utimesSync(newestPath, new Date(expectedStartTime + 2000), new Date(expectedStartTime + 2000));
+		const after = listGeneratedImages(imageRoot);
+		const structuredImageEvents = parseCodexJsonEvents(JSON.stringify({
+			type: 'item.completed',
+			item: { type: 'image_generation', output: { file_path: namedPath } },
+		}));
+		assert.deepStrictEqual(imagePathsFromJsonEvents(structuredImageEvents), [path.resolve(namedPath)]);
+		const detected = detectNewImage(before, after, { startedAt: expectedStartTime, namedPaths: imagePathsFromJsonEvents(structuredImageEvents) });
+		assert.strictEqual(detected[0].path, namedPath);
+		assert.ok(!detected.some((item) => item.path === stalePath));
+		assert.strictEqual(detectNewImage(before, after, { startedAt: Date.now() + 60000 }).length, 0);
+		const oversizedPath = path.join(imageRoot, 'oversized.png');
+		fs.writeFileSync(oversizedPath, Buffer.alloc(20 * 1024 * 1024 + 1));
+		assert.ok(listGeneratedImages(imageRoot).some((item) => item.path === oversizedPath));
+		assert.match(readGeneratedImage(imageRoot, oversizedPath).error, /20 MB size limit/i);
+		const linkPath = path.join(imageRoot, 'linked.png');
+		try {
+			fs.symlinkSync(existingPath, linkPath, 'file');
+			assert.strictEqual(listGeneratedImages(imageRoot).some((item) => item.path === linkPath), false);
+			assert.match(readGeneratedImage(imageRoot, linkPath).error, /regular file|safely/i);
+		} catch (error) {
+			if (!['EPERM', 'EACCES', 'UNKNOWN'].includes(error && error.code)) throw error;
+		}
+	} finally {
+		fs.rmSync(imageRoot, { recursive: true, force: true });
+	}
 
 	const chatArgs = buildChatArgs('C:\\temp\\chat', 'C:\\temp\\chat\\last-message.txt', 'auto', [], {
 		sandboxReadOnly: true,
