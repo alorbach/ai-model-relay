@@ -13,6 +13,11 @@ function toolForArgs(args) {
 	return match ? match[1] : '';
 }
 
+function assertExactToolAllowlist(args, tool) {
+	assert.strictEqual(args.filter((arg) => arg === '--tools').length, 1);
+	assert.strictEqual(args[args.indexOf('--tools') + 1], tool);
+}
+
 function createFakeGrok(options = {}) {
 	const calls = [];
 	const root = fs.mkdtempSync(path.join(os.tmpdir(), 'grok-media-test-'));
@@ -85,18 +90,25 @@ function createFakeGrok(options = {}) {
 		assert.ok(fixture.calls.some((args) => toolForArgs(args) === 'image_edit' && args[args.indexOf('--single') + 1].includes('Pass aspect_ratio "16:9" as the image_edit tool argument.')));
 		assert.ok(fixture.calls.some((args) => toolForArgs(args) === 'image_edit' && args[args.indexOf('--single') + 1].includes('request 2K output with the long edge around 2048 pixels.')));
 		assert.ok(fixture.calls.some((args) => toolForArgs(args) === 'image_edit' && args[args.indexOf('--single') + 1].includes('Do not pass a resolution tool parameter')));
+		assertExactToolAllowlist(fixture.calls.find((args) => toolForArgs(args) === 'image_edit'), 'image_edit');
 
 		const noReference = await fixture.driver.videos({ prompt: 'animate' });
 		assert.strictEqual(noReference.success, true);
 		assert.strictEqual(noReference.response.provider_details.generated_source_image, true);
-		assert.ok(fixture.calls.some((args) => toolForArgs(args) === 'image_gen'));
-		assert.ok(fixture.calls.some((args) => toolForArgs(args) === 'image_to_video'));
+		const generatedSourceArgs = fixture.calls.find((args) => toolForArgs(args) === 'image_gen');
+		assert.ok(generatedSourceArgs);
+		assertExactToolAllowlist(generatedSourceArgs, 'image_gen');
+		const imageToVideoArgs = fixture.calls.find((args) => toolForArgs(args) === 'image_to_video');
+		assert.ok(imageToVideoArgs);
+		assertExactToolAllowlist(imageToVideoArgs, 'image_to_video');
 
 		const oneReference = await fixture.driver.videos({ prompt: 'animate', frames: [`data:image/png;base64,${Buffer.from('frame').toString('base64')}`], seconds: 10, resolution: '1080p', generate_audio: false });
 		assert.strictEqual(oneReference.success, true);
 		assert.strictEqual(Buffer.from(oneReference.response.b64_video, 'base64').toString(), 'generated video');
 		assert.strictEqual(oneReference.response.provider_details.generated_source_image, false);
-		assert.ok(fixture.calls.some((args) => toolForArgs(args) === 'image_to_video'));
+		const oneReferenceArgs = fixture.calls.filter((args) => toolForArgs(args) === 'image_to_video').pop();
+		assert.ok(oneReferenceArgs);
+		assertExactToolAllowlist(oneReferenceArgs, 'image_to_video');
 		assert.ok(fixture.calls.some((args) => toolForArgs(args) === 'image_to_video' && args[args.indexOf('--single') + 1].includes('Requested clip length: 10 seconds.')));
 		assert.ok(fixture.calls.some((args) => toolForArgs(args) === 'image_to_video' && args[args.indexOf('--single') + 1].includes('Requested resolution tier: 1080p.')));
 		assert.ok(fixture.calls.some((args) => toolForArgs(args) === 'image_to_video' && args[args.indexOf('--single') + 1].includes('Request a silent video without a soundtrack.')));
@@ -125,9 +137,11 @@ function createFakeGrok(options = {}) {
 			],
 		});
 		assert.strictEqual(multipleReferences.success, true);
-		assert.ok(fixture.calls.some((args) => toolForArgs(args) === 'reference_to_video'));
+		const referenceToVideoArgs = fixture.calls.find((args) => toolForArgs(args) === 'reference_to_video');
+		assert.ok(referenceToVideoArgs);
+		assertExactToolAllowlist(referenceToVideoArgs, 'reference_to_video');
 		const mediaArgs = fixture.calls.find((args) => toolForArgs(args) === 'image_edit');
-		assert.ok(!mediaArgs.includes('--tools'));
+		assertExactToolAllowlist(mediaArgs, 'image_edit');
 		assert.strictEqual(mediaArgs[mediaArgs.indexOf('--permission-mode') + 1], 'dontAsk');
 		assert.strictEqual(mediaArgs[mediaArgs.indexOf('--disallowed-tools') + 1], 'run_terminal_cmd');
 		assert.ok(mediaArgs.includes('--no-subagents'));

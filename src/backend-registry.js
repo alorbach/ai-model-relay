@@ -540,18 +540,18 @@ function cliModelFromRelay(model, provider) {
 }
 
 function createNamedCliDriver(definition, options = {}) {
-	let cached = { id: definition.id, label: definition.label, kind: 'local-cli', installed: null, ready: false, state: 'checking', diagnostic: 'Checking in background.', models: definition.models || ['auto'], job_types: ['chat'] };
+	let cached = { id: definition.id, label: definition.label, kind: 'local-cli', installed: null, ready: false, state: 'checking', diagnostic: 'Checking in background.', models: definition.models || ['auto'], job_types: definition.jobTypes || ['chat'] };
 	const detector = options.detectCliAsync || detectCliAsync;
 	function detect() { return cached; }
 	return {
 		id: definition.id,
 		label: definition.label,
 		kind: 'local-cli',
-		job_types: ['chat', 'transcribe'],
+		job_types: definition.jobTypes || ['chat'],
 		checkStatus: () => { const state = detect(); return { success: state.ready, message: state.diagnostic, details: state }; },
 		capabilities: () => {
 			const state = detect();
-			return { ...state, id: definition.id, label: definition.label, enabled: state.installed, features: { chat: true, coding: true, images: false, videos: false } };
+			return { ...state, id: definition.id, label: definition.label, job_types: definition.jobTypes || ['chat'], enabled: state.installed, features: { chat: true, coding: true, images: false, videos: false } };
 		},
 		models: () => {
 			const state = detect();
@@ -577,7 +577,7 @@ function createNamedCliDriver(definition, options = {}) {
 }
 
 function createGrokCliDriver(options = {}) {
-	const definition = { id: 'grok-cli', label: 'Grok CLI', candidates: [options.command, process.env.AI_MODEL_RELAY_GROK_BINARY, 'grok'], versionArgs: ['--version'], authArgs: ['models'], jobTypes: ['chat'], models: ['auto'], requestArgs: (model, promptPath) => ['--prompt-file', promptPath, '--output-format', 'json', ...(model !== 'auto' ? ['--model', model] : [])] };
+	const definition = { id: 'grok-cli', label: 'Grok CLI', candidates: [options.command, process.env.AI_MODEL_RELAY_GROK_BINARY, 'grok'], versionArgs: ['--version'], authArgs: ['models'], jobTypes: ['chat'], models: ['auto'], requestArgs: (model, promptPath, workspace) => ['--prompt-file', promptPath, '--output-format', 'json', '--cwd', workspace, '--disallowed-tools', 'run_terminal_cmd', '--permission-mode', 'dontAsk', '--no-subagents', '--disable-web-search', ...(model !== 'auto' ? ['--model', model] : [])] };
 	const configuredMediaTimeout = Number(options.mediaTimeoutMs || process.env.AI_MODEL_RELAY_GROK_MEDIA_TIMEOUT_MS || GROK_MEDIA_TIMEOUT_MS);
 	const mediaTimeoutMs = Number.isFinite(configuredMediaTimeout) && configuredMediaTimeout > 0 ? configuredMediaTimeout : GROK_MEDIA_TIMEOUT_MS;
 	const driver = createNamedCliDriver(definition, options);
@@ -775,7 +775,7 @@ function createGrokCliDriver(options = {}) {
 				if (session.appendSessionInput) {
 					session.appendSessionInput('grok cli request', `Tool: ${toolName}\nWorkspace: ${workspace}\n\nPrompt (passed with --single; stdin is empty):\n${prompt}`);
 				}
-				const result = await runTextCommand(state.command, ['--single', prompt, '--output-format', 'json', '--cwd', workspace, '--disallowed-tools', 'run_terminal_cmd', '--permission-mode', 'dontAsk', '--no-subagents', '--disable-web-search', '--max-turns', '2'], '', session, { ...options, timeoutMs: mediaTimeoutMs });
+				const result = await runTextCommand(state.command, ['--single', prompt, '--output-format', 'json', '--cwd', workspace, '--tools', toolName, '--disallowed-tools', 'run_terminal_cmd', '--permission-mode', 'dontAsk', '--no-subagents', '--disable-web-search', '--max-turns', '2'], '', session, { ...options, timeoutMs: mediaTimeoutMs });
 				if (result.success) {
 					const upstreamTimeout = upstreamGrokMediaTimeout(result.text, toolName);
 					if (upstreamTimeout) return upstreamTimeout;
@@ -1086,7 +1086,7 @@ function createAntigravityCliDriver(mediaAnalysis, options = {}) {
 }
 
 function createCursorCliDriver(options = {}) {
-	return createNamedCliDriver({ id: 'cursor-cli', label: 'Cursor Agent', candidates: [options.command, process.env.AI_MODEL_RELAY_CURSOR_BINARY, 'cursor-agent'], versionArgs: ['--version'], authArgs: ['status'], jobTypes: ['chat'], models: ['auto'], requestArgs: (model, promptPath, workspace) => ['--print', '--output-format', 'json', ...(model !== 'auto' ? ['--model', model] : []), 'Respond to the user request in prompt.txt.', '--workspace', workspace] }, options);
+	return createNamedCliDriver({ id: 'cursor-cli', label: 'Cursor Agent', candidates: [options.command, process.env.AI_MODEL_RELAY_CURSOR_BINARY, 'cursor-agent'], versionArgs: ['--version'], authArgs: ['status'], jobTypes: ['chat'], models: ['auto'], requestArgs: (model, promptPath, workspace) => ['--print', '--output-format', 'json', '--mode=ask', '--trust', ...(model !== 'auto' ? ['--model', model] : []), 'Respond to the user request in prompt.txt.', '--workspace', workspace] }, options);
 }
 
 function createLocalAsrDriver(codex) {
