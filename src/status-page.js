@@ -1061,6 +1061,7 @@ function statusPageHtml() {
 							<p class="muted">Optional executable paths are used only by this local bridge. Leave a field blank to use its configured environment variable or PATH lookup. Refresh detection saves the visible paths before probing every provider.</p>
 							<div class="settings-grid" id="relayCliPaths"></div>
 							<div class="settings-grid" id="relayDefaultSettings"></div>
+							<div class="settings-grid" id="relayTokenDefaults"></div>
 							<div class="settings-actions"><span class="muted" id="relaySettingsMessage">Loading routing settings</span><button type="button" id="refreshRelayProviders">Refresh detection</button><button type="button" class="btn-primary" id="saveRelaySettings" disabled>Save paths &amp; routing</button></div>
 						</form>
 					</div>
@@ -1252,6 +1253,7 @@ function statusPageHtml() {
 			relaySettingsForm: document.getElementById('relaySettingsForm'),
 			relayCliPaths: document.getElementById('relayCliPaths'),
 			relayDefaultSettings: document.getElementById('relayDefaultSettings'),
+			relayTokenDefaults: document.getElementById('relayTokenDefaults'),
 			relaySettingsMessage: document.getElementById('relaySettingsMessage'),
 			refreshRelayProviders: document.getElementById('refreshRelayProviders'),
 			saveRelaySettings: document.getElementById('saveRelaySettings'),
@@ -1412,7 +1414,11 @@ function statusPageHtml() {
 			fields.relayCliPaths.querySelectorAll('[data-relay-cli-path]').forEach((input) => {
 				cli_paths[input.getAttribute('data-relay-cli-path')] = input.value.trim();
 			});
-			return JSON.stringify({ defaults, cli_paths });
+			const token_defaults = {};
+			fields.relayTokenDefaults.querySelectorAll('[data-relay-token-default]').forEach((input) => {
+				token_defaults[input.getAttribute('data-relay-token-default')] = input.value.trim();
+			});
+			return JSON.stringify({ defaults, cli_paths, token_defaults });
 		}
 
 		function normalizeSettingsSection(section) {
@@ -2179,6 +2185,7 @@ function statusPageHtml() {
 			const settings = payload && payload.settings || {};
 			const defaults = settings.defaults || {};
 			const cliPaths = settings.cli_paths || {};
+			const tokenDefaults = settings.token_defaults || {};
 			const models = Array.isArray(payload && payload.models) ? payload.models : [];
 			const backends = Array.isArray(payload && payload.backends) ? payload.backends : (currentCapabilities.backends || []);
 			const backendById = new Map(backends.map((backend) => [backend.id, backend]));
@@ -2211,6 +2218,11 @@ function statusPageHtml() {
 				const options = unavailable.concat(compatible.map((model) => '<option value="' + escapeHtml(model.id) + '"' + optionAttr(model.id, current) + '>' + escapeHtml(model.id) + (model.experimental ? ' (experimental)' : '') + '</option>'));
 				return '<label class="field"><span>' + labels[jobType] + '</span><select data-relay-job="' + jobType + '">' + options.join('') + '</select></label>';
 			}).join('');
+			const tokenFields = [
+				{ jobType: 'chat', label: 'Chat token default', codeDefault: 8192 },
+				{ jobType: 'media.analyze', label: 'Media analysis token default', codeDefault: 4096 },
+			];
+			fields.relayTokenDefaults.innerHTML = tokenFields.map((entry) => '<label class="field"><span>' + escapeHtml(entry.label) + '</span><input type="number" min="512" max="128000" step="1" inputmode="numeric" data-relay-token-default="' + escapeHtml(entry.jobType) + '" value="' + escapeHtml(tokenDefaults[entry.jobType] || '') + '" placeholder="Code default: ' + entry.codeDefault + '"><small class="muted">Leave blank to use the code default.</small></label>').join('');
 			if (!document.querySelector('[data-provider-media-test][data-test-request-id]')) {
 				renderProviderMediaTests(models, backends);
 			}
@@ -2496,10 +2508,12 @@ function statusPageHtml() {
 		async function saveRelaySettings(options = {}) {
 			const defaults = {};
 			const cli_paths = {};
+			const token_defaults = {};
 			fields.relayDefaultSettings.querySelectorAll('[data-relay-job]').forEach((select) => { defaults[select.getAttribute('data-relay-job')] = select.value; });
 			fields.relayCliPaths.querySelectorAll('[data-relay-cli-path]').forEach((input) => { cli_paths[input.getAttribute('data-relay-cli-path')] = input.value.trim(); });
+			fields.relayTokenDefaults.querySelectorAll('[data-relay-token-default]').forEach((input) => { token_defaults[input.getAttribute('data-relay-token-default')] = input.value.trim(); });
 			try {
-				const response = await fetch(relaySettingsUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ settings: { defaults, cli_paths } }) });
+				const response = await fetch(relaySettingsUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ settings: { defaults, cli_paths, token_defaults } }) });
 				const payload = await response.json();
 				if (!response.ok) throw new Error(payload.message || 'Routing settings save failed');
 				renderRelaySettings(payload);
