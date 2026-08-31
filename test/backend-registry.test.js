@@ -27,7 +27,7 @@ function readyCli(definition) {
 function captureCliSpawn(calls) {
 	return (command, args, options) => {
 		const promptPath = path.join(options.cwd, 'prompt.txt');
-		calls.push({ command, args: args.slice(), cwd: options.cwd, promptPath, promptExists: fs.existsSync(promptPath), prompt: fs.existsSync(promptPath) ? fs.readFileSync(promptPath, 'utf8') : '' });
+		calls.push({ command, args: args.slice(), cwd: options.cwd, promptPath, promptExists: fs.existsSync(promptPath), prompt: fs.existsSync(promptPath) ? fs.readFileSync(promptPath, 'utf8') : '', chatImageExists: fs.existsSync(path.join(options.cwd, 'chat-image-1.png')) });
 		const child = new EventEmitter();
 		child.stdin = new PassThrough();
 		child.stdout = new PassThrough();
@@ -489,6 +489,80 @@ function captureCliSpawn(calls) {
 	assert.ok(grokCalls[0].args.includes('--no-subagents'));
 	assert.ok(grokCalls[0].args.includes('--disable-web-search'));
 	assert.ok(!grokCalls[0].args.includes('--max-turns'));
+
+	const discoveredGrok = createGrokCliDriver({ detectCliAsync: async (definition) => ({ ...readyCli(definition), models: ['auto', 'grok-4.6', 'grok-4.5'] }) });
+	await discoveredGrok.refresh();
+	assert.deepStrictEqual(discoveredGrok.models().filter((model) => model.type === 'text').map((model) => model.id), ['model-relay:grok-cli:auto', 'model-relay:grok-cli:grok-4.6', 'model-relay:grok-cli:grok-4.5']);
+	assert.ok(discoveredGrok.models().filter((model) => model.type === 'text').every((model) => model.job_types.length === 1 && model.job_types[0] === 'chat'));
+	const discoveredCursor = createCursorCliDriver({ detectCliAsync: async (definition) => ({ ...readyCli(definition), models: ['auto', 'gpt-5', 'claude-4-sonnet'] }) });
+	await discoveredCursor.refresh();
+	assert.deepStrictEqual(discoveredCursor.models().map((model) => model.id), ['model-relay:cursor-cli:auto', 'model-relay:cursor-cli:gpt-5', 'model-relay:cursor-cli:claude-4-sonnet']);
+	assert.ok(discoveredCursor.models().every((model) => model.job_types.length === 1 && model.job_types[0] === 'chat'));
+
+	const chatPng = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=';
+	const visionCalls = [];
+	const visionRunner = async (command, args, input, session, runOptions = {}) => {
+		if (args[0] === '--help') return { success: true, text: 'Usage: grok --prompt-json <JSON> --prompt-file <PATH>', stderr: '' };
+		visionCalls.push({ args: args.slice(), cwd: runOptions.cwd, prompt: fs.readFileSync(path.join(runOptions.cwd, 'prompt.txt'), 'utf8'), imageExists: fs.existsSync(path.join(runOptions.cwd, 'chat-image-1.png')) });
+		return { success: true, text: JSON.stringify({ choices: [{ index: 0, message: { role: 'assistant', content: 'vision response' }, finish_reason: 'stop' }] }) };
+	};
+	const visionGrok = createGrokCliDriver({ detectCliAsync: async (definition) => readyCli(definition), runTextCommand: visionRunner });
+	const visionResult = await visionGrok.chat({ model: 'model-relay:grok-cli:auto', messages: [{ role: 'user', content: [{ type: 'input_text', text: 'Describe this image.' }, { type: 'input_image', image_url: `data:image/png;base64,${chatPng}` }] }] });
+	assert.strictEqual(visionResult.success, true);
+	assert.strictEqual(visionCalls.length, 1);
+	assert.ok(visionCalls[0].args.includes('--prompt-json'));
+	assert.strictEqual(visionCalls[0].imageExists, true);
+	assert.ok(!visionCalls[0].args.join(' ').includes(chatPng));
+	assert.ok(!visionCalls[0].prompt.includes(chatPng));
+	const promptJson = JSON.parse(visionCalls[0].args[visionCalls[0].args.indexOf('--prompt-json') + 1]);
+	assert.ok(promptJson.some((block) => block.type === 'image' && block.path.endsWith('chat-image-1.png')));
+
+	const fallbackVisionCalls = [];
+	const fallbackVisionGrok = createGrokCliDriver({
+		detectCliAsync: async (definition) => readyCli(definition),
+		runTextCommand: async (command, args, input, session, runOptions = {}) => {
+			if (args[0] === '--help') return { success: true, text: 'Usage: grok --prompt-file <PATH>', stderr: '' };
+			fallbackVisionCalls.push({ args: args.slice(), prompt: fs.readFileSync(path.join(runOptions.cwd, 'prompt.txt'), 'utf8'), imageExists: fs.existsSync(path.join(runOptions.cwd, 'chat-image-1.png')) });
+			return { success: true, text: JSON.stringify({ choices: [{ index: 0, message: { role: 'assistant', content: 'fallback vision response' }, finish_reason: 'stop' }] }) };
+		},
+	});
+	const fallbackVisionResult = await fallbackVisionGrok.chat({ messages: [{ role: 'user', content: [{ type: 'input_text', text: 'Describe this image.' }, { type: 'input_image', image_url: `data:image/png;base64,${chatPng}` }] }] });
+	assert.strictEqual(fallbackVisionResult.success, true);
+	assert.strictEqual(fallbackVisionCalls.length, 1);
+	assert.ok(fallbackVisionCalls[0].args.includes('--prompt-file'));
+	assert.ok(fallbackVisionCalls[0].prompt.includes('@'));
+	assert.ok(fallbackVisionCalls[0].prompt.includes('chat-image-1.png'));
+	assert.strictEqual(fallbackVisionCalls[0].imageExists, true);
+	assert.ok(!fallbackVisionCalls[0].args.join(' ').includes(chatPng));
+	assert.ok(!fallbackVisionCalls[0].prompt.includes(chatPng));
+	const nativeGrok = createGrokCliDriver({
+		detectCliAsync: async (definition) => readyCli(definition),
+		runTextCommand: async (command, args) => args[0] === '--help'
+			? { success: true, text: 'Usage: grok --prompt-file <PATH>', stderr: '' }
+			: { success: true, text: JSON.stringify({ text: 'native Grok response' }) },
+	});
+	const nativeGrokResult = await nativeGrok.chat({ messages: [{ role: 'user', content: 'hello' }] });
+	assert.strictEqual(nativeGrokResult.response.choices[0].message.content, 'native Grok response');
+	const nativeCursor = createCursorCliDriver({
+		detectCliAsync: async (definition) => readyCli(definition),
+		runTextCommand: async () => ({ success: true, text: JSON.stringify({ result: 'native Cursor response' }) }),
+	});
+	const nativeCursorResult = await nativeCursor.chat({ messages: [{ role: 'user', content: 'hello' }] });
+	assert.strictEqual(nativeCursorResult.response.choices[0].message.content, 'native Cursor response');
+	const longPromptJsonCalls = [];
+	const longPromptJsonGrok = createGrokCliDriver({
+		detectCliAsync: async (definition) => readyCli(definition),
+		runTextCommand: async (command, args, input, session, runOptions = {}) => {
+			if (args[0] === '--help') return { success: true, text: 'Usage: grok --prompt-json <JSON> --prompt-file <PATH>', stderr: '' };
+			longPromptJsonCalls.push({ args: args.slice(), promptPath: path.join(runOptions.cwd, 'prompt.txt'), prompt: fs.readFileSync(path.join(runOptions.cwd, 'prompt.txt'), 'utf8') });
+			return { success: true, text: JSON.stringify({ choices: [{ index: 0, message: { role: 'assistant', content: 'long prompt response' }, finish_reason: 'stop' }] }) };
+		},
+	});
+	const longPromptJsonResult = await longPromptJsonGrok.chat({ messages: [{ role: 'user', content: 'x'.repeat(12000) }] });
+	assert.strictEqual(longPromptJsonResult.success, true);
+	assert.strictEqual(longPromptJsonCalls[0].args[0], '--prompt-file');
+	assert.strictEqual(longPromptJsonCalls[0].args[1], longPromptJsonCalls[0].promptPath);
+	assert.strictEqual(longPromptJsonCalls[0].prompt.length, 12006);
 
 		const antigravityRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-model-relay-antigravity-test-'));
 		const antigravityPrompts = [];

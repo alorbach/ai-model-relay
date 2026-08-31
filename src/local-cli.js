@@ -6,6 +6,11 @@ const { spawn, spawnSync } = require('child_process');
 const { createBoundedCollector } = require('./diagnostics');
 
 const TIMEOUT_MS = 15000;
+const MAX_CLI_MODELS = 50;
+const MAX_CLI_MODEL_OUTPUT_CHARS = 256 * 1024;
+const MAX_CHAT_IMAGE_BYTES = 20 * 1024 * 1024;
+const MAX_CHAT_IMAGE_BASE64_CHARS = Math.ceil(MAX_CHAT_IMAGE_BYTES / 3) * 4 + 4;
+const CHAT_IMAGE_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/jpg', 'image/webp']);
 
 function cleanText(value) {
 	return String(value || '').replace(/\x1b\[[0-9;]*m/g, '').replace(/[\r\n]+/g, ' ').trim().slice(0, 500);
@@ -17,6 +22,111 @@ function safeDiagnostic(value) {
 	if (/access is denied|permission denied/i.test(text)) return 'Authentication state could not be read by this process.';
 	if (/timed out/i.test(text)) return 'CLI probe timed out.';
 	return text || 'CLI is unavailable.';
+}
+
+function normalizeModelId(value) {
+	let candidate = String(value == null ? '' : value).replace(/\x1b\[[0-9;]*m/g, '').trim();
+	candidate = candidate.replace(/^[`"']+|[`"']+$/g, '');
+	candidate = candidate.replace(/^(?:[-*•]|\d+[.)])\s+/, '');
+	if (candidate.includes('|')) candidate = candidate.split('|')[0].trim();
+	candidate = candidate.replace(/\s+(?:\([^)]*\)|\[[^\]]*\])\s*$/, '').trim();
+	candidate = candidate.replace(/\s+[-–—]\s+.*$/, '').trim();
+	if (!/^[A-Za-z0-9][A-Za-z0-9_.:/@+-]{0,127}$/.test(candidate)) return '';
+	if (/^(?:available|authenticated|authentication|default|id|logged|login|model|models|name|status|success|true|false|version)$/i.test(candidate)) return '';
+	return candidate;
+}
+
+function collectModelIds(value, add, depth = 0) {
+	if (value == null || depth > 4) return;
+	if (typeof value === 'string') {
+		const text = value.replace(/\x1b\[[0-9;]*m/g, '').slice(0, MAX_CLI_MODEL_OUTPUT_CHARS);
+		if (depth < 3) {
+			try {
+				const parsed = JSON.parse(text.trim());
+				collectModelIds(parsed, add, depth + 1);
+				return;
+			} catch (error) {}
+		}
+		for (const rawLine of text.split(/\r?\n/)) {
+			const line = rawLine.trim();
+			if (!line) continue;
+			const labeled = line.match(/^(?:available\s+)?models?\s*[:=]\s*(.+)$/i);
+			if (labeled) {
+				for (const token of labeled[1].split(/[\s,]+/)) add(token);
+				continue;
+			}
+			if (line.includes('|')) {
+				for (const cell of line.split('|')) add(cell);
+				continue;
+			}
+			if (line.includes(',')) {
+				for (const token of line.split(',')) add(token);
+				continue;
+			}
+			add(line);
+		}
+		return;
+	}
+	if (Array.isArray(value)) {
+		for (const item of value) collectModelIds(item, add, depth + 1);
+		return;
+	}
+	if (typeof value !== 'object') return;
+	for (const key of ['id', 'model', 'model_id', 'modelId', 'slug', 'name']) {
+		if (Object.prototype.hasOwnProperty.call(value, key)) add(value[key]);
+	}
+	for (const key of ['models', 'data', 'items', 'results', 'choices']) {
+		if (Object.prototype.hasOwnProperty.call(value, key)) collectModelIds(value[key], add, depth + 1);
+	}
+}
+
+function parseCliModelList(output, maxModels = MAX_CLI_MODELS) {
+	const limit = Math.max(1, Math.min(MAX_CLI_MODELS, Number(maxModels) || MAX_CLI_MODELS));
+	const models = ['auto'];
+	const seen = new Set(models);
+	const add = (value) => {
+		const model = normalizeModelId(value);
+		if (!model || seen.has(model) || models.length >= limit) return;
+		seen.add(model);
+		models.push(model);
+	};
+	collectModelIds(String(output || '').slice(0, MAX_CLI_MODEL_OUTPUT_CHARS), add);
+	return models;
+}
+
+function modelListArguments(definition) {
+	if (!Array.isArray(definition.modelListArgs)) return [];
+	if (!definition.modelListArgs.length) return [];
+	return Array.isArray(definition.modelListArgs[0])
+		? definition.modelListArgs.filter((args) => Array.isArray(args) && args.length).map((args) => args.map(String))
+		: [definition.modelListArgs.map(String)];
+}
+
+function modelsFromProbe(output, fallback) {
+	const parsed = parseCliModelList(output);
+	return parsed.length > 1 ? parsed : fallback;
+}
+
+function probeModelListSync(command, definition, options, fallback) {
+	for (const args of modelListArguments(definition)) {
+		const result = run(command, args, options);
+		if (!result.error && result.status === 0) {
+			const models = modelsFromProbe(`${result.stdout || ''}\n${result.stderr || ''}`, fallback);
+			if (models !== fallback || parseCliModelList(`${result.stdout || ''}\n${result.stderr || ''}`).length > 1) return models;
+		}
+	}
+	return fallback;
+}
+
+async function probeModelListAsync(command, definition, options, fallback) {
+	for (const args of modelListArguments(definition)) {
+		const result = await runAsync(command, args, options);
+		if (!result.error && result.status === 0) {
+			const models = modelsFromProbe(`${result.stdout || ''}\n${result.stderr || ''}`, fallback);
+			if (models !== fallback || parseCliModelList(`${result.stdout || ''}\n${result.stderr || ''}`).length > 1) return models;
+		}
+	}
+	return fallback;
 }
 
 function expandWindowsEnvironmentVariables(value, env = process.env) {
@@ -61,17 +171,34 @@ function commandAndArgs(command, args) {
 function run(command, args, options = {}) {
 	const spawnImpl = options.spawnSync || spawnSync;
 	const invocation = commandAndArgs(command, args);
-	return spawnImpl(invocation.command, invocation.args, { encoding: 'utf8', shell: false, windowsHide: true, timeout: Number(options.timeoutMs || TIMEOUT_MS) });
+	const maxBuffer = Math.max(1024, Math.min(MAX_CLI_MODEL_OUTPUT_CHARS, Number(options.maxBuffer || MAX_CLI_MODEL_OUTPUT_CHARS) || MAX_CLI_MODEL_OUTPUT_CHARS));
+	return spawnImpl(invocation.command, invocation.args, { encoding: 'utf8', shell: false, windowsHide: true, timeout: Number(options.timeoutMs || TIMEOUT_MS), maxBuffer });
 }
 
 function runAsync(command, args, options = {}) {
 	return new Promise((resolve) => {
-		let child; let stdout = ''; let stderr = ''; let timedOut = false;
-		try { const invocation = commandAndArgs(command, args); child = (options.spawn || spawn)(invocation.command, invocation.args, { shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }); } catch (error) { resolve({ error, status: null, stdout, stderr }); return; }
-		const timer = setTimeout(() => { timedOut = true; child.kill(); }, Number(options.timeoutMs || TIMEOUT_MS));
-		child.stdout.on('data', (chunk) => { stdout += String(chunk); }); child.stderr.on('data', (chunk) => { stderr += String(chunk); });
-		child.once('error', (error) => { clearTimeout(timer); resolve({ error, status: null, stdout, stderr }); });
-		child.once('close', (status) => { clearTimeout(timer); resolve({ error: timedOut ? new Error('CLI probe timed out.') : null, status, stdout, stderr }); });
+		const maxOutputChars = Math.max(1024, Math.min(MAX_CLI_MODEL_OUTPUT_CHARS, Number(options.maxOutputChars || MAX_CLI_MODEL_OUTPUT_CHARS) || MAX_CLI_MODEL_OUTPUT_CHARS));
+		const out = createBoundedCollector({ maxChars: maxOutputChars });
+		const err = createBoundedCollector({ maxChars: maxOutputChars });
+		let child; let timedOut = false; let oversized = false; let settled = false; let timer;
+		const finish = (result) => {
+			if (settled) return;
+			settled = true;
+			if (timer) clearTimeout(timer);
+			resolve({ ...result, stdout: out.value(), stderr: err.value() });
+		};
+		try { const invocation = commandAndArgs(command, args); child = (options.spawn || spawn)(invocation.command, invocation.args, { shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }); } catch (error) { finish({ error, status: null }); return; }
+		timer = setTimeout(() => { timedOut = true; child.kill(); }, Number(options.timeoutMs || TIMEOUT_MS));
+		const capture = (collector, chunk) => {
+			collector.append(chunk);
+			if (!oversized && collector.stats().total_chars > maxOutputChars) {
+				oversized = true;
+				child.kill();
+			}
+		};
+		child.stdout.on('data', (chunk) => capture(out, chunk)); child.stderr.on('data', (chunk) => capture(err, chunk));
+		child.once('error', (error) => finish({ error, status: null }));
+		child.once('close', (status) => finish({ error: timedOut ? new Error('CLI probe timed out.') : (oversized ? new Error('CLI probe output exceeded the maximum size.') : null), status }));
 	});
 }
 
@@ -84,7 +211,10 @@ function detectCli(definition, options = {}) {
 	const auth = definition.authArgs && !options.skipAuth ? run(command, definition.authArgs, options) : null;
 	const authText = auth ? `${auth.stdout || ''}\n${auth.stderr || ''}` : '';
 	const unauthenticated = auth && (/not logged in|not authenticated|no auth credentials|login required/i.test(authText) || auth.status !== 0);
-	return { ...base, version: cleanText(version.stdout || version.stderr), authenticated: auth ? !unauthenticated : null, ready: auth ? !unauthenticated : false, state: unauthenticated ? 'not_authenticated' : (auth ? 'ready' : 'installed'), diagnostic: unauthenticated ? safeDiagnostic(authText) : (auth ? 'Ready.' : 'Authentication not checked yet.'), models: definition.models || [] };
+	const fallbackModels = definition.models || ['auto'];
+	const authModels = auth && !unauthenticated ? modelsFromProbe(authText, fallbackModels) : fallbackModels;
+	const models = authModels.length > 1 ? authModels : (!unauthenticated ? probeModelListSync(command, definition, options, fallbackModels) : fallbackModels);
+	return { ...base, version: cleanText(version.stdout || version.stderr), authenticated: auth ? !unauthenticated : null, ready: auth ? !unauthenticated : false, state: unauthenticated ? 'not_authenticated' : (auth ? 'ready' : 'installed'), diagnostic: unauthenticated ? safeDiagnostic(authText) : (auth ? 'Ready.' : 'Authentication not checked yet.'), models };
 }
 
 async function detectCliAsync(definition, options = {}) {
@@ -96,7 +226,10 @@ async function detectCliAsync(definition, options = {}) {
 	const auth = definition.authArgs ? await runAsync(command, definition.authArgs, options) : null;
 	const authText = auth ? `${auth.stdout || ''}\n${auth.stderr || ''}` : '';
 	const unauthenticated = auth && (/not logged in|not authenticated|no auth credentials|login required/i.test(authText) || auth.status !== 0);
-	return { ...base, version: cleanText(version.stdout || version.stderr), authenticated: auth ? !unauthenticated : null, ready: !!auth && !unauthenticated, state: unauthenticated ? 'not_authenticated' : 'ready', diagnostic: unauthenticated ? safeDiagnostic(authText) : 'Ready.', models: definition.models || [] };
+	const fallbackModels = definition.models || ['auto'];
+	const authModels = auth && !unauthenticated ? modelsFromProbe(authText, fallbackModels) : fallbackModels;
+	const models = authModels.length > 1 ? authModels : (!unauthenticated ? await probeModelListAsync(command, definition, options, fallbackModels) : fallbackModels);
+	return { ...base, version: cleanText(version.stdout || version.stderr), authenticated: auth ? !unauthenticated : null, ready: !!auth && !unauthenticated, state: unauthenticated ? 'not_authenticated' : 'ready', diagnostic: unauthenticated ? safeDiagnostic(authText) : 'Ready.', models };
 }
 
 function runTextCommand(command, args, input, session = {}, options = {}) {
@@ -122,6 +255,111 @@ function writePromptFile(dir, text) {
 	return promptPath;
 }
 
-function messagesToText(payload = {}) { return payload.input || payload.prompt || (payload.messages || []).map((m) => `${m.role || 'user'}: ${Array.isArray(m.content) ? m.content.map((p) => p.text || p.content || '').join('\n') : m.content || ''}`).join('\n\n'); }
+function imageValueFromPart(part) {
+	if (!part || typeof part !== 'object') return '';
+	if (typeof part.image_url === 'string') return part.image_url;
+	if (part.image_url && typeof part.image_url === 'object' && typeof part.image_url.url === 'string') return part.image_url.url;
+	if (typeof part.url === 'string') return part.url;
+	for (const key of ['path', 'file_path', 'image_path']) if (typeof part[key] === 'string') return part[key];
+	return '';
+}
 
-module.exports = { detectCli, detectCliAsync, expandWindowsEnvironmentVariables, messagesToText, resolveCommand, runTextCommand, safeDiagnostic, writePromptFile };
+function isImagePart(part) {
+	return !!part && typeof part === 'object' && ['input_image', 'image_url', 'image'].includes(String(part.type || '').toLowerCase());
+}
+
+function imageMimeAndBytes(value) {
+	const match = String(value || '').match(/^data:(image\/(?:png|jpeg|jpg|webp));base64,([A-Za-z0-9+/=\s]+)$/i);
+	if (!match) return null;
+	if (match[2].length > MAX_CHAT_IMAGE_BASE64_CHARS) return null;
+	const encoded = match[2].replace(/\s+/g, '');
+	if (!encoded || encoded.length > MAX_CHAT_IMAGE_BASE64_CHARS || encoded.length % 4 === 1) return null;
+	const bytes = Buffer.from(encoded, 'base64');
+	if (!bytes.length || bytes.length > MAX_CHAT_IMAGE_BYTES) return null;
+	const mimeType = match[1].toLowerCase() === 'image/jpg' ? 'image/jpeg' : match[1].toLowerCase();
+	return { mime_type: mimeType, bytes };
+}
+
+function extensionForImageMime(mimeType) {
+	return { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/webp': 'webp' }[String(mimeType || '').toLowerCase()] || '';
+}
+
+function chatImageParts(payload = {}) {
+	const parts = [];
+	for (const message of Array.isArray(payload.messages) ? payload.messages : []) {
+		if (!Array.isArray(message && message.content)) continue;
+		for (const part of message.content) if (isImagePart(part)) parts.push(part);
+	}
+	return parts;
+}
+
+function materializeChatImages(payload = {}, workspace) {
+	const references = [];
+	for (const [index, part] of chatImageParts(payload).entries()) {
+		const imageValue = imageValueFromPart(part);
+		const dataImage = imageMimeAndBytes(imageValue);
+		let image = dataImage;
+		if (!image && imageValue && !/^https?:\/\//i.test(imageValue) && !/^data:/i.test(imageValue)) {
+			try {
+				const stat = fs.statSync(imageValue);
+				const extension = path.extname(imageValue).toLowerCase();
+				const extensionMimeType = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp' }[extension] || '';
+				const declaredMimeType = String(part.mime_type || part.mimeType || '').toLowerCase().replace('image/jpg', 'image/jpeg');
+				if (stat.isFile() && extensionMimeType && stat.size > 0 && stat.size <= MAX_CHAT_IMAGE_BYTES && (!declaredMimeType || declaredMimeType === extensionMimeType)) {
+					const bytes = fs.readFileSync(imageValue);
+					image = { mime_type: extensionMimeType, bytes };
+				}
+			} catch (error) {}
+		}
+		if (!image) {
+			if (/^https?:\/\//i.test(imageValue)) return { error: 'CLI chat image URLs are not downloaded; provide a PNG, JPEG, or WebP data URL or an existing local image path.' };
+			if (/^data:/i.test(imageValue)) return { error: 'CLI chat images must be non-empty PNG, JPEG, or WebP data URLs smaller than 20 MB.' };
+			return { error: 'A CLI chat image must be an existing PNG, JPEG, or WebP file.' };
+		}
+		const extension = extensionForImageMime(image.mime_type);
+		if (!extension) return { error: 'CLI chat images must be PNG, JPEG, or WebP files.' };
+		const imagePath = path.join(workspace, `chat-image-${index + 1}.${extension}`);
+		fs.writeFileSync(imagePath, image.bytes);
+		references.push({ path: imagePath, mime_type: image.mime_type, bytes: image.bytes.length });
+	}
+	return { references };
+}
+
+function messagesToText(payload = {}, options = {}) {
+	if (!Array.isArray(payload.messages) || !payload.messages.length) return payload.input || payload.prompt || '';
+	const imageReferences = Array.isArray(options.imageReferences) ? options.imageReferences : [];
+	let imageIndex = 0;
+	return (payload.messages || []).map((message) => `${message.role || 'user'}: ${Array.isArray(message.content) ? message.content.map((part) => {
+		if (isImagePart(part)) {
+			const reference = imageReferences[imageIndex++];
+			return reference && reference.path ? `Image attachment ${imageIndex}: @${reference.path}` : '[Image attachment omitted]';
+		}
+		return typeof part === 'string' ? part : part && (part.text || part.content) || '';
+	}).join('\n') : message.content || ''}`).join('\n\n');
+}
+
+function messagesToPromptJson(payload = {}, imageReferences = []) {
+	const blocks = [];
+	let imageIndex = 0;
+	for (const message of Array.isArray(payload.messages) ? payload.messages : []) {
+		const role = message && message.role ? String(message.role) : 'user';
+		if (!Array.isArray(message && message.content)) {
+			blocks.push({ type: 'text', text: `${role}: ${String(message && message.content || '')}` });
+			continue;
+		}
+		blocks.push({ type: 'text', text: `${role}:` });
+		for (const part of message.content) {
+			if (isImagePart(part)) {
+				const reference = imageReferences[imageIndex++];
+				if (reference && reference.path) blocks.push({ type: 'image', path: reference.path, mimeType: reference.mime_type });
+				continue;
+			}
+			const text = typeof part === 'string' ? part : part && (part.text || part.content) || '';
+			if (text) blocks.push({ type: 'text', text: String(text) });
+		}
+	}
+	if (!blocks.length) blocks.push({ type: 'text', text: String(payload.input || payload.prompt || '') });
+	return blocks;
+}
+
+module.exports = { detectCli, detectCliAsync, expandWindowsEnvironmentVariables, materializeChatImages, messagesToPromptJson, messagesToText, parseCliModelList, resolveCommand, runTextCommand, safeDiagnostic, writePromptFile };

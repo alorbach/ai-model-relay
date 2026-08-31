@@ -6,13 +6,14 @@ const path = require('path');
 const { randomUUID } = require('crypto');
 const { spawn } = require('child_process');
 const { createBoundedCollector } = require('./diagnostics');
-const { detectCli, detectCliAsync, messagesToText, runTextCommand, writePromptFile } = require('./local-cli');
+const { detectCli, detectCliAsync, materializeChatImages, messagesToPromptJson, messagesToText, runTextCommand, writePromptFile } = require('./local-cli');
 const { createLocalUpscaleDriver } = require('./local-upscale');
 const { resolveMaxTokens } = require('./token-policy');
 
 const RELAY_MODEL_PREFIX = 'model-relay';
 const GROK_MEDIA_TIMEOUT_MS = 450000;
 const MAX_AUDIO_BASE64_LENGTH = 67108864;
+const MAX_CLI_PROMPT_JSON_ARG_CHARS = 8192;
 
 function truthy(value) {
 	return /^(1|true|yes|on)$/i.test(String(value || ''));
@@ -238,6 +239,8 @@ function openAiCompatText(response) {
 	if (choice && choice.message && typeof choice.message.content === 'string') {
 		return choice.message.content;
 	}
+	if (response && typeof response.text === 'string') return response.text;
+	if (response && typeof response.result === 'string') return response.result;
 	if (response && Array.isArray(response.output)) {
 		return response.output.map((item) => Array.isArray(item.content)
 			? item.content.map((part) => part && (part.text || part.output_text || '')).join('')
@@ -544,6 +547,7 @@ function cliModelFromRelay(model, provider) {
 function createNamedCliDriver(definition, options = {}) {
 	let cached = { id: definition.id, label: definition.label, kind: 'local-cli', installed: null, ready: false, state: 'checking', diagnostic: 'Checking in background.', models: definition.models || ['auto'], job_types: definition.jobTypes || ['chat'] };
 	const detector = options.detectCliAsync || detectCliAsync;
+	const commandRunner = options.runTextCommand || runTextCommand;
 	function detect() { return cached; }
 	return {
 		id: definition.id,
@@ -564,12 +568,15 @@ function createNamedCliDriver(definition, options = {}) {
 			const state = await this.refresh();
 			if (!state.ready) return { success: false, category: 'configuration', code: `${definition.id}_unavailable`, message: `${definition.label} is unavailable: ${state.diagnostic}` };
 			const model = cliModelFromRelay(payload.model, definition.id);
-			const prompt = messagesToText(payload);
 			const workspace = fs.mkdtempSync(path.join(os.tmpdir(), `ai-model-relay-${definition.id}-`));
 			try {
+				const materialized = materializeChatImages(payload, workspace);
+				if (materialized.error) return { success: false, category: 'validation', code: 'cli_chat_image_invalid', message: materialized.error };
+				const prompt = messagesToText(payload, { imageReferences: materialized.references });
 				const promptPath = writePromptFile(workspace, prompt);
-				const args = definition.requestArgs(model, promptPath, workspace);
-				const result = await runTextCommand(state.command, args, '', session, { ...options, cwd: workspace });
+				const request = { prompt, promptPath, workspace, imageReferences: materialized.references, promptJsonSupported: state.prompt_json_supported === true, promptJson: state.prompt_json_supported === true ? messagesToPromptJson(payload, materialized.references) : null };
+				const args = definition.requestArgs(model, promptPath, workspace, request);
+				const result = await commandRunner(state.command, args, '', session, { ...options, cwd: workspace });
 				if (!result.success) return result;
 				let parsed = null; try { parsed = JSON.parse(result.text); } catch (error) {}
 				return normalizeChatResponse(definition.id, model, parsed, result.text);
@@ -579,15 +586,31 @@ function createNamedCliDriver(definition, options = {}) {
 }
 
 function createGrokCliDriver(options = {}) {
-	const definition = { id: 'grok-cli', label: 'Grok CLI', candidates: [options.command, process.env.AI_MODEL_RELAY_GROK_BINARY, 'grok'], versionArgs: ['--version'], authArgs: ['models'], jobTypes: ['chat'], models: ['auto'], requestArgs: (model, promptPath, workspace) => ['--prompt-file', promptPath, '--output-format', 'json', '--cwd', workspace, '--disallowed-tools', 'run_terminal_cmd', '--permission-mode', 'dontAsk', '--no-subagents', '--disable-web-search', ...(model !== 'auto' ? ['--model', model] : [])] };
+	const definition = { id: 'grok-cli', label: 'Grok CLI', candidates: [options.command, process.env.AI_MODEL_RELAY_GROK_BINARY, 'grok'], versionArgs: ['--version'], authArgs: ['models'], jobTypes: ['chat'], models: ['auto'], requestArgs: (model, promptPath, workspace, request = {}) => {
+		const promptJson = request.promptJsonSupported && request.promptJson ? JSON.stringify(request.promptJson) : '';
+		const usePromptJson = !!promptJson && promptJson.length <= MAX_CLI_PROMPT_JSON_ARG_CHARS;
+		return [usePromptJson ? '--prompt-json' : '--prompt-file', usePromptJson ? promptJson : promptPath, '--output-format', 'json', '--cwd', workspace, '--disallowed-tools', 'run_terminal_cmd', '--permission-mode', 'dontAsk', '--no-subagents', '--disable-web-search', ...(model !== 'auto' ? ['--model', model] : [])];
+	} };
 	const configuredMediaTimeout = Number(options.mediaTimeoutMs || process.env.AI_MODEL_RELAY_GROK_MEDIA_TIMEOUT_MS || GROK_MEDIA_TIMEOUT_MS);
 	const mediaTimeoutMs = Number.isFinite(configuredMediaTimeout) && configuredMediaTimeout > 0 ? configuredMediaTimeout : GROK_MEDIA_TIMEOUT_MS;
 	const driver = createNamedCliDriver(definition, options);
 	const baseCapabilities = driver.capabilities;
 	const baseModels = driver.models;
 	const baseRefresh = driver.refresh;
+	const promptCommandRunner = options.runTextCommand || runTextCommand;
+	let promptJsonChecked = false;
+	let promptJsonSupported = false;
 	let imagine = { checked: false, path: '', images: false, videos: false, video_verified: false, diagnostic: 'Imagine tooling has not been checked yet.' };
 	let unavailableTools = { images: false, videos: false };
+
+	async function probePromptJson(state) {
+		if (promptJsonChecked || !state || !state.ready || !state.command) return;
+		promptJsonChecked = true;
+		if (!options.runTextCommand && options.spawn) return;
+		const help = await promptCommandRunner(state.command, ['--help'], '', {}, { ...options, timeoutMs: 15000 });
+		const helpText = `${help && help.text || ''}\n${help && help.stderr || ''}`;
+		promptJsonSupported = !!help && help.success === true && /(?:^|[\s,])--prompt-json(?:[\s=]|$)/i.test(helpText);
+	}
 
 	function probeImagine() {
 		const candidates = [
@@ -754,10 +777,11 @@ function createGrokCliDriver(options = {}) {
 	};
 	driver.refresh = async (refreshOptions = {}) => {
 		const state = await baseRefresh();
+		await probePromptJson(state);
 		if (refreshOptions.resetMedia) unavailableTools = { images: false, videos: false };
 		const detected = probeImagine();
 		imagine = { ...detected, images: detected.images && !unavailableTools.images, videos: detected.videos && !unavailableTools.videos, video_verified: refreshOptions.resetMedia ? false : (imagine.video_verified && detected.videos) };
-		return { ...state, imagine };
+		return { ...state, prompt_json_supported: promptJsonSupported, imagine };
 	};
 	async function media(kind, payload = {}, session = {}) {
 		const state = await driver.refresh();
@@ -1065,7 +1089,9 @@ function createAntigravityCliDriver(mediaAnalysis, options = {}) {
 			if (!state.ready) return { success: false, category: 'configuration', code: state.state === 'not_authenticated' ? 'antigravity_cli_not_authenticated' : 'antigravity_cli_unavailable', message: `Antigravity CLI is unavailable: ${state.diagnostic}` };
 			const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-model-relay-antigravity-'));
 			try {
-				const prompt = String(messagesToText(payload) || '');
+				const materialized = materializeChatImages(payload, workspace);
+				if (materialized.error) return { success: false, category: 'validation', code: 'cli_chat_image_invalid', message: materialized.error };
+				const prompt = String(messagesToText(payload, { imageReferences: materialized.references }) || '');
 				const promptPath = writePromptFile(workspace, prompt);
 				const result = await runPrompt(workspace, `Read the user's full request from @${promptPath} and respond to it.`, chatTimeoutMs, session, 'chat');
 				if (!result.success) return result;
@@ -1158,7 +1184,7 @@ function createAntigravityCliDriver(mediaAnalysis, options = {}) {
 }
 
 function createCursorCliDriver(options = {}) {
-	return createNamedCliDriver({ id: 'cursor-cli', label: 'Cursor Agent', candidates: [options.command, process.env.AI_MODEL_RELAY_CURSOR_BINARY, 'cursor-agent'], versionArgs: ['--version'], authArgs: ['status'], jobTypes: ['chat'], models: ['auto'], requestArgs: (model, promptPath, workspace) => ['--print', '--output-format', 'json', '--mode=ask', '--trust', ...(model !== 'auto' ? ['--model', model] : []), 'Respond to the user request in prompt.txt.', '--workspace', workspace] }, options);
+	return createNamedCliDriver({ id: 'cursor-cli', label: 'Cursor Agent', candidates: [options.command, process.env.AI_MODEL_RELAY_CURSOR_BINARY, 'cursor-agent'], versionArgs: ['--version'], authArgs: ['status'], modelListArgs: [['models'], ['--list-models']], jobTypes: ['chat'], models: ['auto'], requestArgs: (model, promptPath, workspace) => ['--print', '--output-format', 'json', '--mode=ask', '--trust', ...(model !== 'auto' ? ['--model', model] : []), 'Respond to the user request in prompt.txt.', '--workspace', workspace] }, options);
 }
 
 function createLocalAsrDriver(codex) {
