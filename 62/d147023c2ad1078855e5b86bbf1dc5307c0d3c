@@ -1,0 +1,25 @@
+src/token-policy.js
+  s_66a384a8a418ee::t_6d9986082d852b 1-10,19-31
+  s_66a384a8a418ee::t_f09133257579b9 11-18
+test/token-policy.test.js
+  s_66a384a8a418ee::t_6d9986082d852b 1-13,16-18,20-23
+  s_66a384a8a418ee::t_f09133257579b9 14-15,19
+package.json
+  s_66a384a8a418ee::t_6d9986082d852b 12
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "62d147023c2ad1078855e5b86bbf1dc5307c0d3c",
+  "prompts": {},
+  "sessions": {
+    "s_66a384a8a418ee": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0583f-8e85-7db1-886d-02293ade9cd8",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
