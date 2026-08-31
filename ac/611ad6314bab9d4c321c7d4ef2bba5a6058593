@@ -1,0 +1,62 @@
+src/asr.js
+  s_b0eabc644f1cfe::t_b818906aaac3a1 878-944
+  s_b0eabc644f1cfe::t_6a2ef4b29b4196 1377,1382-1384
+  s_b0eabc644f1cfe::t_ea2699e1258e71 341-345,348-350,353,359,362
+  s_b0eabc644f1cfe::t_6441970c946363 1201,1206,1220-1223
+  s_b0eabc644f1cfe::t_e529990633b8d0 8-16
+  s_b0eabc644f1cfe::t_02a1b73fabb6ce 1512,1517-1519
+  s_b0eabc644f1cfe::t_6896744a3266b6 1712-1714,1746,1750-1761,1763,1765-1773
+  s_b0eabc644f1cfe::t_cb37b99d048111 1478-1480
+  s_b0eabc644f1cfe::t_3d22a2235da6df 1610-1612
+  s_b0eabc644f1cfe::t_6cd296760c89ec 31-32
+  s_b0eabc644f1cfe::t_115fe4cc5b3826 975
+  s_b0eabc644f1cfe::t_13b673b3dd499f 25
+  s_b0eabc644f1cfe::t_0e782a673435f1 1014-1015,1017,1020-1022,1029,1034-1038,1040-1053,1056-1059,1063,1065-1101,1105,1109-1110,1114-1115,1118-1119,1121,1124-1126,1133,1138-1141,1143-1145,1150-1151,1153,1158,1162
+  s_b0eabc644f1cfe::t_21ed9c69cf59f8 1326-1328
+README.md
+  s_b0eabc644f1cfe::t_f7adf180eca5de 71
+  s_283fd6cff5aacb::t_0fbccfddaa8bb3 265
+docs/operations.md
+  s_b0eabc644f1cfe::t_025c51813b8924 252,256
+  s_b0eabc644f1cfe::t_40ce679be0e4ce 170-171,173
+  s_b0eabc644f1cfe::t_0f4331c191abb9 248,264,266,268,272
+src/cuda-torch-venv.js
+  s_b0eabc644f1cfe::t_84c9c8c3307f13 1-97
+test/asr.test.js
+  s_b0eabc644f1cfe::t_43a3340effd3c8 273-279,283
+  s_b0eabc644f1cfe::t_06ce7c6b71b6e3 260-272,280-282,284-341
+  s_b0eabc644f1cfe::t_8fbe6478357d1b 229
+  s_b0eabc644f1cfe::t_860d323267e81c 230-232
+src/local-upscale.js
+  s_b0eabc644f1cfe::t_61b25e873f0b8c 412
+  s_b0eabc644f1cfe::t_3fbebe3e123c02 17-24
+  s_b0eabc644f1cfe::t_05ae109c6a9a2a 311-314
+  s_b0eabc644f1cfe::t_9ca236e07edf89 388,393,395,398-399
+  s_b0eabc644f1cfe::t_785c39ec3c4ca4 302-310,315,317
+test/local-upscale.test.js
+  s_283fd6cff5aacb::t_8aa00144b2c282 84,87
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "ac611ad6314bab9d4c321c7d4ef2bba5a6058593",
+  "prompts": {},
+  "sessions": {
+    "s_283fd6cff5aacb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fe0c8-2012-7ae3-a5b8-7804867046e5",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_b0eabc644f1cfe": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "d035b00f-42db-4de7-aaf0-2111176e6f55",
+        "model": "composer-2.5"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
