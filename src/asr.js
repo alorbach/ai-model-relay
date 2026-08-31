@@ -5,6 +5,15 @@ const os = require('os');
 const path = require('path');
 const { spawn, spawnSync } = require('child_process');
 const { appendLog, createBoundedCollector, safeError } = require('./diagnostics');
+const {
+	constraintPath,
+	DEFAULT_TORCH_INDEX,
+	evaluateCudaTorch,
+	killProcessTree,
+	parseTorchProbe,
+	torchConstraintText,
+	TORCH_PROBE,
+} = require('./cuda-torch-venv');
 const security = require('./security');
 const { beginLocalModelDebugLog } = require('./temp-debug-logs');
 
@@ -13,12 +22,14 @@ const LEGACY_AUDIO_MODEL_PREFIX = 'codex-local:audio';
 const RUNNER_PATH = runnerPath('asr-runner.py');
 const QWEN_RUNNER_PATH = runnerPath('asr-qwen-runner.py');
 const DEFAULT_TIMEOUT_MS = Number(process.env.ALORBACH_ASR_TRANSCRIBE_TIMEOUT_MS || 1800000);
+const SETUP_TIMEOUT_MS = Number(process.env.ALORBACH_ASR_SETUP_TIMEOUT_MS || 1800000);
 const DEFAULT_PROBE_TTL_MS = Number(process.env.ALORBACH_ASR_PROBE_TTL_MS || 30000);
 const DEFAULT_PYTHON310 = path.join(os.homedir(), 'AppData', 'Local', 'Programs', 'Python', 'Python310', 'python.exe');
 const DEFAULT_PYTHON312 = path.join(os.homedir(), 'AppData', 'Local', 'Programs', 'Python', 'Python312', 'python.exe');
 const DEFAULT_VENV_PATH = path.join(security.stateDir, 'asr-venv');
 const DEFAULT_QWEN_VENV_PATH = path.join(security.stateDir, 'qwen-asr-venv');
-const DEFAULT_QWEN_TORCH_INDEX_URL = process.env.ALORBACH_QWEN_TORCH_INDEX_URL || 'https://download.pytorch.org/whl/cu128';
+const DEFAULT_QWEN_TORCH_INDEX_URL = process.env.ALORBACH_QWEN_TORCH_INDEX_URL || DEFAULT_TORCH_INDEX;
+const JOB_RUNTIME_MESSAGE = 'Open Local ASR Settings and use Install model on the status page. Transcription jobs do not pip-install packages or download models unless Allow ASR model downloads is enabled.';
 const MAX_AUDIO_BASE64_LENGTH = 67108864;
 let probeCache = null;
 
@@ -327,43 +338,28 @@ function torchCudaInfo(pythonPath) {
 	if (!pythonPath || !fs.existsSync(pythonPath)) {
 		return { available: false, reason: 'venv_missing', version: '', cuda_version: '', device_count: 0 };
 	}
-	const script = [
-		'import json',
-		'try:',
-		' import torch',
-		' print(json.dumps({',
-		'  "version": getattr(torch, "__version__", ""),',
-		'  "cuda_version": getattr(getattr(torch, "version", None), "cuda", None),',
-		'  "cuda_available": bool(torch.cuda.is_available()),',
-		'  "device_count": int(torch.cuda.device_count()),',
-		' }))',
-		'except Exception as exc:',
-		' print(json.dumps({"error": str(exc)}))',
-		' raise SystemExit(1)',
-	].join('\n');
-	const result = runSync(pythonPath, ['-c', script]);
-	let parsed = {};
-	try {
-		parsed = JSON.parse(String(result.stdout || '{}'));
-	} catch (error) {}
-	const cudaVersion = parsed.cuda_version ? String(parsed.cuda_version) : '';
-	const deviceCount = Number(parsed.device_count || 0) || 0;
-	const cudaAvailable = parsed.cuda_available === true;
+	const result = runSync(pythonPath, ['-c', TORCH_PROBE]);
+	const parsed = parseTorchProbe(result);
+	const probe = parsed.probe || {};
+	const cudaVersion = probe.cuda_version ? String(probe.cuda_version) : '';
+	const deviceCount = Number(probe.device_count || 0) || 0;
 	let reason = '';
 	if (result.error || result.status !== 0) {
-		reason = parsed.error || result.error && result.error.message || 'torch probe failed';
+		reason = probe.error || result.error && result.error.message || 'torch probe failed';
+	} else if (parsed.cpuWheel) {
+		reason = 'torch CPU wheel installed; use Install model to reinstall CUDA PyTorch';
 	} else if (!cudaVersion) {
 		reason = 'torch is not compiled with CUDA enabled';
-	} else if (!cudaAvailable || deviceCount < 1) {
+	} else if (!probe.available || deviceCount < 1) {
 		reason = 'torch CUDA is not available';
 	}
 	return {
 		available: !reason,
 		reason,
-		version: parsed.version ? String(parsed.version) : '',
+		version: probe.version ? String(probe.version) : '',
 		cuda_version: cudaVersion,
 		device_count: deviceCount,
-		error: parsed.error || result.error && result.error.message || '',
+		error: probe.error || result.error && result.error.message || '',
 	};
 }
 
@@ -531,6 +527,10 @@ function probeCacheKey(config) {
 
 function invalidateProbeCache() {
 	probeCache = null;
+}
+
+function refreshProbeCache(config = settings()) {
+	return cachedProbe(config, { refresh: true });
 }
 
 function lightRuntime(config = settings()) {
@@ -879,6 +879,73 @@ function resolveModelPath(model, repoId, allowDownload) {
 	return allowDownload ? (repoId || model.id) : '';
 }
 
+function commandDetails(result, extra = {}) {
+	const stdout = String(result && result.stdout || '').trim();
+	const stderr = String(result && result.stderr || '').trim();
+	const error = result && result.error ? (result.error.message || String(result.error)) : '';
+	const python = extra.python || '';
+	return {
+		...extra,
+		python,
+		python_exists: python ? fs.existsSync(python) : extra.python_exists,
+		status: result && result.status != null ? result.status : null,
+		error,
+		stdout: stdout.slice(-8000),
+		stderr: stderr.slice(-8000),
+		log: [stderr, stdout, error].filter(Boolean).join('\n').slice(-12000),
+	};
+}
+
+function setupFailure(code, message, result, extra = {}) {
+	const details = commandDetails(result, extra);
+	appendLog('asr-setup', message, { code, ...details });
+	return { success: false, category: 'configuration', code, message, details };
+}
+
+function cleanupTempDir(tempDir) {
+	if (!tempDir) return;
+	try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch (error) {}
+}
+
+function verifySnapshotPath(snapshotPath, requiredFiles = []) {
+	if (!snapshotPath || !fs.existsSync(snapshotPath)) {
+		return { valid: false, path: snapshotPath || '', missing_files: requiredFiles };
+	}
+	if (!requiredFiles.length) {
+		return { valid: true, path: snapshotPath, missing_files: [] };
+	}
+	const missing = requiredFiles.filter((file) => !fs.existsSync(path.join(snapshotPath, file)));
+	return { valid: missing.length === 0, path: snapshotPath, missing_files: missing };
+}
+
+function persistModelSnapshotPaths(config, modelId, downloaded) {
+	const models = (config.models || []).map((entry) => {
+		if (entry.id !== modelId) return entry;
+		const next = { ...entry };
+		for (const item of downloaded) {
+			if (item.repo_id === entry.repo_id) next.local_path = item.path;
+			if (item.repo_id === entry.aligner_repo_id) next.aligner_local_path = item.path;
+		}
+		return next;
+	});
+	return saveSettings({ ...config, models });
+}
+
+async function qwenEvaluateCudaTorch(run, venvPython, emit, pythonVersion) {
+	const evaluated = await evaluateCudaTorch(run, venvPython, emit, {
+		indexUrl: DEFAULT_QWEN_TORCH_INDEX_URL,
+		pythonVersion,
+		cpuTorchCode: 'qwen_asr_cpu_torch',
+		cpuTorchMessage: `pip installed a CPU PyTorch wheel instead of a CUDA build from ${DEFAULT_QWEN_TORCH_INDEX_URL}. Local Qwen ASR does not fall back to CPU.`,
+		cudaUnavailableCode: 'qwen_asr_torch_cuda_unavailable',
+		cudaUnavailableMessage: 'CUDA PyTorch is installed but torch.cuda is not usable for Local Qwen ASR.',
+	});
+	if (!evaluated.success) {
+		return setupFailure(evaluated.code, evaluated.message, evaluated.result, evaluated.extras);
+	}
+	return { success: true, torch: evaluated.torch };
+}
+
 function runAsync(command, args, options = {}) {
 	const onOutput = typeof options.onOutput === 'function' ? options.onOutput : () => {};
 	return new Promise((resolve) => {
@@ -909,7 +976,7 @@ function runAsync(command, args, options = {}) {
 		}
 		const timer = options.timeout ? setTimeout(() => {
 			timedOut = true;
-			child.kill();
+			killProcessTree(child);
 		}, options.timeout) : null;
 		if (timer && typeof timer.unref === 'function') {
 			timer.unref();
@@ -948,122 +1015,158 @@ function runAsync(command, args, options = {}) {
 	});
 }
 
-async function ensureRuntime(config = settings(), session = {}) {
+async function ensureRuntime(config = settings(), session = {}, options = {}) {
+	const installPackages = options.installPackages === true;
 	const emit = typeof session.appendSessionOutput === 'function' ? session.appendSessionOutput : () => {};
+	const run = options.runAsync || runAsync;
 	const venvPython = venvPythonPath(config);
 	if (!fs.existsSync(venvPython)) {
+		if (!installPackages) {
+			return { success: false, category: 'configuration', code: 'asr_venv_missing', message: JOB_RUNTIME_MESSAGE, details: { probe: probe(config), venv_path: config.venv_path } };
+		}
 		const python = discoverPython(config);
 		if (!python.available) {
 			return { success: false, category: 'configuration', code: 'asr_python_missing', message: 'Python 3.10+ was not found for Local Whisper setup.', details: { probe: probe(config) } };
 		}
-		if (!config.allow_package_install) {
-			return { success: false, category: 'configuration', code: 'asr_venv_missing', message: 'Local Whisper Python environment is missing and package installation is disabled.', details: { probe: probe(config) } };
-		}
 		emit('stdout', `Creating Local Whisper Python environment at ${config.venv_path}\n`);
 		fs.mkdirSync(path.dirname(config.venv_path), { recursive: true });
-		const created = await runAsync(python.command, [...python.argsPrefix, '-m', 'venv', config.venv_path], { timeout: 600000, onOutput: emit });
+		const created = await run(python.command, [...python.argsPrefix, '-m', 'venv', config.venv_path], { timeout: SETUP_TIMEOUT_MS, onOutput: emit });
 		if (created.error || created.status !== 0) {
 			return { success: false, category: 'configuration', code: 'asr_venv_failed', message: 'Local Whisper Python environment could not be created.', details: created };
 		}
 	}
-	if (!hasPythonModule(venvPython, 'faster_whisper')) {
-		if (!config.allow_package_install) {
-			return { success: false, category: 'configuration', code: 'asr_runtime_missing', message: 'faster-whisper is not installed and package installation is disabled.', details: { probe: probe(config) } };
+	const needsFasterWhisper = !hasPythonModule(venvPython, 'faster_whisper');
+	const needsHfHub = !hasPythonModule(venvPython, 'huggingface_hub');
+	if (needsFasterWhisper || needsHfHub) {
+		if (!installPackages) {
+			return { success: false, category: 'configuration', code: needsFasterWhisper ? 'asr_runtime_missing' : 'asr_hf_hub_missing', message: JOB_RUNTIME_MESSAGE, details: { probe: probe(config), venv_path: config.venv_path } };
 		}
-		emit('stdout', 'Installing faster-whisper in the Local Whisper Python environment.\n');
-		const installed = await runAsync(venvPython, ['-m', 'pip', 'install', '--progress-bar', 'off', 'faster-whisper'], { timeout: 1800000, onOutput: emit });
-		if (installed.error || installed.status !== 0) {
-			return { success: false, category: 'configuration', code: 'asr_runtime_install_failed', message: 'faster-whisper could not be installed.', details: installed };
+		await run(venvPython, ['-m', 'pip', 'install', '--disable-pip-version-check', '--upgrade', 'pip'], { timeout: SETUP_TIMEOUT_MS, onOutput: emit });
+		if (needsFasterWhisper) {
+			emit('stdout', 'Installing faster-whisper in the Local Whisper Python environment.\n');
+			const installed = await run(venvPython, ['-m', 'pip', 'install', '--disable-pip-version-check', '--progress-bar', 'off', 'faster-whisper'], { timeout: SETUP_TIMEOUT_MS, onOutput: emit });
+			if (installed.error || installed.status !== 0) {
+				return { success: false, category: 'configuration', code: 'asr_runtime_install_failed', message: 'faster-whisper could not be installed.', details: installed };
+			}
 		}
+		if (needsHfHub) {
+			emit('stdout', 'Installing huggingface_hub in the Local Whisper Python environment.\n');
+			const installed = await run(venvPython, ['-m', 'pip', 'install', '--disable-pip-version-check', '--progress-bar', 'off', 'huggingface_hub'], { timeout: SETUP_TIMEOUT_MS, onOutput: emit });
+			if (installed.error || installed.status !== 0) {
+				return { success: false, category: 'configuration', code: 'asr_hf_hub_install_failed', message: 'huggingface_hub could not be installed for Local Whisper.', details: installed };
+			}
+		}
+	}
+	const cudaRuntime = await ensureCudaRuntime(config, venvPython, session, { installPackages, runAsync: run });
+	if (installPackages && cudaRuntime.details && (cudaRuntime.details.error || cudaRuntime.details.status !== 0)) {
+		return { success: false, category: 'configuration', code: 'asr_cuda_runtime_install_failed', message: cudaRuntime.message || 'Local Whisper CUDA runtime packages could not be installed.', details: cudaRuntime };
+	}
+	if (installPackages && !cudaRuntime.cuda_runtime?.available) {
+		emit('stderr', `${cudaRuntime.message || 'CUDA runtime unavailable on this host; Whisper will use CPU/int8 when transcribing.'}\n`);
 	}
 	return { success: true, python: venvPython };
 }
 
-async function ensureQwenTorchCuda(config = settings(), pythonPath, session = {}) {
+async function installQwenCudaTorchStack(config, venvPython, session, run) {
 	const emit = typeof session.appendSessionOutput === 'function' ? session.appendSessionOutput : () => {};
-	let info = torchCudaInfo(pythonPath);
+	await run(venvPython, ['-m', 'pip', 'install', '--disable-pip-version-check', '--upgrade', 'pip'], { timeout: SETUP_TIMEOUT_MS, onOutput: emit });
+	const versionResult = await run(venvPython, ['-V'], { timeout: 15000, onOutput: emit });
+	const pythonVersion = String(versionResult.stdout || versionResult.stderr || '').trim();
+	emit('stdout', 'Removing any existing CPU PyTorch wheels so pip cannot keep 2.x+cpu.\n');
+	await run(venvPython, ['-m', 'pip', 'uninstall', '-y', 'torch', 'torchvision', 'torchaudio'], { timeout: 120000, onOutput: emit });
+	emit('stdout', `Installing CUDA PyTorch for Local Qwen ASR (${pythonVersion || venvPython}) from ${DEFAULT_QWEN_TORCH_INDEX_URL} only.\n`);
+	const torch = await run(venvPython, ['-m', 'pip', 'install', '--disable-pip-version-check', '--progress-bar', 'off', '--force-reinstall', '--no-cache-dir', 'torch', 'torchvision', '--index-url', DEFAULT_QWEN_TORCH_INDEX_URL], { timeout: SETUP_TIMEOUT_MS, onOutput: emit });
+	if (torch.error || torch.status !== 0) {
+		return setupFailure('qwen_asr_torch_cuda_install_failed', 'CUDA PyTorch could not be installed for Local Qwen ASR.', torch, { python: venvPython, python_version: pythonVersion, index_url: DEFAULT_QWEN_TORCH_INDEX_URL });
+	}
+	const firstProbe = await qwenEvaluateCudaTorch(run, venvPython, emit, pythonVersion);
+	if (!firstProbe.success) return firstProbe;
+	const freeze = await run(venvPython, ['-m', 'pip', 'freeze'], { timeout: 30000, onOutput: emit });
+	const constraintText = torchConstraintText(freeze && freeze.stdout, firstProbe.torch && firstProbe.torch.version);
+	if (!/^torch==/im.test(constraintText)) {
+		return setupFailure('qwen_asr_torch_constraint_failed', 'CUDA PyTorch was installed but could not be pinned before qwen-asr install.', freeze, { python: venvPython, python_version: pythonVersion, torch: firstProbe.torch });
+	}
+	const torchConstraintFile = constraintPath(config.qwen_venv_path);
+	fs.mkdirSync(config.qwen_venv_path, { recursive: true });
+	fs.writeFileSync(torchConstraintFile, constraintText);
+	const needsQwen = !hasPythonModule(venvPython, 'qwen_asr');
+	const needsHfHub = !hasPythonModule(venvPython, 'huggingface_hub');
+	if (needsQwen || needsHfHub) {
+		emit('stdout', `Installing qwen-asr packages with CUDA PyTorch pinned at ${String(firstProbe.torch && firstProbe.torch.version || 'installed')}.\n`);
+		const packages = ['qwen-asr', 'huggingface_hub'];
+		const installed = await run(venvPython, ['-m', 'pip', 'install', '--disable-pip-version-check', '--progress-bar', 'off', '--constraint', torchConstraintFile, ...packages], { timeout: SETUP_TIMEOUT_MS, onOutput: emit });
+		if (installed.error || installed.status !== 0) {
+			return setupFailure('qwen_asr_runtime_install_failed', 'qwen-asr could not be installed.', installed, { python: venvPython, python_version: pythonVersion, constraint: torchConstraintFile });
+		}
+	}
+	const afterPackages = await qwenEvaluateCudaTorch(run, venvPython, emit, pythonVersion);
+	if (!afterPackages.success) return afterPackages;
+	return { success: true, python: venvPython, torch_cuda: torchCudaInfo(venvPython) };
+}
+
+async function ensureQwenTorchCuda(config = settings(), pythonPath, session = {}, options = {}) {
+	const info = torchCudaInfo(pythonPath);
 	if (info.available) {
 		return { success: true, installed: false, torch_cuda: info };
 	}
-	if (!config.allow_package_install) {
+	if (!options.installPackages) {
 		return {
 			success: false,
 			category: 'configuration',
-			code: 'qwen_asr_torch_cuda_missing',
-			message: `Local Qwen ASR requires a CUDA-enabled PyTorch build, but the current torch install is not usable: ${info.reason || 'torch CUDA unavailable'}.`,
+			code: info.version && info.version.toLowerCase().includes('+cpu') ? 'qwen_asr_cpu_torch' : 'qwen_asr_torch_cuda_missing',
+			message: `Local Qwen ASR requires a CUDA-enabled PyTorch build, but the current torch install is not usable: ${info.reason || 'torch CUDA unavailable'}. ${JOB_RUNTIME_MESSAGE}`,
 			details: { torch_cuda: info },
 		};
 	}
-	emit('stdout', `Installing CUDA-enabled PyTorch for Local Qwen ASR from ${DEFAULT_QWEN_TORCH_INDEX_URL} (${info.reason || 'torch CUDA unavailable'}).\n`);
-	const installed = await runAsync(pythonPath, ['-m', 'pip', 'install', '--progress-bar', 'off', '--force-reinstall', '--no-deps', '--index-url', DEFAULT_QWEN_TORCH_INDEX_URL, 'torch'], { timeout: 1800000, onOutput: emit });
-	if (installed.error || installed.status !== 0) {
-		return {
-			success: false,
-			category: 'configuration',
-			code: 'qwen_asr_torch_cuda_install_failed',
-			message: 'CUDA-enabled PyTorch could not be installed for Local Qwen ASR.',
-			details: installed,
-		};
-	}
-	info = torchCudaInfo(pythonPath);
-	if (!info.available) {
-		return {
-			success: false,
-			category: 'configuration',
-			code: 'qwen_asr_torch_cuda_unavailable',
-			message: `CUDA-enabled PyTorch is installed but still not usable for Local Qwen ASR: ${info.reason || 'torch CUDA unavailable'}.`,
-			details: { torch_cuda: info },
-		};
-	}
-	return { success: true, installed: true, torch_cuda: info };
+	const run = options.runAsync || runAsync;
+	return installQwenCudaTorchStack(config, pythonPath, session, run);
 }
 
-async function ensureQwenRuntime(config = settings(), session = {}) {
+async function ensureQwenRuntime(config = settings(), session = {}, options = {}) {
+	const installPackages = options.installPackages === true;
 	const emit = typeof session.appendSessionOutput === 'function' ? session.appendSessionOutput : () => {};
+	const run = options.runAsync || runAsync;
 	const venvPython = qwenVenvPythonPath(config);
 	if (!fs.existsSync(venvPython)) {
+		if (!installPackages) {
+			return { success: false, category: 'configuration', code: 'qwen_asr_venv_missing', message: JOB_RUNTIME_MESSAGE, details: { probe: probe(config), venv_path: config.qwen_venv_path } };
+		}
 		const python = discoverQwenPython(config);
 		if (!python.available) {
 			return { success: false, category: 'configuration', code: 'qwen_asr_python_missing', message: 'Python 3.12+ was not found for Local Qwen ASR setup.', details: { probe: probe(config) } };
 		}
-		if (!config.allow_package_install) {
-			return { success: false, category: 'configuration', code: 'qwen_asr_venv_missing', message: 'Local Qwen ASR Python environment is missing and package installation is disabled.', details: { probe: probe(config) } };
-		}
 		emit('stdout', `Creating Local Qwen ASR Python environment at ${config.qwen_venv_path}\n`);
 		fs.mkdirSync(path.dirname(config.qwen_venv_path), { recursive: true });
-		const created = await runAsync(python.command, [...python.argsPrefix, '-m', 'venv', config.qwen_venv_path], { timeout: 600000, onOutput: emit });
+		const created = await run(python.command, [...python.argsPrefix, '-m', 'venv', config.qwen_venv_path], { timeout: SETUP_TIMEOUT_MS, onOutput: emit });
 		if (created.error || created.status !== 0) {
 			return { success: false, category: 'configuration', code: 'qwen_asr_venv_failed', message: 'Local Qwen ASR Python environment could not be created.', details: created };
 		}
 	}
-	if (!hasPythonModule(venvPython, 'qwen_asr')) {
-		if (!config.allow_package_install) {
-			return { success: false, category: 'configuration', code: 'qwen_asr_runtime_missing', message: 'qwen-asr is not installed and package installation is disabled.', details: { probe: probe(config) } };
+	if (!hasPythonModule(venvPython, 'qwen_asr') || !hasPythonModule(venvPython, 'huggingface_hub') || !torchCudaInfo(venvPython).available) {
+		if (!installPackages) {
+			const code = !hasPythonModule(venvPython, 'qwen_asr') ? 'qwen_asr_runtime_missing' : (!hasPythonModule(venvPython, 'huggingface_hub') ? 'asr_hf_hub_missing' : 'qwen_asr_torch_cuda_missing');
+			return { success: false, category: 'configuration', code, message: JOB_RUNTIME_MESSAGE, details: { probe: probe(config), venv_path: config.qwen_venv_path } };
 		}
-		emit('stdout', 'Installing qwen-asr in the Local Qwen ASR Python environment.\n');
-		const installed = await runAsync(venvPython, ['-m', 'pip', 'install', '--progress-bar', 'off', 'qwen-asr'], { timeout: 1800000, onOutput: emit });
-		if (installed.error || installed.status !== 0) {
-			return { success: false, category: 'configuration', code: 'qwen_asr_runtime_install_failed', message: 'qwen-asr could not be installed.', details: installed };
-		}
-	}
-	const torchCuda = await ensureQwenTorchCuda(config, venvPython, session);
-	if (!torchCuda.success) {
-		return torchCuda;
+		const installed = await installQwenCudaTorchStack(config, venvPython, session, run);
+		if (!installed.success) return installed;
+		return { success: true, python: venvPython };
 	}
 	return { success: true, python: venvPython };
 }
 
-async function ensureCudaRuntime(config = settings(), pythonPath, session = {}) {
+async function ensureCudaRuntime(config = settings(), pythonPath, session = {}, options = {}) {
+	const installPackages = options.installPackages === true;
 	const emit = typeof session.appendSessionOutput === 'function' ? session.appendSessionOutput : () => {};
+	const run = options.runAsync || runAsync;
 	let info = cudaRuntimeInfo(pythonPath);
 	if (info.available) {
 		return { success: true, installed: false, cuda_runtime: info };
 	}
-	if (!config.allow_package_install) {
+	if (!installPackages) {
 		return { success: false, installed: false, cuda_runtime: info, message: `CUDA runtime packages are missing: ${info.reason || 'runtime unavailable'}` };
 	}
 	emit('stdout', `Installing Local Whisper CUDA runtime packages (${info.reason || 'CUDA DLLs missing'}).\n`);
-	const installed = await runAsync(pythonPath, ['-m', 'pip', 'install', '--progress-bar', 'off', 'nvidia-cublas-cu12', 'nvidia-cudnn-cu12'], { timeout: 1800000, onOutput: emit });
+	const installed = await run(pythonPath, ['-m', 'pip', 'install', '--disable-pip-version-check', '--progress-bar', 'off', 'nvidia-cublas-cu12', 'nvidia-cudnn-cu12'], { timeout: SETUP_TIMEOUT_MS, onOutput: emit });
 	if (installed.error || installed.status !== 0) {
 		return { success: false, installed: false, cuda_runtime: info, message: 'CUDA runtime packages could not be installed.', details: installed };
 	}
@@ -1102,12 +1205,12 @@ async function transcribe(payload, session = {}) {
 	if (selected.provider === 'qwen-aligner') {
 		return alignQwen(payload, audioBytes, selected, config, hardware, session);
 	}
-	const runtime = await ensureRuntime(config, session);
+	const runtime = await ensureRuntime(config, session, { installPackages: false });
 	if (!runtime.success) {
 		return runtime;
 	}
 	if (requestCouldUseCuda(requestedModel, config, hardware) && !(hardware.cuda_runtime || {}).available) {
-		const cudaRuntime = await ensureCudaRuntime(config, runtime.python, session);
+		const cudaRuntime = await ensureCudaRuntime(config, runtime.python, session, { installPackages: false });
 		if (!cudaRuntime.success && typeof session.appendSessionOutput === 'function') {
 			session.appendSessionOutput('stderr', `${cudaRuntime.message || 'CUDA runtime unavailable; falling back to CPU.'}\n`);
 		}
@@ -1121,9 +1224,10 @@ async function transcribe(payload, session = {}) {
 		return { success: false, category: 'configuration', code: 'asr_model_missing', message: `Local Whisper model ${selected.model_id} is not cached or configured. Enable model downloads or set a local model path in the bridge status page.`, details: { selected, hardware } };
 	}
 	const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'alorbach-whisper-transcribe-'));
-	const audioPath = path.join(tempDir, `audio.${audioExtensionForFormat(payload.audio_format)}`);
-	fs.writeFileSync(audioPath, audioBytes);
-	const debugLogDirs = [];
+	try {
+		const audioPath = path.join(tempDir, `audio.${audioExtensionForFormat(payload.audio_format)}`);
+		fs.writeFileSync(audioPath, audioBytes);
+		const debugLogDirs = [];
 	async function runSelected(modelSelection) {
 		const request = {
 			audio_path: audioPath,
@@ -1226,6 +1330,9 @@ async function transcribe(payload, session = {}) {
 			},
 		},
 	};
+	} finally {
+		cleanupTempDir(tempDir);
+	}
 }
 
 async function transcribeQwen(payload, audioBytes, selected, config, hardware, session = {}) {
@@ -1274,13 +1381,14 @@ async function transcribeQwen(payload, audioBytes, selected, config, hardware, s
 			details: { selected, hardware },
 		};
 	}
-	const runtime = await ensureQwenRuntime(config, session);
+	const runtime = await ensureQwenRuntime(config, session, { installPackages: false });
 	if (!runtime.success) {
 		return runtime;
 	}
 	const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'alorbach-qwen-transcribe-'));
-	const audioPath = path.join(tempDir, `audio.${audioExtensionForFormat(payload.audio_format)}`);
-	fs.writeFileSync(audioPath, audioBytes);
+	try {
+		const audioPath = path.join(tempDir, `audio.${audioExtensionForFormat(payload.audio_format)}`);
+		fs.writeFileSync(audioPath, audioBytes);
 	const request = {
 		audio_path: audioPath,
 		model: selected.model_path,
@@ -1374,6 +1482,9 @@ async function transcribeQwen(payload, audioBytes, selected, config, hardware, s
 			},
 		},
 	};
+	} finally {
+		cleanupTempDir(tempDir);
+	}
 }
 
 async function alignQwen(payload, audioBytes, selected, config, hardware, session = {}) {
@@ -1405,13 +1516,14 @@ async function alignQwen(payload, audioBytes, selected, config, hardware, sessio
 			details: { selected, hardware },
 		};
 	}
-	const runtime = await ensureQwenRuntime(config, session);
+	const runtime = await ensureQwenRuntime(config, session, { installPackages: false });
 	if (!runtime.success) {
 		return runtime;
 	}
 	const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'alorbach-qwen-align-'));
-	const audioPath = path.join(tempDir, `audio.${audioExtensionForFormat(payload.audio_format)}`);
-	fs.writeFileSync(audioPath, audioBytes);
+	try {
+		const audioPath = path.join(tempDir, `audio.${audioExtensionForFormat(payload.audio_format)}`);
+		fs.writeFileSync(audioPath, audioBytes);
 	const request = {
 		audio_path: audioPath,
 		aligner_model: selected.model_path,
@@ -1502,6 +1614,9 @@ async function alignQwen(payload, audioBytes, selected, config, hardware, sessio
 			},
 		},
 	};
+	} finally {
+		cleanupTempDir(tempDir);
+	}
 }
 
 function models(options = {}) {
@@ -1601,8 +1716,9 @@ async function setup(options = {}) {
 	};
 	const session = { appendSessionOutput: emit };
 	const run = options.runAsync || runAsync;
-	const ensureWhisper = options.ensureRuntime || ensureRuntime;
-	const ensureQwen = options.ensureQwenRuntime || ensureQwenRuntime;
+	const installOptions = { installPackages: true, runAsync: run };
+	const ensureWhisper = options.ensureRuntime || ((config, setupSession) => ensureRuntime(config, setupSession, installOptions));
+	const ensureQwen = options.ensureQwenRuntime || ((config, setupSession) => ensureQwenRuntime(config, setupSession, installOptions));
 	const config = { ...(options.settings || settings()), allow_package_install: true };
 	const modelId = modelSlug(options.model_id || options.modelId || '');
 	if (!modelId) {
@@ -1631,16 +1747,39 @@ async function setup(options = {}) {
 			};
 		}
 		invalidateProbeCache();
+		refreshProbeCache();
 		return { success: true, model_id: fullModelId(model.id), label: model.label, provider, downloaded: [], details: { log: logChunks.join('').slice(-12000) } };
 	}
 	const downloaded = [];
+	const qwenRequired = qwenRequiredFiles();
 	for (const repoId of repoIds) {
 		const result = await downloadHfSnapshot(runtime.python, repoId, run, emit);
 		if (!result.success) return result;
-		downloaded.push(result);
+		const required = (provider === 'qwen-asr' || provider === 'qwen-aligner') ? qwenRequired : [];
+		const verified = verifySnapshotPath(result.path, required);
+		if (!verified.valid) {
+			const code = provider === 'qwen-asr' || provider === 'qwen-aligner' ? 'qwen_asr_model_incomplete' : 'asr_model_incomplete';
+			return setupFailure(
+				code,
+				`Local ASR model cache is incomplete at ${verified.path}. Missing files: ${verified.missing_files.join(', ') || 'required files'}.`,
+				{},
+				{ repo_id: repoId, path: verified.path, missing_files: verified.missing_files },
+			);
+		}
+		downloaded.push({ ...result, path: verified.path });
 	}
+	const savedConfig = persistModelSnapshotPaths(config, modelId, downloaded);
 	invalidateProbeCache();
-	return { success: true, model_id: fullModelId(model.id), label: model.label, provider, downloaded, details: { log: logChunks.join('').slice(-12000) } };
+	refreshProbeCache(savedConfig);
+	return {
+		success: true,
+		model_id: fullModelId(model.id),
+		label: model.label,
+		provider,
+		downloaded,
+		settings: savedConfig,
+		details: { log: logChunks.join('').slice(-12000), python: runtime.python },
+	};
 }
 
 function publicSettings(options = {}) {

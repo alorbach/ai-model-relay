@@ -167,10 +167,10 @@ Default behavior:
 - Qwen Python is auto-detected, preferring `%LOCALAPPDATA%\Programs\Python\Python312\python.exe`.
 - The Whisper ASR virtual environment is `%USERPROFILE%\.alorbach-codex-bridge\asr-venv` unless `ALORBACH_ASR_VENV` is set.
 - The Qwen ASR virtual environment is `%USERPROFILE%\.alorbach-codex-bridge\qwen-asr-venv` unless `ALORBACH_QWEN_ASR_VENV` is set.
-- Package installation is allowed by default for the private ASR venvs.
-- Model downloads are disabled by default; use cached model snapshots or set a local model path unless downloads are explicitly enabled in `/status`.
+- Package installation happens only from the status-page **Install model** action; transcription jobs do not pip-install packages.
+- Model downloads during jobs stay disabled by default; use cached model snapshots or set a local model path unless downloads are explicitly enabled in `/status`. Setup still downloads models when you click Install model.
 - Requests that omit `payload.model` use the `Default model` from Local ASR Settings when set; otherwise `local-asr` auto-selects the best ready transcription model. A caller-supplied `payload.model` always overrides the default.
-- Qwen setup verifies that PyTorch was installed with CUDA support. If `qwen-asr` installs a CPU-only torch wheel, the bridge repairs the Qwen venv by installing `torch` from the PyTorch CUDA wheel index when package installation is enabled.
+- Qwen Install uninstalls any existing CPU PyTorch wheel, installs CUDA `torch`/`torchvision` from `ALORBACH_QWEN_TORCH_INDEX_URL` only, pins the wheel with `cuda-torch-constraint.txt`, then installs `qwen-asr` and `huggingface_hub`. A second CUDA probe rejects CPU wheels that slip in via dependencies. Jobs never repair a broken torch install.
 - Whisper CUDA is selected only when the enabled model prefers it, enough free VRAM is detected, and CUDA runtime packages are usable. A CUDA load failure falls back to CPU/int8 when possible.
 - Qwen3 ASR requires CUDA, but can optionally use mixed GPU/CPU loading through Transformers `device_map="auto"` when a selected Qwen model does not fit fully in VRAM. The bridge still prefers a fully GPU-ready transcription model during automatic selection; use the 0.6B model for normal low-VRAM work and explicit/default 1.7B selection when CPU offload is acceptable.
 - Qwen timestamp output still requires `Qwen/Qwen3-ForcedAligner-0.6B` to be cached or explicitly downloadable, but the ForcedAligner is not exposed as a normal transcription model because it requires reference text.
@@ -245,15 +245,15 @@ This is expected on initial `/status` load. Press `Refresh runtime` in Local ASR
 
 ### Local Whisper says Python or faster-whisper is missing
 
-Install Python 3.10 for the same Windows account or set `ALORBACH_ASR_PYTHON`. If automatic package installation is disabled, create the ASR venv yourself and install `faster-whisper` before running transcription jobs.
+Install Python 3.10 for the same Windows account or set `ALORBACH_ASR_PYTHON`. Use **Install model** on the status page to create the Whisper venv and install `faster-whisper`, `huggingface_hub`, and CUDA runtime packages. Transcription jobs do not pip-install.
 
 ### Local Whisper model is missing
 
-Either enable model downloads in the Local ASR Settings panel or configure `local_path` for an existing faster-whisper/CTranslate2 model snapshot. The default faster-whisper model list includes Large v3, Medium, and Small.
+Either use **Install model** on the status page or configure `local_path` for an existing faster-whisper/CTranslate2 model snapshot. The default faster-whisper model list includes Large v3, Medium, and Small.
 
 ### Local Qwen ASR model or aligner is missing
 
-Either enable model downloads in the Local ASR Settings panel or configure `local_path` for `Qwen/Qwen3-ASR-1.7B` or `Qwen/Qwen3-ASR-0.6B`, plus `aligner_local_path` for `Qwen/Qwen3-ForcedAligner-0.6B`. The bridge keeps downloads disabled by default so Qwen remains a fully local backend after the model files are cached.
+Either use **Install model** on the status page or configure `local_path` for `Qwen/Qwen3-ASR-1.7B` or `Qwen/Qwen3-ASR-0.6B`, plus `aligner_local_path` for `Qwen/Qwen3-ForcedAligner-0.6B`. Job-time downloads stay disabled by default so Qwen remains fully local after Install caches the snapshots.
 
 ### Local Qwen ASR has less free VRAM than the selected model requires
 
@@ -261,15 +261,15 @@ Use `qwen3-asr-0.6b` as the default model for normal low-VRAM transcription. If 
 
 ### Local Qwen ASR says preprocessor_config.json is missing
 
-The Hugging Face cache snapshot is incomplete. Qwen ASR snapshots must include processor/tokenizer files such as `preprocessor_config.json`, `tokenizer_config.json`, `vocab.json`, and `merges.txt`, not only the safetensors weights. Enable model downloads in Local ASR Settings so the bridge can redownload missing files, or remove the incomplete snapshot under `%USERPROFILE%\.cache\huggingface\hub\models--Qwen--...`.
+The Hugging Face cache snapshot is incomplete. Qwen ASR snapshots must include processor/tokenizer files such as `preprocessor_config.json`, `tokenizer_config.json`, `vocab.json`, and `merges.txt`, not only the safetensors weights. Use **Install model** again so setup can verify and redownload missing files, or remove the incomplete snapshot under `%USERPROFILE%\.cache\huggingface\hub\models--Qwen--...`.
 
-### Local Qwen ASR says Torch not compiled with CUDA enabled
+### Local Qwen ASR says Torch not compiled with CUDA enabled or shows a CPU torch wheel
 
-Refresh Local ASR runtime in `/status` and check `Qwen torch CUDA`. When package installation is enabled, the bridge installs or upgrades `torch` from `ALORBACH_QWEN_TORCH_INDEX_URL`, defaulting to the PyTorch CUDA 12.8 wheel index. If package installation is disabled, install a CUDA-enabled PyTorch wheel manually in `%USERPROFILE%\.alorbach-codex-bridge\qwen-asr-venv`.
+Refresh Local ASR runtime in `/status` and check `Qwen torch CUDA`. Use **Install model** on a Qwen ASR entry; setup uninstalls CPU PyTorch wheels, installs CUDA builds from `ALORBACH_QWEN_TORCH_INDEX_URL` (default cu128 index only), pins torch before `qwen-asr`, and fails if a `+cpu` wheel remains. Transcription jobs do not repair torch at job time.
 
 ### CUDA runtime is missing or unusable
 
-Use `Refresh runtime` to see the exact CUDA reason. The bridge can install `nvidia-cublas-cu12` and `nvidia-cudnn-cu12` into the ASR venv when package installation is enabled. If CUDA still fails during transcription, the job retries on CPU/int8 when a CPU model is available.
+Use `Refresh runtime` to see the exact CUDA reason. Whisper **Install model** installs `nvidia-cublas-cu12` and `nvidia-cudnn-cu12` into the ASR venv. Jobs do not install CUDA runtime packages; if CUDA still fails during transcription, the job retries on CPU/int8 when a CPU model is available.
 
 ## Naming and Compatibility
 

@@ -14,6 +14,14 @@ const os = require('os');
 const path = require('path');
 const { spawn, spawnSync } = require('child_process');
 const { appendLog, createBoundedCollector } = require('./diagnostics');
+const {
+	constraintPath,
+	DEFAULT_TORCH_INDEX,
+	evaluateCudaTorch,
+	killProcessTree,
+	probeTorchStatus,
+	torchConstraintText,
+} = require('./cuda-torch-venv');
 const { resolveCommand } = require('./local-cli');
 const security = require('./security');
 
@@ -21,8 +29,6 @@ const MAX_BYTES = 64 * 1024 * 1024;
 const SETUP_TIMEOUT_MS = Number(process.env.AI_MODEL_RELAY_UPSCALE_SETUP_TIMEOUT_MS || 1800000);
 const DOWNLOAD_TIMEOUT_MS = Number(process.env.AI_MODEL_RELAY_UPSCALE_DOWNLOAD_TIMEOUT_MS || 600000);
 const CHECKOUT_MARKER = '.ai-model-relay-commit';
-const TORCH_PROBE = 'import json,torch; info={"available":bool(torch.cuda.is_available()),"version":getattr(torch,"__version__",""),"cuda_version":getattr(getattr(torch,"version",None),"cuda",None),"device_count":int(torch.cuda.device_count()) if hasattr(torch,"cuda") else 0}; print(json.dumps(info)); raise SystemExit(0 if info["available"] else 1)';
-const DEFAULT_TORCH_INDEX = process.env.AI_MODEL_RELAY_UPSCALE_TORCH_INDEX_URL || 'https://download.pytorch.org/whl/cu128';
 const DEFAULT_PYTHON310 = path.join(os.homedir(), 'AppData', 'Local', 'Programs', 'Python', 'Python310', 'python.exe');
 const DEFAULT_PYTHON312 = path.join(os.homedir(), 'AppData', 'Local', 'Programs', 'Python', 'Python312', 'python.exe');
 const MODELS = {
@@ -165,28 +171,6 @@ function readCheckoutCommit(root) {
 	}
 }
 
-function parseTorchProbe(result) {
-	let probe = {};
-	try { probe = JSON.parse(String(result && result.stdout || '').trim().split(/\r?\n/).filter(Boolean).pop() || '{}'); } catch (error) { probe = {}; }
-	const version = String(probe.version || '').toLowerCase();
-	const cpuWheel = version.includes('+cpu') || (!probe.cuda_version && version && !probe.available);
-	const ok = !cpuWheel && !!(result && !result.error && result.status === 0 && probe.available);
-	return { probe, version, cpuWheel, ok };
-}
-
-function probeTorchStatus(python) {
-	if (!python || !fs.existsSync(python)) return { ok: false, state: 'python_missing', version: '', probe: {} };
-	try {
-		const result = spawnSync(python, ['-c', TORCH_PROBE], { encoding: 'utf8', shell: false, windowsHide: true, timeout: 15000 });
-		const parsed = parseTorchProbe(result);
-		if (parsed.cpuWheel) return { ok: false, state: 'cpu_torch', version: parsed.version, probe: parsed.probe };
-		if (!parsed.ok) return { ok: false, state: 'cuda_unavailable', version: parsed.version, probe: parsed.probe };
-		return { ok: true, state: 'cuda', version: parsed.version, probe: parsed.probe };
-	} catch (error) {
-		return { ok: false, state: 'torch_probe_failed', version: '', probe: {} };
-	}
-}
-
 function pythonCommand(env = process.env) {
 	if (env === process.env) {
 		const config = settings();
@@ -315,26 +299,22 @@ function discoverBasePython(config = settings()) {
 	return '';
 }
 
-function torchConstraintText(freezeStdout, probeVersion) {
-	const pinned = String(freezeStdout || '')
-		.split(/\r?\n/)
-		.map((line) => line.trim())
-		.filter((line) => /^(torch|torchvision|torchaudio)==/i.test(line));
-	if (pinned.length) return `${pinned.join('\n')}\n`;
-	const version = String(probeVersion || '').trim();
-	return version ? `torch==${version}\n` : '';
-}
-
-async function evaluateCudaTorch(run, venvPython, emit, pythonVersion) {
-	const cuda = await run(venvPython, ['-c', TORCH_PROBE], { timeout: 60000, onOutput: emit });
-	const parsed = parseTorchProbe(cuda);
-	if (parsed.cpuWheel) {
-		return setupFailure('local_upscale_cpu_torch', `pip installed a CPU PyTorch wheel (${parsed.probe.version}) instead of a CUDA build from ${DEFAULT_TORCH_INDEX}. Local upscale does not fall back to CPU.`, cuda, { python: venvPython, python_version: pythonVersion, index_url: DEFAULT_TORCH_INDEX, torch: parsed.probe });
+async function upscaleEvaluateCudaTorch(run, venvPython, emit, pythonVersion) {
+	const evaluated = await evaluateCudaTorch(run, venvPython, emit, {
+		indexUrl: DEFAULT_TORCH_INDEX,
+		pythonVersion,
+		cpuTorchCode: 'local_upscale_cpu_torch',
+		cudaUnavailableCode: 'local_upscale_cuda_unavailable',
+		cudaUnavailableMessage: 'CUDA PyTorch is installed but torch.cuda is not usable. CPU fallback is disabled.',
+	});
+	if (!evaluated.success) {
+		if (evaluated.code === 'local_upscale_cpu_torch') {
+			const version = evaluated.extras && evaluated.extras.torch && evaluated.extras.torch.version || '';
+			return setupFailure(evaluated.code, `pip installed a CPU PyTorch wheel (${version}) instead of a CUDA build from ${DEFAULT_TORCH_INDEX}. Local upscale does not fall back to CPU.`, evaluated.result, evaluated.extras);
+		}
+		return setupFailure(evaluated.code, evaluated.message, evaluated.result, evaluated.extras);
 	}
-	if (!parsed.ok) {
-		return setupFailure('local_upscale_cuda_unavailable', `CUDA PyTorch ${parsed.probe.version || ''} is installed but torch.cuda is not usable (CUDA ${parsed.probe.cuda_version || 'missing'}). CPU fallback is disabled.`, cuda, { python: venvPython, python_version: pythonVersion, index_url: DEFAULT_TORCH_INDEX, torch: parsed.probe });
-	}
-	return { success: true, torch: parsed.probe };
+	return { success: true, torch: evaluated.torch };
 }
 
 async function readGitHead(run, git, root) {
@@ -405,18 +385,18 @@ async function setup(options = {}) {
 	emit('stdout', `Installing CUDA PyTorch for local upscale (${pythonVersion || venvPython}) from ${DEFAULT_TORCH_INDEX} only.\n`);
 	const torch = await run(venvPython, ['-m', 'pip', 'install', '--disable-pip-version-check', '--progress-bar', 'off', '--force-reinstall', '--no-cache-dir', 'torch', 'torchvision', '--index-url', DEFAULT_TORCH_INDEX], { timeout: SETUP_TIMEOUT_MS, onOutput: emit });
 	if (torch.error || torch.status !== 0) return setupFailure('local_upscale_torch_failed', 'CUDA PyTorch could not be installed for local upscale. CPU fallback is disabled.', torch, { python: venvPython, python_version: pythonVersion, index_url: DEFAULT_TORCH_INDEX });
-	const firstProbe = await evaluateCudaTorch(run, venvPython, emit, pythonVersion);
+	const firstProbe = await upscaleEvaluateCudaTorch(run, venvPython, emit, pythonVersion);
 	if (!firstProbe.success) return firstProbe;
 	const freeze = await run(venvPython, ['-m', 'pip', 'freeze'], { timeout: 30000, onOutput: emit });
 	const constraintText = torchConstraintText(freeze && freeze.stdout, firstProbe.torch && firstProbe.torch.version);
 	if (!/^torch==/im.test(constraintText)) return setupFailure('local_upscale_torch_constraint_failed', 'CUDA PyTorch was installed but could not be pinned before follow-on package installs.', freeze, { python: venvPython, python_version: pythonVersion, torch: firstProbe.torch });
-	const constraintPath = path.join(config.venv_path, 'cuda-torch-constraint.txt');
+	const torchConstraintFile = constraintPath(config.venv_path);
 	fs.mkdirSync(config.venv_path, { recursive: true });
-	fs.writeFileSync(constraintPath, constraintText);
+	fs.writeFileSync(torchConstraintFile, constraintText);
 	if (spec.packages.length) {
 		emit('stdout', `Installing ${spec.engine} packages with CUDA PyTorch pinned at ${String(firstProbe.torch && firstProbe.torch.version || 'installed')}.\n`);
-		const packages = await run(venvPython, ['-m', 'pip', 'install', '--disable-pip-version-check', '--progress-bar', 'off', '--constraint', constraintPath, ...spec.packages], { timeout: SETUP_TIMEOUT_MS, onOutput: emit });
-		if (packages.error || packages.status !== 0) return setupFailure('local_upscale_packages_failed', `Could not install ${spec.engine} Python packages.`, packages, { python: venvPython, python_version: pythonVersion, constraint: constraintPath });
+		const packages = await run(venvPython, ['-m', 'pip', 'install', '--disable-pip-version-check', '--progress-bar', 'off', '--constraint', torchConstraintFile, ...spec.packages], { timeout: SETUP_TIMEOUT_MS, onOutput: emit });
+		if (packages.error || packages.status !== 0) return setupFailure('local_upscale_packages_failed', `Could not install ${spec.engine} Python packages.`, packages, { python: venvPython, python_version: pythonVersion, constraint: torchConstraintFile });
 	}
 	const key = engine === 'swinir' ? 'swinir' : 'realesrgan';
 	const root = config[`${key}_root`];
@@ -429,7 +409,7 @@ async function setup(options = {}) {
 		const editable = await run(venvPython, ['-m', 'pip', 'install', '--disable-pip-version-check', '--no-deps', '-e', root], { cwd: root, timeout: SETUP_TIMEOUT_MS, onOutput: emit });
 		if (editable.error || editable.status !== 0) return setupFailure('local_upscale_realesrgan_package_failed', 'Could not install the official Real-ESRGAN checkout into the local upscale environment.', editable, { python: venvPython, root });
 	}
-	const afterPackages = await evaluateCudaTorch(run, venvPython, emit, pythonVersion);
+	const afterPackages = await upscaleEvaluateCudaTorch(run, venvPython, emit, pythonVersion);
 	if (!afterPackages.success) return afterPackages;
 	const modelPath = config[`${key}_model_path`] || path.join(security.stateDir, 'upscale', 'weights', spec.weight_name);
 	const expected = String(spec.weight_sha256 || '').toLowerCase();
@@ -453,14 +433,6 @@ async function setup(options = {}) {
 	});
 	const modelId = engine === 'swinir' ? 'model-relay:local-upscale:swinir-classical-x2' : 'model-relay:local-upscale:realesrgan-x2plus';
 	return { success: true, engine, settings: saved, model: { id: modelId, label: MODELS[modelId].label, state: 'installed', manifest_valid: true, checkout_valid: true }, details: { python: venvPython, python_version: pythonVersion, index_url: DEFAULT_TORCH_INDEX, log: collectedLog(), torch: afterPackages.torch } };
-}
-
-function killProcessTree(child) {
-	if (!child || !child.pid) return;
-	try {
-		if (process.platform === 'win32') spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { shell: false, windowsHide: true, stdio: 'ignore' });
-		else child.kill('SIGKILL');
-	} catch (error) {}
 }
 
 function safeOutput(result, modelId) {

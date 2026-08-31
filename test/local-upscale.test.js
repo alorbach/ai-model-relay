@@ -81,9 +81,10 @@ const { CHECKOUT_MARKER, INSTALL, MODELS, createLocalUpscaleDriver, modelConfig 
 		assert.ok(runner.includes('"--gpu-id", str(int(job.get("cuda_device", 0)))'), 'Real-ESRGAN must receive the selected CUDA device');
 		assert.ok(runner.includes('int(job.get("timeout_seconds", 1800))'), 'the CUDA subprocess must use the Node-configured timeout');
 		const driverSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'local-upscale.js'), 'utf8');
+		const cudaTorchSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'cuda-torch-venv.js'), 'utf8');
 		assert.ok(driverSource.includes('safeOutput({ output, provenance: metadata.provenance, local_job_id: session.jobId }, model.id)'), 'completion must report the requested relay model id');
 		assert.ok(driverSource.includes("stopReason === 'cancelled'"), 'cancel must wait for the CUDA process to exit before releasing the GPU slot');
-		assert.ok(driverSource.includes("spawn('taskkill'"), 'Windows cancel must kill the CUDA process tree');
+		assert.ok(cudaTorchSource.includes("spawn('taskkill'") || driverSource.includes("spawn('taskkill'"), 'Windows cancel must kill the CUDA process tree');
 		assert.ok(!driverSource.includes('setTimeout(() => settle({ [reason]: true'), 'cancel must not free the GPU slot before the runner closes');
 		assert.ok(driverSource.includes("web_ui_setup: true"), 'status-page setup is the operator install path');
 		assert.ok(!driverSource.includes('--extra-index-url'), 'CUDA torch setup must not add PyPI as an extra index');

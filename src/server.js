@@ -718,6 +718,9 @@ async function route(req, res, context) {
 			return;
 		}
 		const result = await withSetupLock('asr', () => context.codex.setupAsr({ model_id: body.model_id || body.model || '', runtime: body.runtime || '' }));
+		if (result.success && context.codex.asrStatus) {
+			context.codex.asrStatus({ refresh: true });
+		}
 		context.statusCache.sync();
 		context.statusEvents.broadcast('status', statusPayload(context));
 		context.statusEvents.broadcast('capabilities', capabilitiesPayload(context));

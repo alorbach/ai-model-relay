@@ -1084,8 +1084,9 @@ function createLocalAsrDriver(codex) {
 				label: 'Local ASR',
 				kind: 'local-runtime',
 				enabled: caps.enabled !== false,
-				ready: caps.ready,
+				ready: caps.ready === true,
 				runtime_checked: caps.runtime_checked,
+				diagnostic: caps.ready === true ? '' : (caps.ready === false ? 'Install a model under Local ASR Settings or press Refresh runtime.' : 'Press Refresh runtime in Local ASR Settings to probe the Python environment.'),
 				models: caps.models || [],
 			};
 		},

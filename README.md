@@ -68,7 +68,7 @@ codex login
 7. Choose a Local Codex model such as `codex-local:auto` or `codex-local:image`.
 8. Enter the pairing code shown in the tray app when WordPress prompts for it.
 
-For local audio transcription, open the bridge status page after installation and review `Local ASR Settings`. Use each model's **Install model** button to download that Hugging Face snapshot onto this computer. That action is explicit; transcription jobs stay offline unless you also enable **Allow ASR model downloads**. By default, the bridge can create private Python virtual environments under `%USERPROFILE%\.alorbach-codex-bridge\asr-venv` for faster-whisper and `%USERPROFILE%\.alorbach-codex-bridge\qwen-asr-venv` for Qwen3 ASR/ForcedAligner.
+For local audio transcription, open the bridge status page after installation and review `Local ASR Settings`. Use each model's **Install model** button to create the private Python environment, install packages, and download that Hugging Face snapshot onto this computer. That action is explicit; transcription jobs do not pip-install packages. Jobs stay offline unless you also enable **Allow ASR model downloads**. Qwen setup matches Local CUDA Upscale: it uninstalls any CPU PyTorch wheel, installs CUDA PyTorch from the official cu128 index only, pins it before `qwen-asr`, and verifies the downloaded snapshot. Whisper setup installs `faster-whisper`, `huggingface_hub`, and Whisper CUDA runtime packages during Install. Default venvs: `%USERPROFILE%\.alorbach-codex-bridge\asr-venv` (faster-whisper) and `%USERPROFILE%\.alorbach-codex-bridge\qwen-asr-venv` (Qwen3 ASR/ForcedAligner).
 
 For local album metrics, use the separate `Local Music Analysis Settings` panel. Its setup button creates `%USERPROFILE%\.alorbach-codex-bridge\music-analysis-venv` and installs the local analysis packages only after you ask it to. It returns tempo/beat grid, key estimate, loudness, spectral descriptors, and neutral numbered sections; it does not perform stem separation, chord recognition, melody/MIDI extraction, or automatic transcription.
 
@@ -262,7 +262,7 @@ for await (const chunk of response.body.pipeThrough(new TextDecoderStream())) {
 - `ALORBACH_ASR_VENV`: Local Whisper virtual environment path. Default: `%USERPROFILE%\.alorbach-codex-bridge\asr-venv`.
 - `ALORBACH_QWEN_ASR_PYTHON`: explicit Python executable for Local Qwen ASR setup.
 - `ALORBACH_QWEN_ASR_VENV`: Local Qwen ASR virtual environment path. Default: `%USERPROFILE%\.alorbach-codex-bridge\qwen-asr-venv`.
-- `ALORBACH_QWEN_TORCH_INDEX_URL`: PyTorch CUDA wheel index used when repairing the Qwen ASR venv. Default: `https://download.pytorch.org/whl/cu128`.
+- `ALORBACH_QWEN_TORCH_INDEX_URL`: PyTorch CUDA wheel index used during Qwen ASR Install (cu128 only, no CPU fallback). Default: `https://download.pytorch.org/whl/cu128`.
 - `ALORBACH_QWEN_ALLOW_CPU_OFFLOAD`: set to `0` to disable mixed GPU/CPU Qwen loading for models that do not fit fully in VRAM.
 - `ALORBACH_QWEN_CHUNK_SECONDS`: local pre-chunk size for Qwen ASR timestamped transcription. Default: `30`.
 - `ALORBACH_QWEN_MAX_WORD_DURATION_SECONDS`: cap for implausibly stretched Qwen word timestamps. Default: `12`.

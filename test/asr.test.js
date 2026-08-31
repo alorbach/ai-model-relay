@@ -203,24 +203,35 @@ function createQwenSnapshot(snapshot) {
 	assert.strictEqual(setupMissing.code, 'asr_setup_model_required');
 
 	const setupCalls = [];
+	const whisperSnapshot = fs.mkdtempSync(path.join(os.tmpdir(), 'asr-whisper-snap-'));
 	const setupWhisper = await asr.setup({
 		model_id: 'whisper-small',
 		settings: config,
 		ensureRuntime: async () => ({ success: true, python: 'python' }),
 		runAsync: async (command, args) => {
 			setupCalls.push(args);
-			return { status: 0, stdout: '/tmp/hub/org-small\n', stderr: '' };
+			return { status: 0, stdout: `${whisperSnapshot}\n`, stderr: '' };
 		},
 	});
 	assert.strictEqual(setupWhisper.success, true);
 	assert.strictEqual(setupWhisper.model_id, 'local-asr:whisper-small');
 	assert.ok(setupCalls.some((args) => args.includes('org/small')));
 
+	const qwenSetupDir = fs.mkdtempSync(path.join(os.tmpdir(), 'asr-qwen-snap-'));
+	const qwenAsrSnapshot = path.join(qwenSetupDir, 'asr');
+	const qwenAlignerSnapshotPath = path.join(qwenSetupDir, 'aligner');
+	createQwenSnapshot(qwenAsrSnapshot);
+	createQwenSnapshot(qwenAlignerSnapshotPath);
 	const setupQwen = await asr.setup({
 		model_id: 'qwen3-asr-0.6b',
 		settings: config,
 		ensureQwenRuntime: async () => ({ success: true, python: 'python' }),
-		runAsync: async (command, args) => ({ status: 0, stdout: '/tmp/hub/' + args[args.length - 1], stderr: '' }),
+		runAsync: async (command, args) => {
+			const repoId = args[args.length - 1];
+			if (repoId === 'Qwen/Qwen3-ASR-0.6B') return { status: 0, stdout: `${qwenAsrSnapshot}\n`, stderr: '' };
+			if (repoId === 'Qwen/Qwen3-ForcedAligner-0.6B') return { status: 0, stdout: `${qwenAlignerSnapshotPath}\n`, stderr: '' };
+			return { status: 0, stdout: '', stderr: '' };
+		},
 	});
 	assert.strictEqual(setupQwen.success, true);
 	assert.strictEqual(setupQwen.provider, 'qwen-asr');
@@ -246,6 +257,88 @@ function createQwenSnapshot(snapshot) {
 	});
 	assert.strictEqual(emptyRepo.success, false);
 	assert.strictEqual(emptyRepo.code, 'asr_setup_repo_missing');
+
+	const incompleteSnapshot = fs.mkdtempSync(path.join(os.tmpdir(), 'asr-qwen-incomplete-'));
+	fs.mkdirSync(incompleteSnapshot, { recursive: true });
+	fs.writeFileSync(path.join(incompleteSnapshot, 'config.json'), '{}');
+	const incompleteSetup = await asr.setup({
+		model_id: 'qwen3-asr-0.6b',
+		settings: config,
+		ensureQwenRuntime: async () => ({ success: true, python: 'python' }),
+		runAsync: async (command, args) => ({ status: 0, stdout: `${incompleteSnapshot}\n`, stderr: '' }),
+	});
+	assert.strictEqual(incompleteSetup.success, false);
+	assert.strictEqual(incompleteSetup.code, 'qwen_asr_model_incomplete');
+
+	const missingVenvRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'asr-missing-venv-'));
+	const missingConfig = asr.normalizeSettings({
+		venv_path: path.join(missingVenvRoot, 'asr-venv'),
+		qwen_venv_path: path.join(missingVenvRoot, 'qwen-venv'),
+		models: config.models,
+	});
+	const missingWhisperRuntime = await asr.ensureRuntime(missingConfig, {}, { installPackages: false });
+	assert.strictEqual(missingWhisperRuntime.success, false);
+	assert.ok(['asr_venv_missing', 'asr_runtime_missing', 'asr_hf_hub_missing'].includes(missingWhisperRuntime.code));
+
+	const missingQwenRuntime = await asr.ensureQwenRuntime(missingConfig, {}, { installPackages: false });
+	assert.strictEqual(missingQwenRuntime.success, false);
+	assert.ok(['qwen_asr_venv_missing', 'qwen_asr_runtime_missing', 'asr_hf_hub_missing', 'qwen_asr_torch_cuda_missing'].includes(missingQwenRuntime.code));
+
+	const cudaProbe = { status: 0, stdout: '{"available":true,"version":"2.8.0+cu128","cuda_version":"12.8","device_count":1}\n', stderr: '' };
+	const cpuTorchProbe = { status: 0, stdout: '{"available":false,"version":"2.8.0+cpu","cuda_version":null,"device_count":0}\n', stderr: '' };
+	const qwenVenv = fs.mkdtempSync(path.join(os.tmpdir(), 'asr-qwen-venv-'));
+	const qwenVenvBin = path.join(qwenVenv, process.platform === 'win32' ? 'Scripts' : 'bin');
+	fs.mkdirSync(qwenVenvBin, { recursive: true });
+	fs.writeFileSync(path.join(qwenVenvBin, process.platform === 'win32' ? 'python.exe' : 'python'), '');
+	const qwenConfig = asr.normalizeSettings({
+		qwen_venv_path: qwenVenv,
+		models: config.models,
+	});
+	let cudaProbeCount = 0;
+	const packageInstalls = [];
+	const qwenInstall = await asr.ensureQwenRuntime(qwenConfig, {}, {
+		installPackages: true,
+		runAsync: async (command, args) => {
+			if (args[0] === '-m' && args[1] === 'pip' && args.includes('--constraint')) packageInstalls.push(args.slice());
+			if (args[0] === '-c') {
+				cudaProbeCount += 1;
+				return cudaProbeCount === 1 ? cudaProbe : cudaProbe;
+			}
+			if (args[1] === 'pip' && args.includes('freeze')) {
+				return { status: 0, stdout: 'torch==2.8.0+cu128\ntorchvision==0.23.0+cu128\n', stderr: '' };
+			}
+			if (args.includes('torch') && args.includes('torchvision') && args.includes('--index-url')) return { status: 0, stdout: '', stderr: '' };
+			if (args[0] === '-V') return { status: 0, stdout: 'Python 3.12.0\n', stderr: '' };
+			return { status: 0, stdout: '', stderr: '' };
+		},
+	});
+	assert.strictEqual(qwenInstall.success, true);
+	assert.ok(packageInstalls.some((args) => args.includes('--constraint') && args.includes('qwen-asr') && args.includes('huggingface_hub')));
+	assert.ok(fs.existsSync(path.join(qwenVenv, 'cuda-torch-constraint.txt')));
+
+	cudaProbeCount = 0;
+	const cpuTorchInstall = await asr.ensureQwenRuntime(qwenConfig, {}, {
+		installPackages: true,
+		runAsync: async (command, args) => {
+			if (args[0] === '-c') {
+				cudaProbeCount += 1;
+				return cpuTorchProbe;
+			}
+			if (args[1] === 'pip' && args.includes('freeze')) {
+				return { status: 0, stdout: 'torch==2.8.0+cpu\n', stderr: '' };
+			}
+			if (args.includes('torch') && args.includes('--index-url')) return { status: 0, stdout: '', stderr: '' };
+			if (args[0] === '-V') return { status: 0, stdout: 'Python 3.12.0\n', stderr: '' };
+			return { status: 0, stdout: '', stderr: '' };
+		},
+	});
+	assert.strictEqual(cpuTorchInstall.success, false);
+	assert.strictEqual(cpuTorchInstall.code, 'qwen_asr_cpu_torch');
+
+	const asrSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'asr.js'), 'utf8');
+	assert.ok(asrSource.includes('installPackages: false'), 'transcription jobs must not pip-install packages');
+	assert.ok(asrSource.includes('--constraint'), 'qwen-asr setup must pin CUDA torch before follow-on pip installs');
+
 	console.log('asr tests passed');
 })().catch((error) => {
 	console.error(error);
