@@ -1,0 +1,98 @@
+src/status-page.js
+  s_0713b558b419cc::t_962b3c4d4a949e 1058
+  s_6a5a87f3f40165::t_5176186eddc624 1564-1574,1581,1583
+  s_f875d017f94040::t_8e98bd419f1189 215-218
+  s_f875d017f94040::t_792c51ac55d0c2 1039-1057
+  s_f875d017f94040::t_ebf23530569f64 1172-1173
+docs/operations.md
+  s_f875d017f94040::t_8c1fbd7e99e9ff 212
+  s_f875d017f94040::t_65f0b19e871a86 216-219
+  s_f875d017f94040::t_d79d1ae9133d31 19
+docs/architecture.md
+  s_f875d017f94040::t_43b52739f3ccd1 37
+src/server.js
+  s_f875d017f94040::t_ea36b822a5bab1 836
+test/image-dimensions.test.js
+  s_f875d017f94040::t_f0fb783996558d 1-27
+src/job-manager.js
+  s_f875d017f94040::t_5295df38c8a237 4
+  s_f875d017f94040::t_189acf1d6df79c 72-83,88-90,101
+  s_f875d017f94040::t_8641db5af1026b 364
+src/backend-registry.js
+  s_f875d017f94040::t_4f25323497ef95 985
+  s_f875d017f94040::t_b767bc0ad99dac 1013-1014
+  s_f875d017f94040::t_a116dde1a6e914 439
+  s_f875d017f94040::t_c0dba620ac4bd8 947
+  s_f875d017f94040::t_0acaccbddc3861 343-347
+  s_f875d017f94040::t_e22a924eab0bf2 755-756
+  s_f875d017f94040::t_c281d4d8eda00f 1732-1734
+  s_f875d017f94040::t_2357233e533939 573-578
+  s_283fd6cff5aacb::t_72665c265a55f2 401,403-404
+  s_f875d017f94040::t_810cb6baa1098e 303-333
+  s_f875d017f94040::t_9fcd4fe394a239 360-369,373-378
+package.json
+  s_f875d017f94040::t_9b5527ef9b4144 12-13
+test/job-manager.test.js
+  s_f875d017f94040::t_492cca71229a44 106
+  s_f875d017f94040::t_41a7e40cb7b7b1 94,97,101-102,104
+test/grok-media.test.js
+  s_f875d017f94040::t_5f9942948a3c02 72
+  s_f875d017f94040::t_eb2731c7c9274d 85-87
+  s_f875d017f94040::t_100641b95da24d 141-158
+  s_f875d017f94040::t_0818222725ecbe 56-61
+src/image-dimensions.js
+  s_f875d017f94040::t_a9d216d648a15e 22-25
+  s_f875d017f94040::t_498d8088165dd1 1-3,5-6,8-21,26-50
+  s_f875d017f94040::t_666325bfc9f390 4,7
+test/backend-registry.test.js
+  s_f875d017f94040::t_b5406ac8de6bf4 395-396,402-403,410-411
+  s_f875d017f94040::t_bc7f1ede94d7e0 462-486
+src/codex.js
+  s_f875d017f94040::t_601cf63f116388 835-838,840-842
+docs/local-bridge-api.md
+  s_f875d017f94040::t_22ce8eff85252a 500-502
+test/relay-routes.test.js
+  s_f875d017f94040::t_ee55e9b464d037 333-336
+test/image-attachments.test.js
+  s_6a5a87f3f40165::t_d5529fc5214ebc 51-52
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "94744e0ad69dcf42952a5bd1ba2dd456fd17e2ef",
+  "prompts": {},
+  "sessions": {
+    "s_0713b558b419cc": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f771c-180e-79c0-9935-2eee0ea9cf4a",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_283fd6cff5aacb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fe0c8-2012-7ae3-a5b8-7804867046e5",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_6a5a87f3f40165": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a042de-0d59-71e2-9a67-e8ecda5a42f4",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_f875d017f94040": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "ee04f1be-df62-41a8-8028-54d6351731df",
+        "model": "composer-2.5"
+      },
+      "human_author": null
+    }
+  }
+}
