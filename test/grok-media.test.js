@@ -53,8 +53,12 @@ function createFakeGrok(options = {}) {
 		return child;
 	};
 	const skill = path.join(root, 'SKILL.md');
-	fs.writeFileSync(skill, '---\nname: imagine\n---\nimage_gen image_edit image_to_video reference_to_video');
-	return { root, calls, driver: createGrokCliDriver({ candidates: ['grok-test'], lookup: () => ({ status: 0, stdout: 'grok-test\n' }), spawn, imagineSkillPath: skill, grokSessionsRoot: sessionsRoot, timeoutMs: 100, mediaTimeoutMs: options.mediaTimeoutMs }) };
+	const driverOptions = { candidates: ['grok-test'], lookup: () => ({ status: 0, stdout: 'grok-test\n' }), spawn, grokSessionsRoot: sessionsRoot, timeoutMs: 100, mediaTimeoutMs: options.mediaTimeoutMs };
+	if (!options.bundledSkillOnly) {
+		fs.writeFileSync(skill, '---\nname: imagine\n---\nimage_gen image_edit image_to_video reference_to_video');
+		driverOptions.imagineSkillPath = skill;
+	}
+	return { root, calls, driver: createGrokCliDriver(driverOptions) };
 }
 
 (async () => {
@@ -65,7 +69,7 @@ function createFakeGrok(options = {}) {
 		const grokImageModel = fixture.driver.models().find((model) => model.id === 'model-relay:grok-cli:image');
 		assert.ok(grokImageModel);
 		assert.deepStrictEqual(grokImageModel.test_options.map((option) => option.key), ['aspect_ratio', 'resolution']);
-		assert.ok(grokImageModel.test_options.every((option) => option.delivery === 'guidance'));
+		assert.ok(grokImageModel.test_options.every((option) => option.key === 'aspect_ratio' ? option.delivery === 'tool-arg' : option.delivery === 'guidance'));
 		assert.ok(grokImageModel.test_options[0].choices.some((choice) => choice.value === '21:9'));
 		assert.ok(grokImageModel.test_options[0].choices.some((choice) => choice.value === '5:2'));
 		const grokVideoModel = fixture.driver.models().find((model) => model.id === 'model-relay:grok-cli:video');
@@ -78,8 +82,9 @@ function createFakeGrok(options = {}) {
 		assert.strictEqual(image.success, true);
 		assert.strictEqual(Buffer.from(image.response.data[0].b64_json, 'base64').toString(), 'generated image');
 		assert.ok(fixture.calls.some((args) => toolForArgs(args) === 'image_edit'));
-		assert.ok(fixture.calls.some((args) => toolForArgs(args) === 'image_edit' && args[args.indexOf('--single') + 1].includes('Requested aspect ratio: 16:9.')));
-		assert.ok(fixture.calls.some((args) => toolForArgs(args) === 'image_edit' && args[args.indexOf('--single') + 1].includes('Requested resolution tier: 2k.')));
+		assert.ok(fixture.calls.some((args) => toolForArgs(args) === 'image_edit' && args[args.indexOf('--single') + 1].includes('Pass aspect_ratio "16:9" as the image_edit tool argument.')));
+		assert.ok(fixture.calls.some((args) => toolForArgs(args) === 'image_edit' && args[args.indexOf('--single') + 1].includes('request 2K output with the long edge around 2048 pixels.')));
+		assert.ok(fixture.calls.some((args) => toolForArgs(args) === 'image_edit' && args[args.indexOf('--single') + 1].includes('Do not pass a resolution tool parameter')));
 
 		const noReference = await fixture.driver.videos({ prompt: 'animate' });
 		assert.strictEqual(noReference.success, true);
@@ -131,6 +136,24 @@ function createFakeGrok(options = {}) {
 		assert.strictEqual(fixture.driver.capabilities().imagine.video_verified, true);
 	} finally {
 		fs.rmSync(fixture.root, { recursive: true, force: true });
+	}
+
+	const bundledHome = fs.mkdtempSync(path.join(os.tmpdir(), 'grok-bundled-home-'));
+	const bundledSkillDir = path.join(bundledHome, '.grok', 'bundled', 'skills', 'imagine');
+	fs.mkdirSync(bundledSkillDir, { recursive: true });
+	fs.writeFileSync(path.join(bundledSkillDir, 'SKILL.md'), '---\nname: imagine\n---\nimage_gen image_edit image_to_video reference_to_video');
+	const originalHomedir = os.homedir;
+	os.homedir = () => bundledHome;
+	const bundledFixture = createFakeGrok({ bundledSkillOnly: true });
+	try {
+		await bundledFixture.driver.refresh();
+		assert.ok(bundledFixture.driver.models().some((model) => model.id === 'model-relay:grok-cli:image'));
+		assert.ok(bundledFixture.driver.models().some((model) => model.id === 'model-relay:grok-cli:video'));
+		assert.strictEqual(bundledFixture.driver.capabilities().imagine.detected, true);
+	} finally {
+		os.homedir = originalHomedir;
+		fs.rmSync(bundledHome, { recursive: true, force: true });
+		fs.rmSync(bundledFixture.root, { recursive: true, force: true });
 	}
 
 	const unsupported = createFakeGrok({ unsupportedTool: 'image_to_video' });

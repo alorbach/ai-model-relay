@@ -330,6 +330,10 @@ function createMockSecurity() {
 		assert.strictEqual(localGrokOptionsTest.statusCode, 200);
 		assert.strictEqual(calls[calls.length - 1].payload.aspect_ratio, '16:9');
 		assert.strictEqual(calls[calls.length - 1].payload.resolution, '2k');
+		const localAntigravityImageTest = await requestJson(port, 'POST', '/v1/relay/test', { job_type: 'images', model: 'model-relay:antigravity-cli:image', prompt: 'test antigravity image', aspect_ratio: '16:9', image_size: '2K' });
+		assert.strictEqual(localAntigravityImageTest.statusCode, 200);
+		assert.strictEqual(calls[calls.length - 1].payload.aspect_ratio, '16:9');
+		assert.strictEqual(calls[calls.length - 1].payload.image_size, '2K');
 		const localMediaTest = await requestJson(port, 'POST', '/v1/relay/test', { job_type: 'media.analyze', model: 'model-relay:codex:auto', prompt: 'test media', media_data_url: `data:video/mp4;base64,${Buffer.from('mp4').toString('base64')}` });
 		assert.strictEqual(localMediaTest.statusCode, 200);
 		assert.strictEqual(calls[calls.length - 1].route, 'relay-media.analyze');

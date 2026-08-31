@@ -300,6 +300,37 @@ function generationPreferences(payload = {}, kind) {
 	return preferences.join(' ');
 }
 
+function grokImageToolGuidance(payload = {}, toolName) {
+	const safeValue = (value, maxLength = 64) => String(value || '').trim().replace(/[\r\n]+/g, ' ').slice(0, maxLength);
+	const parts = [];
+	const aspectRatio = safeValue(payload.aspect_ratio);
+	const resolution = safeValue(payload.resolution).toLowerCase();
+	if (aspectRatio && aspectRatio !== 'auto') {
+		parts.push(`Pass aspect_ratio ${JSON.stringify(aspectRatio)} as the ${toolName} tool argument.`);
+	}
+	if (resolution === '2k') {
+		parts.push('In the tool prompt string, request 2K output with the long edge around 2048 pixels.');
+	} else if (resolution === '1k') {
+		parts.push('In the tool prompt string, request 1K output with the long edge around 1024 pixels.');
+	}
+	parts.push('Do not pass a resolution tool parameter; Grok Imagine image tools only accept prompt and aspect_ratio.');
+	return parts.join(' ');
+}
+
+function antigravityImageToolGuidance(payload = {}) {
+	const safeValue = (value, maxLength = 64) => String(value || '').trim().replace(/[\r\n]+/g, ' ').slice(0, maxLength);
+	const parts = [];
+	const aspectRatio = safeValue(payload.aspect_ratio);
+	const imageSize = safeValue(payload.image_size || payload.imageSize).toUpperCase();
+	if (aspectRatio && aspectRatio !== 'auto') {
+		parts.push(`Call generate_image with aspectRatio ${JSON.stringify(aspectRatio)}.`);
+	}
+	if (imageSize === '1K' || imageSize === '2K' || imageSize === '4K') {
+		parts.push(`Call generate_image with imageSize ${JSON.stringify(imageSize)}.`);
+	}
+	return parts.join(' ');
+}
+
 function testOption(key, label, delivery, choices) {
 	return { key, label, delivery, choices };
 }
@@ -309,11 +340,11 @@ const CODEX_IMAGE_SIZE_CHOICES = [
 	{ value: '1024x1024', label: 'Square · 1024 × 1024' },
 	{ value: '1536x1024', label: 'Landscape · 1536 × 1024' },
 	{ value: '1024x1536', label: 'Portrait · 1024 × 1536' },
-	{ value: '2048x2048', label: '2K square · 2048 × 2048' },
-	{ value: '2560x1440', label: '2K landscape · 2560 × 1440' },
-	{ value: '1440x2560', label: '2K portrait · 1440 × 2560' },
-	{ value: '3840x2160', label: '4K landscape · 3840 × 2160' },
-	{ value: '2160x3840', label: '4K portrait · 2160 × 3840' },
+	{ value: '2048x2048', label: '2K square · 2048 × 2048 (requested, not guaranteed)' },
+	{ value: '2560x1440', label: '2K landscape · 2560 × 1440 (requested, not guaranteed)' },
+	{ value: '1440x2560', label: '2K portrait · 1440 × 2560 (requested, not guaranteed)' },
+	{ value: '3840x2160', label: '4K landscape · 3840 × 2160 (requested, not guaranteed)' },
+	{ value: '2160x3840', label: '4K portrait · 2160 × 3840 (requested, not guaranteed)' },
 ];
 
 const CODEX_IMAGE_TEST_OPTIONS = [
@@ -326,12 +357,25 @@ const CODEX_IMAGE_TEST_OPTIONS = [
 	]),
 ];
 
-const ANTIGRAVITY_IMAGE_SIZE_CHOICES = [
-	...CODEX_IMAGE_SIZE_CHOICES,
+const ANTIGRAVITY_IMAGE_ASPECT_CHOICES = [
+	{ value: 'auto', label: 'Auto · provider chooses' },
+	{ value: '1:1', label: 'Square · 1:1' },
+	{ value: '16:9', label: 'Landscape · 16:9' },
+	{ value: '9:16', label: 'Portrait · 9:16' },
+	{ value: '4:3', label: 'Landscape · 4:3' },
+	{ value: '3:4', label: 'Portrait · 3:4' },
+	{ value: '3:2', label: 'Landscape · 3:2' },
+	{ value: '2:3', label: 'Portrait · 2:3' },
+	{ value: '21:9', label: 'Cinema · 21:9' },
 ];
 
 const ANTIGRAVITY_IMAGE_TEST_OPTIONS = [
-	testOption('size', 'Resolution', 'guidance', ANTIGRAVITY_IMAGE_SIZE_CHOICES),
+	testOption('aspect_ratio', 'Aspect ratio', 'guidance', ANTIGRAVITY_IMAGE_ASPECT_CHOICES),
+	testOption('image_size', 'Resolution', 'guidance', [
+		{ value: '2K', label: '2K · ~2048px long edge' },
+		{ value: '4K', label: '4K · ~4096px long edge' },
+		{ value: '1K', label: '1K · ~1024px long edge' },
+	]),
 ];
 
 const GROK_IMAGE_ASPECT_CHOICES = [
@@ -354,10 +398,10 @@ const GROK_IMAGE_ASPECT_CHOICES = [
 ];
 
 const GROK_IMAGE_TEST_OPTIONS = [
-	testOption('aspect_ratio', 'Aspect ratio', 'guidance', GROK_IMAGE_ASPECT_CHOICES),
+	testOption('aspect_ratio', 'Aspect ratio', 'tool-arg', GROK_IMAGE_ASPECT_CHOICES),
 	testOption('resolution', 'Resolution', 'guidance', [
-		{ value: '1k', label: '1K' },
-		{ value: '2k', label: '2K' },
+		{ value: '2k', label: '2K · prompt guidance only' },
+		{ value: '1k', label: '1K · prompt guidance only' },
 	]),
 ];
 
@@ -391,8 +435,8 @@ const GROK_VIDEO_TEST_OPTIONS = [
 const XAI_IMAGE_TEST_OPTIONS = [
 	testOption('aspect_ratio', 'Aspect ratio', 'direct', GROK_IMAGE_ASPECT_CHOICES),
 	testOption('resolution', 'Resolution', 'direct', [
-		{ value: '1k', label: '1K' },
 		{ value: '2k', label: '2K' },
+		{ value: '1k', label: '1K' },
 	]),
 	testOption('quality', 'Quality', 'direct', [
 		{ value: 'medium', label: 'Medium' },
@@ -526,7 +570,12 @@ function createGrokCliDriver(options = {}) {
 	let unavailableTools = { images: false, videos: false };
 
 	function probeImagine() {
-		const candidates = [options.imagineSkillPath, process.env.AI_MODEL_RELAY_GROK_IMAGINE_SKILL, path.join(os.homedir(), '.grok', 'skills', 'imagine', 'SKILL.md')].filter(Boolean);
+		const candidates = [
+			options.imagineSkillPath,
+			process.env.AI_MODEL_RELAY_GROK_IMAGINE_SKILL,
+			path.join(os.homedir(), '.grok', 'skills', 'imagine', 'SKILL.md'),
+			path.join(os.homedir(), '.grok', 'bundled', 'skills', 'imagine', 'SKILL.md'),
+		].filter(Boolean);
 		const skillPath = candidates.find((candidate) => {
 			try { return fs.statSync(candidate).isFile(); } catch (error) { return false; }
 		});
@@ -703,8 +752,8 @@ function createGrokCliDriver(options = {}) {
 			if (references.error) return { success: false, category: 'validation', code: 'grok_reference_invalid', message: references.error };
 			const runImagineTool = async (toolName, targetDir, sourcePaths = [], outputLabel = kind === 'images' ? 'image' : 'video') => {
 				const instruction = `Call the ${toolName} tool exactly once to create the requested ${outputLabel}${sourcePaths.length ? ` using ${sourcePaths.join(', ')}` : ''}.`;
-                                const preferences = generationPreferences(payload, kind);
-                                const prompt = `${instruction} The tool saves the generated file in its managed Grok session directory; do not search for, copy, or move it. Do not call any other tool.${preferences ? ` ${preferences}` : ''} User request: ${String(payload.prompt || '').trim()}`;
+				const preferences = kind === 'images' ? grokImageToolGuidance(payload, toolName) : generationPreferences(payload, kind);
+				const prompt = `${instruction} The tool saves the generated file in its managed Grok session directory; do not search for, copy, or move it. Do not call any other tool.${preferences ? ` ${preferences}` : ''} User request: ${String(payload.prompt || '').trim()}`;
 				if (session.appendSessionInput) {
 					session.appendSessionInput('grok cli request', `Tool: ${toolName}\nWorkspace: ${workspace}\n\nPrompt (passed with --single; stdin is empty):\n${prompt}`);
 				}
@@ -895,7 +944,7 @@ function createAntigravityCliDriver(mediaAnalysis, options = {}) {
 
 	async function runPrompt(workspace, prompt, timeoutMs, session, operation = 'CLI request') {
 		const args = ['-p', prompt];
-		if (snapshot.print_json_supported) args.push('-o', 'json');
+		if (snapshot.print_json_supported) args.push('--output-format', 'json');
 		const result = await commandRunner(snapshot.command, args, '', session, { ...options, cwd: workspace, timeoutMs });
 		return resultFailure(result, operation) || result;
 	}
@@ -933,7 +982,7 @@ function createAntigravityCliDriver(mediaAnalysis, options = {}) {
 				snapshot = { ...snapshot, ...detected, ready: false, authenticated: null, state: 'unsupported', diagnostic: 'Installed Antigravity CLI does not expose non-interactive -p/--print support.' };
 				return snapshot;
 			}
-			const printJsonSupported = /(?:^|[\s,])-o(?:[\s,]|$)|--output-format/i.test(helpText);
+			const printJsonSupported = /--output-format/i.test(helpText);
 			snapshot = { ...snapshot, ...detected, print_json_supported: printJsonSupported, ready: snapshot.authenticated !== false, authenticated: snapshot.authenticated, state: snapshot.authenticated === false ? 'not_authenticated' : 'ready', diagnostic: snapshot.authenticated === false ? 'Not authenticated.' : (printJsonSupported ? 'Ready; authentication will be confirmed on the first request.' : 'Ready; CLI print-mode text output will be normalized locally.') };
 			return snapshot;
 		},
@@ -961,8 +1010,8 @@ function createAntigravityCliDriver(mediaAnalysis, options = {}) {
 				if (references.error) return { success: false, category: 'validation', code: 'antigravity_reference_invalid', message: references.error };
 				const imageName = `relay-${Date.now()}-${randomUUID()}`;
 				const referenceInstruction = references.paths.length ? ` Use these exact ImagePaths: ${JSON.stringify(references.paths)}.` : ' Do not use ImagePaths.';
-                                const preferences = generationPreferences(payload, 'images');
-                                const prompt = `Call generate_image exactly once with ImageName ${JSON.stringify(imageName)}.${referenceInstruction} Do not call shell, file, browser, subagent, or any other tools.${preferences ? ` ${preferences}` : ''} User image request: ${String(payload.prompt || '').trim().slice(0, 24000)}`;
+				const preferences = antigravityImageToolGuidance(payload);
+				const prompt = `Call generate_image exactly once with ImageName ${JSON.stringify(imageName)}.${referenceInstruction} Do not call shell, file, browser, subagent, or any other tools.${preferences ? ` ${preferences}` : ''} User image request: ${String(payload.prompt || '').trim().slice(0, 24000)}`;
 				const startedAt = Date.now();
 				const result = await runPrompt(workspace, prompt, imageTimeoutMs, session, 'image-generation');
 				if (!result.success) return result;
@@ -1680,4 +1729,7 @@ module.exports = {
 	createXaiApiDriver,
 	GROK_MEDIA_TIMEOUT_MS,
 	providerFromPayload,
+	antigravityImageToolGuidance,
+	grokImageToolGuidance,
+	generationPreferences,
 };

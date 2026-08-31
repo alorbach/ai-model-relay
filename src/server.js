@@ -833,7 +833,7 @@ async function route(req, res, context) {
 		if (body.input_reference_data_url) {
 			requestedPayload.input_reference_data_url = String(body.input_reference_data_url);
 		}
-		for (const key of ['audio_base64', 'audio_format', 'language', 'locale', 'xai_options', 'media_data_url', 'media_url', 'frames', 'size', 'quality', 'seconds', 'aspect_ratio', 'resolution', 'n', 'generate_audio']) {
+		for (const key of ['audio_base64', 'audio_format', 'language', 'locale', 'xai_options', 'media_data_url', 'media_url', 'frames', 'size', 'quality', 'image_size', 'seconds', 'aspect_ratio', 'resolution', 'n', 'generate_audio']) {
 			if (body[key] !== undefined) requestedPayload[key] = body[key];
 		}
 		const resolved = relayPayloadFor(context, jobType, requestedPayload);

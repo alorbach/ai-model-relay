@@ -91,16 +91,19 @@ function deferredRunner(label, started, resolvers, result = { success: true }) {
 
 	{
 		const manager = new JobManager({ maxConcurrent: 1 });
+		const tinyPng = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=', 'base64');
 		await manager.run({ requestId: 'request-image', type: 'images' }, () => ({
 			success: true,
-			response: { data: [{ b64_json: Buffer.from('generated image bytes').toString('base64'), mime_type: 'image/png' }] },
+			response: { data: [{ b64_json: tinyPng.toString('base64'), mime_type: 'image/png' }] },
 		}));
 		const artifact = manager.snapshot().recent[0].artifacts[0];
 		assert.strictEqual(artifact.mime_type, 'image/png');
+		assert.strictEqual(artifact.width, 1);
+		assert.strictEqual(artifact.height, 1);
 		assert.strictEqual(artifact.url, '/v1/status/jobs/1/artifacts/0');
-		assert.strictEqual(manager.artifact(1, 0).bytes.toString(), 'generated image bytes');
+		assert.strictEqual(manager.artifact(1, 0).bytes.toString('base64'), tinyPng.toString('base64'));
 		assert.strictEqual(manager.artifact(1, 1), null);
-		assert.strictEqual(manager.artifactByRequestId('request-image').bytes.toString(), 'generated image bytes');
+		assert.strictEqual(manager.artifactByRequestId('request-image').bytes.toString('base64'), tinyPng.toString('base64'));
 		assert.strictEqual(manager.artifactByRequestId('missing'), null);
 	}
 

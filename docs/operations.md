@@ -16,7 +16,7 @@
 The Settings page shows every supported local/API driver with an installed, ready, checking, not-authenticated, or unavailable state; executable path, version, supported operations, and concise safe diagnostics are shown separately so long paths do not distort the card layout.
 
 - **Codex CLI**: chat, image generation, and media analysis.
-- **Grok CLI**: chat/coding plus Grok Imagine image generation and experimental image-reference video generation only when `%USERPROFILE%\.grok\skills\imagine\SKILL.md` declares the matching local tools.
+- **Grok CLI**: chat/coding plus Grok Imagine image generation and experimental image-reference video generation only when `%USERPROFILE%\.grok\skills\imagine\SKILL.md` or `%USERPROFILE%\.grok\bundled\skills\imagine\SKILL.md` declares the matching local tools.
 - **Cursor Agent**: chat/coding through `cursor-agent --print --output-format json`.
 - **Local ASR**: local transcription; its detailed runtime/model editor remains below routing.
 - **OpenAI Videos**, **Grok/xAI API**, and **API Key Chat**: separately configured API drivers. xAI Imagine image/video use the same `XAI_API_KEY` as chat and STT. OpenAI Sora 2 remains available until the Videos API shutdown on 24 Sep 2026.
@@ -209,9 +209,13 @@ Open **Settings**, press **Refresh detection**, and read the provider card's saf
 
 ### Grok image or video is unavailable
 
-Grok CLI media requires `%USERPROFILE%\.grok\skills\imagine\SKILL.md` to declare the relevant Imagine tools. Press **Refresh detection** after installing/updating Grok. Image/video jobs fail explicitly when the Imagine tools are unavailable, no output artifact is generated, the request is moderated, or the bounded Grok process times out. Video remains experimental until a local video request succeeds; if Grok confirms that a video tool is unavailable, refresh detection and update Grok before selecting it again.
+Grok CLI media requires `%USERPROFILE%\.grok\skills\imagine\SKILL.md` or `%USERPROFILE%\.grok\bundled\skills\imagine\SKILL.md` to declare the relevant Imagine tools. Press **Refresh detection** after installing/updating Grok. Image/video jobs fail explicitly when the Imagine tools are unavailable, no output artifact is generated, the request is moderated, or the bounded Grok process times out. Video remains experimental until a local video request succeeds; if Grok confirms that a video tool is unavailable, refresh detection and update Grok before selecting it again.
 
 xAI Imagine HTTP image and video jobs (`model-relay:xai:imagine-image`, `model-relay:xai:imagine-video`) need `XAI_API_KEY` or `AI_MODEL_RELAY_XAI_API_KEY`. Native request fields include aspect ratio (including `21:9` and `5:2` for images), image resolution `1k`/`2k`, video resolution `480p`/`720p`/`1080p`, clip length 1–15 seconds, and `generate_audio`. These upload the prompt and any reference images to xAI. When that key is set and no video default has been saved, Settings defaults video routing to Imagine video.
+
+### Image resolution expectations on status-page tests
+
+Codex CLI and Grok CLI image tests send size or resolution choices as **generation guidance** only. Codex built-in `image_gen` does not accept explicit `size`/`quality` tool parameters, and Grok Imagine `image_gen` accepts `aspect_ratio` but not `resolution`. The Live tab shows the measured artifact width × height so you can compare a requested size against what the provider actually returned. xAI Imagine HTTP (`model-relay:xai:imagine-image`) is the only built-in image test path that sends `resolution` directly to the provider API.
 
 ### Cursor Agent is unavailable
 

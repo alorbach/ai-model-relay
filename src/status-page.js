@@ -212,6 +212,10 @@ function statusPageHtml() {
 			border: 1px solid var(--line);
 			border-radius: 8px;
 		}
+		.job-artifact-meta {
+			color: var(--muted);
+			font-size: 11px;
+		}
 		.job-artifact-preview video {
 			width: 100%;
 			max-height: 320px;
@@ -1032,6 +1036,26 @@ function statusPageHtml() {
 			selectProviderTestTab('provider-test-tab-images');
 		}
 
+		function formatArtifactBytes(sizeBytes) {
+			const bytes = Number(sizeBytes);
+			if (!Number.isFinite(bytes) || bytes < 0) return '';
+			if (bytes < 1024) return bytes + ' B';
+			if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(bytes < 10 * 1024 ? 1 : 0) + ' KB';
+			return (bytes / (1024 * 1024)).toFixed(bytes < 10 * 1024 * 1024 ? 1 : 0) + ' MB';
+		}
+
+		function artifactMetaLabel(artifact) {
+			const parts = [];
+			const width = Number(artifact && artifact.width);
+			const height = Number(artifact && artifact.height);
+			if (Number.isFinite(width) && width > 0 && Number.isFinite(height) && height > 0) {
+				parts.push(width + ' × ' + height);
+			}
+			const sizeLabel = formatArtifactBytes(artifact && artifact.size_bytes);
+			if (sizeLabel) parts.push(sizeLabel);
+			return parts.join(' · ');
+		}
+
 		function text(value, fallback = '-') {
 			const normalized = String(value ?? '').trim();
 			return normalized || fallback;
@@ -1145,7 +1169,8 @@ function statusPageHtml() {
 				if (/^video\\//.test(mimeType)) return '<button type="button" class="job-artifact-preview" data-media-preview="' + escapeHtml(url) + '" data-media-mime="' + escapeHtml(mimeType) + '" title="Open generated video ' + (index + 1) + '"><video src="' + escapeHtml(url) + '" muted preload="metadata" playsinline></video><span>Open generated video ' + (index + 1) + '</span></button>';
 				if (!/^image\\//.test(mimeType)) return '';
 				const label = 'Open generated image ' + (index + 1);
-				return '<button type="button" class="job-artifact-preview" data-media-preview="' + escapeHtml(url) + '" data-media-mime="' + escapeHtml(mimeType) + '" title="' + escapeHtml(label) + '"><img src="' + escapeHtml(url) + '" alt="Generated image preview ' + (index + 1) + '" loading="lazy"><span>' + escapeHtml(label) + '</span></button>';
+				const meta = artifactMetaLabel(artifact);
+				return '<button type="button" class="job-artifact-preview" data-media-preview="' + escapeHtml(url) + '" data-media-mime="' + escapeHtml(mimeType) + '" title="' + escapeHtml(label) + '"><img src="' + escapeHtml(url) + '" alt="Generated image preview ' + (index + 1) + '" loading="lazy"><span>' + escapeHtml(label) + (meta ? '<br><span class="job-artifact-meta">' + escapeHtml(meta) + '</span>' : '') + '</span></button>';
 			}).filter(Boolean);
 			return previews.length ? '<div class="job-artifacts">' + previews.join('') + '</div>' : '';
 		}
@@ -1536,21 +1561,26 @@ function statusPageHtml() {
 
                 function providerTestControls(model, jobType) {
                         const options = Array.isArray(model.test_options) ? model.test_options.filter((entry) => entry && entry.key && Array.isArray(entry.choices) && entry.choices.length) : [];
-                        if (!options.length) {
-                                return jobType === 'images' && model.backend === 'antigravity-cli'
-                                        ? '<small class="muted">Antigravity generate_image does not expose CLI resolution or quality options.</small>'
-                                        : '';
-                        }
+                        if (!options.length) return '';
+                        const deliveryLabel = (entry) => {
+                                if (entry.delivery === 'direct') return 'sent directly';
+                                if (entry.delivery === 'tool-arg') return 'image_gen tool argument';
+                                return 'generation guidance';
+                        };
+                        const deliverySummary = (entry) => {
+                                if (entry.delivery === 'direct') return 'directly to the provider';
+                                if (entry.delivery === 'tool-arg') return 'as an image_gen tool argument';
+                                return 'as generation guidance';
+                        };
                         const controls = options.map((entry) => {
                                 const key = String(entry.key || '').trim();
                                 const choices = entry.choices.filter((choice) => choice && choice.value !== undefined);
                                 if (!key || !choices.length) return '';
                                 const selected = key === 'model' ? model.id : String(choices[0].value);
                                 const selectOptions = choices.map((choice) => '<option value="' + escapeHtml(choice.value) + '"' + (String(choice.value) === selected ? ' selected' : '') + '>' + escapeHtml(choice.label || choice.value) + '</option>').join('');
-                                const delivery = entry.delivery === 'direct' ? 'sent directly' : 'generation guidance';
-                                return '<label class="field"><span>' + escapeHtml(entry.label || key) + ' · ' + delivery + '</span><select data-test-option="' + escapeHtml(key) + '">' + selectOptions + '</select></label>';
+                                return '<label class="field"><span>' + escapeHtml(entry.label || key) + ' · ' + deliveryLabel(entry) + '</span><select data-test-option="' + escapeHtml(key) + '">' + selectOptions + '</select></label>';
                         }).filter(Boolean).join('');
-                        const deliveries = Array.from(new Set(options.map((entry) => entry.delivery === 'direct' ? 'directly to the provider' : 'as generation guidance')));
+                        const deliveries = Array.from(new Set(options.map((entry) => deliverySummary(entry))));
                         return controls ? '<div class="settings-grid provider-generation-options">' + controls + '</div><small class="muted">Selected values are sent ' + escapeHtml(deliveries.join(' and ')) + '.</small>' : '';
                 }
 

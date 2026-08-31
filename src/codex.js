@@ -832,8 +832,14 @@ function imagePrompt(payload, attachments = []) {
 	const size = String(payload.size || '1024x1024').trim();
 	const quality = String(payload.quality || 'high').trim();
 	const outputFormat = String(payload.output_format || 'image/png').trim();
+	const formatName = /png/i.test(outputFormat) ? 'PNG' : (/webp/i.test(outputFormat) ? 'WebP' : 'JPEG');
+	const sizePart = size === 'auto' ? '' : ` at ${size}`;
+	const qualityPart = quality === 'auto' ? '' : `, quality ${quality}`;
+	const generationPrompt = `Create one ${formatName} image${sizePart}${qualityPart}. Scene: ${prompt}`;
 	const lines = [
-		'Generate exactly one image using your built-in image generation tool.',
+		'Generate exactly one image using your built-in image_gen tool.',
+		'Pass the following text verbatim as the image_gen prompt (do not shorten or omit the size or quality):',
+		generationPrompt,
 		'Do not access unrelated local files or modify anything except generated image output.',
 	];
 	if (attachments.length) {
@@ -849,9 +855,6 @@ function imagePrompt(payload, attachments = []) {
 		}
 	}
 	lines.push(
-		`User prompt: ${prompt}`,
-		`Requested size: ${size}`,
-		`Preferred quality: ${quality}`,
 		`Requested output format: ${outputFormat}. Produce this exact file format.`,
 		'After the image has been generated, reply with a short plain-text confirmation only.',
 	);

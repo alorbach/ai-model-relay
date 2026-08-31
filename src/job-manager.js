@@ -1,6 +1,7 @@
 'use strict';
 
 const fs = require('fs');
+const { readImageDimensions } = require('./image-dimensions');
 
 function clampMaxConcurrent(value) {
 	const parsed = Number.parseInt(String(value || ''), 10);
@@ -68,11 +69,25 @@ function redactSessionInput(value) {
 	return String(value || '').replace(/\b(bearer|token|api[_ -]?key|authorization)\s*(?:[:=]\s*|\s+)([^\s,;]+)/ig, '$1: <redacted>');
 }
 
+function artifactWithDimensions(mimeType, bytes) {
+	const artifact = { mime_type: mimeType, bytes };
+	if (/^image\//.test(mimeType)) {
+		const dimensions = readImageDimensions(bytes);
+		if (dimensions && dimensions.width > 0 && dimensions.height > 0) {
+			artifact.width = dimensions.width;
+			artifact.height = dimensions.height;
+		}
+	}
+	return artifact;
+}
+
 function collectMediaArtifacts(result) {
 	const localArtifact = result && result.artifact && typeof result.artifact === 'object' ? result.artifact : null;
 	const localBytes = localArtifact && Buffer.isBuffer(localArtifact.bytes) ? localArtifact.bytes : null;
 	const localMime = String(localArtifact && localArtifact.mime_type || '').toLowerCase();
-	const localArtifacts = localBytes && localBytes.length && localBytes.length <= 64 * 1024 * 1024 && ['image/png', 'image/jpeg', 'image/webp'].includes(localMime) ? [{ mime_type: localMime, bytes: localBytes }] : [];
+	const localArtifacts = localBytes && localBytes.length && localBytes.length <= 64 * 1024 * 1024 && ['image/png', 'image/jpeg', 'image/webp'].includes(localMime)
+		? [artifactWithDimensions(localMime, localBytes)]
+		: [];
 	const response = result && result.response && typeof result.response === 'object' ? result.response : {};
 	const data = Array.isArray(response.data) ? response.data : [];
 	const artifacts = [];
@@ -83,7 +98,7 @@ function collectMediaArtifacts(result) {
 		if (!['image/png', 'image/jpeg', 'image/webp'].includes(mimeType)) continue;
 		const bytes = Buffer.from(encoded, 'base64');
 		if (!bytes.length || bytes.length > 20 * 1024 * 1024) continue;
-		artifacts.push({ mime_type: mimeType, bytes });
+		artifacts.push(artifactWithDimensions(mimeType, bytes));
 	}
 	const videoEncoded = String(response.b64_video || '').replace(/\s/g, '');
 	if (videoEncoded) {
@@ -346,6 +361,7 @@ class JobManager {
 				index,
 				mime_type: artifact.mime_type,
 				size_bytes: artifact.bytes.length,
+				...(artifact.width && artifact.height ? { width: artifact.width, height: artifact.height } : {}),
 				url: `/v1/status/jobs/${job.id}/artifacts/${index}`,
 			}));
 		}

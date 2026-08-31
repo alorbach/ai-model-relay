@@ -392,23 +392,23 @@ const mediaAnalysis = require('../src/media-analysis');
 		assert.strictEqual(antigravity.capabilities().ready, true);
 		assert.deepStrictEqual(antigravity.models().map((model) => model.id), ['model-relay:antigravity-cli:auto', 'model-relay:antigravity-cli:image', 'model-relay:antigravity-cli:media']);
 		const antigravityImageModel = antigravity.models().find((model) => model.id === 'model-relay:antigravity-cli:image');
-		assert.deepStrictEqual(antigravityImageModel.test_options.map((option) => option.key), ['size']);
-		assert.deepStrictEqual(antigravityImageModel.test_options[0].choices.map((choice) => choice.value), ['auto', '1024x1024', '1536x1024', '1024x1536', '2048x2048', '2560x1440', '1440x2560', '3840x2160', '2160x3840']);
+		assert.deepStrictEqual(antigravityImageModel.test_options.map((option) => option.key), ['aspect_ratio', 'image_size']);
+		assert.deepStrictEqual(antigravityImageModel.test_options[1].choices.map((choice) => choice.value), ['2K', '4K', '1K']);
 		assert.strictEqual(antigravityImageModel.test_options[0].delivery, 'guidance');
 		const antigravityChat = await antigravity.chat({ prompt: 'hello from Antigravity' });
 		assert.strictEqual(antigravityChat.response.choices[0].message.content, 'Antigravity answer');
                 const antigravityImage = await antigravity.images({
                         prompt: 'make a relay icon',
-                        size: '1536x1024',
-                        quality: 'high',
+                        aspect_ratio: '16:9',
+                        image_size: '2K',
                         reference_images: [{ b64_json: Buffer.from('reference image').toString('base64'), mime_type: 'image/png' }],
                 });
 		assert.strictEqual(antigravityImage.success, true);
 		assert.strictEqual(antigravityImage.response.data[0].mime_type, 'image/png');
                                 assert.strictEqual(antigravityImage.response.provider_details.tool, 'generate_image');
                                 assert.ok(antigravityPrompts.some((prompt) => prompt.includes('ImagePaths')));
-                                assert.ok(antigravityPrompts.some((prompt) => prompt.includes('Requested output resolution: 1536x1024.')));
-                                assert.ok(antigravityPrompts.some((prompt) => prompt.includes('Preferred quality: high.')));
+                                assert.ok(antigravityPrompts.some((prompt) => prompt.includes('aspectRatio "16:9"')));
+                                assert.ok(antigravityPrompts.some((prompt) => prompt.includes('imageSize "2K"')));
 				assert.ok(antigravityCommands.some((args) => args[0] === '-p' && !args.includes('-o') && !args.includes('--output-format')));
 		const antigravityMedia = await antigravity['media.analyze']({
 			prompt: 'describe this test video',
@@ -458,6 +458,31 @@ const mediaAnalysis = require('../src/media-analysis');
 			media_data_url: `data:video/mp4;base64,${Buffer.from('mp4 test video').toString('base64')}`,
 		});
 		assert.strictEqual(quotaInSuccessMedia.success, true);
+
+		const agy114Commands = [];
+		const agy114Help = [
+			'Usage of agy.exe:',
+			'  --add-dir Add a directory to the workspace',
+			'  --agent Agent for the current CLI session',
+			'  -c Short alias for --continue',
+			'  -p  Short alias for --print',
+		].join('\n');
+		const agy114 = createAntigravityCliDriver(mediaAnalysis, {
+			...antigravityOptions,
+			runTextCommand: async (command, args) => {
+				if (args[0] === '--help') return { success: true, text: '', stderr: agy114Help };
+				agy114Commands.push(args);
+				return antigravityOptions.runTextCommand(command, args);
+			},
+		});
+		await agy114.refresh();
+		assert.strictEqual(agy114.capabilities().print_json_supported, false);
+		const agy114Image = await agy114.images({ prompt: 'no json flag' });
+		assert.strictEqual(agy114Image.success, true);
+		const agy114ImageArgs = agy114Commands.find((args) => args[0] === '-p');
+		assert.ok(agy114ImageArgs);
+		assert.ok(!agy114ImageArgs.includes('-o'));
+		assert.ok(!agy114ImageArgs.includes('--output-format'));
 
 		const antigravityRegistry = createBackendRegistry({
 			codex,
