@@ -1,0 +1,78 @@
+test/grok-media.test.js
+  s_f875d017f94040::t_3aa97734d8a279 69-75
+  s_f875d017f94040::t_6b01bffdc05db4 90,95-97
+src/backend-registry.js
+  s_f875d017f94040::t_b43f30908e32a7 119-120
+  s_f875d017f94040::t_e2e0a83a9416cc 153,163-166
+  s_f875d017f94040::t_ddaebff4856cce 169-184
+  s_f875d017f94040::t_3339f3eee78461 296-298
+  s_f875d017f94040::t_ad1fdc52734ba4 684
+  s_f875d017f94040::t_f763fe6f1ff6e9 1274-1284,1286-1297,1300-1302,1304-1347,1349-1360,1362-1430
+  s_f875d017f94040::t_3b8fc369b6244f 115-118,121-125,127-152,154-162,167-168,185-195
+  s_f875d017f94040::t_7d378c4a9a7512 337-355,357-364,368,375-393,397-427
+  s_f875d017f94040::t_e1706774119617 1285
+  s_f875d017f94040::t_718f49cebbab61 1298-1299,1303
+  s_f875d017f94040::t_3e1796d1bfbd89 1361
+  s_f875d017f94040::t_17c0eefde6e6a2 1131-1151,1156,1165-1167,1170-1175
+  s_f875d017f94040::t_91a1d98ab77212 1348
+docs/operations.md
+  s_f875d017f94040::t_90ce056de94251 22
+  s_f875d017f94040::t_154d011e87a3cc 214-215
+  s_f875d017f94040::t_0ec84f2fdf4488 279
+docs/local-bridge-api.md
+  s_f875d017f94040::t_b8780c5cc1eb6d 498
+  s_f875d017f94040::t_a8d7bb10a047a5 712
+  s_f875d017f94040::t_177cd8275c5c25 496-497
+  s_f875d017f94040::t_96e5bfe81fa8e9 469
+  s_f875d017f94040::t_48968b4ac6dc2b 462-464
+  s_f875d017f94040::t_9349d61d41f858 492
+  s_f875d017f94040::t_def0f085a9bbbd 233
+test/relay-settings.test.js
+  s_f875d017f94040::t_8fdc063363bfd5 45-61
+src/relay-settings.js
+  s_f875d017f94040::t_1e589bebeb219c 34
+  s_f875d017f94040::t_5dbb8f19be0ea6 14-20
+  s_f875d017f94040::t_ffe5a870d314c7 32
+docs/architecture.md
+  s_f875d017f94040::t_a61b8551bfd670 65
+  s_f875d017f94040::t_665349ab6332fb 37
+test/backend-registry.test.js
+  s_f875d017f94040::t_0b6b3cf5b95efc 258-288
+  s_f875d017f94040::t_904cfaa379b4cb 328-341
+  s_f875d017f94040::t_dd3de532b45a90 305-313,325,327
+  s_f875d017f94040::t_213e43d7a39274 161-162
+  s_f875d017f94040::t_ccfc0f6a95bb2a 92,95-103
+  s_f875d017f94040::t_7219563c6efd29 214-228,230-257,289-304,314-324,326
+  s_f875d017f94040::t_2ca795bc22cdde 229
+README.md
+  s_f875d017f94040::t_cf19bb18156c9b 27-28
+  s_f875d017f94040::t_400771fc21e7cb 280,284,286
+  s_f875d017f94040::t_93280ed2aa0938 198
+docs/gateway-integration.md
+  s_f875d017f94040::t_6ce38a01a559dc 21
+src/server.js
+  s_f875d017f94040::t_f9fdaeb865e4a6 404-405
+  s_f875d017f94040::t_60c97f3d947174 836
+src/status-page.js
+  s_f875d017f94040::t_15f2eb098ddc61 1587
+test/relay-routes.test.js
+  s_f875d017f94040::t_a058a326aed087 322-328
+  s_f875d017f94040::t_d0fd4e9290e0da 121,123-124
+  s_f875d017f94040::t_6dacb93d18c5c6 201-202
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "2656ced1eb07a91fe4b48723c4e4f473fba3aefc",
+  "prompts": {},
+  "sessions": {
+    "s_f875d017f94040": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "ee04f1be-df62-41a8-8028-54d6351731df",
+        "model": "grok-4.6"
+      },
+      "human_author": null
+    }
+  }
+}
