@@ -121,15 +121,29 @@ async function withServer(options, callback) {
 	};
 	const codex = {
 		lastChatPayload: null,
-		capabilities: () => ({ success: true, bridge_features: { structured_exec_json: true, app_server: true }, codex: { version: 'codex-cli test' } }),
+		outputSchema: true,
+		structuredResponse: false,
+		lastSchemaPath: null,
+		lastSchemaContents: null,
+		lastChatInternalOptions: null,
+		execCapabilities: () => ({ output_schema: codex.outputSchema }),
+		capabilities: () => ({ success: true, bridge_features: { structured_exec_json: true, output_schema: codex.outputSchema, app_server: true }, codex: { version: 'codex-cli test' } }),
 		checkStatus: () => ({ success: true, message: 'ready', details: {} }),
 		models: () => ({ success: true, models: { text: ['codex-local:auto'], image: ['codex-local:image'] } }),
-		chat: (payload) => {
+		chat: (payload, session, internalOptions) => {
 			codex.lastChatPayload = payload;
+			codex.lastChatInternalOptions = internalOptions || null;
+			if (internalOptions && internalOptions.outputSchemaPath) {
+				codex.lastSchemaPath = internalOptions.outputSchemaPath;
+				codex.lastSchemaContents = fs.readFileSync(internalOptions.outputSchemaPath, 'utf8');
+			}
+			const content = codex.structuredResponse
+				? JSON.stringify({ summary: 'A structured media summary.', visible_text: 'A visible sign.', issues: ['Low contrast.'], confidence: 'high', notes: 'Additional context.' })
+				: `analyzed ${payload.messages[0].content.length} parts`;
 			return Promise.resolve({
 				success: true,
 				response: {
-					choices: [{ message: { role: 'assistant', content: `analyzed ${payload.messages[0].content.length} parts` } }],
+					choices: [{ message: { role: 'assistant', content } }],
 					provider_details: {},
 				},
 			});
@@ -166,8 +180,40 @@ async function withServer(options, callback) {
 		assert.strictEqual(analyzed.body.response.provider_details.media_analysis.frames_analyzed, 1);
 		assert.strictEqual(codex.lastChatPayload.max_tokens, 4096);
 		const analysisText = codex.lastChatPayload.messages[0].content[0].text;
-		assert.ok(analysisText.endsWith('a'.repeat(32000)));
-		assert.ok(!analysisText.endsWith('a'.repeat(32000) + 'b'));
+		assert.ok(analysisText.includes(`Provided audio transcript:\n${'a'.repeat(32000)}\n\nIf the CLI requests structured output`));
+		assert.ok(!analysisText.includes('a'.repeat(32000) + 'b'));
+		assert.strictEqual(codex.lastChatPayload.output_schema_path, undefined);
+		assert.ok(codex.lastChatInternalOptions.outputSchemaPath.endsWith('media-analysis.schema.json'));
+		const schema = JSON.parse(codex.lastSchemaContents);
+		assert.deepStrictEqual(schema.properties.issues, { type: 'array', items: { type: 'string' } });
+		assert.strictEqual(schema.additionalProperties, true);
+
+		codex.structuredResponse = true;
+		const structured = await requestJson(port, 'POST', '/v1/media/analyze', jobBody('media-structured', {
+			frames: [framePng],
+			prompt: 'Return structured analysis.',
+		}));
+		assert.strictEqual(structured.statusCode, 200);
+		assert.deepStrictEqual(structured.body.response.provider_details.media_analysis.structured, {
+			summary: 'A structured media summary.',
+			visible_text: 'A visible sign.',
+			issues: ['Low contrast.'],
+			confidence: 'high',
+			notes: 'Additional context.',
+		});
+		assert.strictEqual(structured.body.response.choices[0].message.content, 'A structured media summary.');
+
+		codex.structuredResponse = false;
+		codex.outputSchema = false;
+		const freeText = await requestJson(port, 'POST', '/v1/media/analyze', jobBody('media-free-text', {
+			frames: [framePng],
+			prompt: 'Use free text.',
+		}));
+		assert.strictEqual(freeText.statusCode, 200);
+		assert.strictEqual(freeText.body.response.provider_details.media_analysis.structured, undefined);
+		assert.ok(freeText.body.response.choices[0].message.content.startsWith('analyzed '));
+		assert.strictEqual(codex.lastChatPayload.output_schema_path, undefined);
+		assert.strictEqual(codex.lastChatInternalOptions, null);
 	});
 
 	await withServer({

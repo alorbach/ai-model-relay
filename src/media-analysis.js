@@ -19,6 +19,89 @@ const VIDEO_MIME_TYPES = new Map([
 	['video/x-msvideo', 'avi'],
 ]);
 
+const MEDIA_ANALYSIS_SCHEMA = {
+	$schema: 'http://json-schema.org/draft-07/schema#',
+	type: 'object',
+	properties: {
+		summary: { type: 'string' },
+		visible_text: { type: 'string' },
+		issues: { type: 'array', items: { type: 'string' } },
+		confidence: { type: 'string' },
+		notes: { type: 'string' },
+	},
+	additionalProperties: true,
+};
+
+function writeAnalysisSchema(tempDir) {
+	const schemaPath = path.join(tempDir, 'media-analysis.schema.json');
+	fs.writeFileSync(schemaPath, `${JSON.stringify(MEDIA_ANALYSIS_SCHEMA, null, 2)}\n`, 'utf8');
+	return schemaPath;
+}
+
+function outputSchemaSupported(codexAdapter) {
+	try {
+		if (codexAdapter && typeof codexAdapter.execCapabilities === 'function') {
+			return codexAdapter.execCapabilities().output_schema === true;
+		}
+		const capabilities = codexAdapter && typeof codexAdapter.capabilities === 'function'
+			? codexAdapter.capabilities()
+			: null;
+		return !!(capabilities && capabilities.bridge_features && capabilities.bridge_features.output_schema);
+	} catch (error) {
+		return false;
+	}
+}
+
+function parseStructuredAnalysis(value) {
+	const text = typeof value === 'string' ? value.trim().replace(/^```json\s*/i, '').replace(/```$/i, '').trim() : '';
+	if (!text) {
+		return null;
+	}
+	let parsed;
+	try {
+		parsed = JSON.parse(text);
+	} catch (error) {
+		return null;
+	}
+	if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+		return null;
+	}
+	let knownField = false;
+	for (const field of ['summary', 'visible_text', 'confidence', 'notes']) {
+		if (parsed[field] !== undefined) {
+			knownField = true;
+			if (typeof parsed[field] !== 'string') {
+				return null;
+			}
+		}
+	}
+	if (parsed.issues !== undefined) {
+		knownField = true;
+		if (!Array.isArray(parsed.issues) || parsed.issues.some((issue) => typeof issue !== 'string')) {
+			return null;
+		}
+	}
+	return knownField ? parsed : null;
+}
+
+function humanReadableAnalysis(structured, originalText) {
+	const summary = typeof structured.summary === 'string' ? structured.summary.trim() : '';
+	if (summary) {
+		return summary;
+	}
+	const lines = [];
+	if (typeof structured.visible_text === 'string' && structured.visible_text.trim()) {
+		lines.push(`Visible text: ${structured.visible_text.trim()}`);
+	}
+	if (Array.isArray(structured.issues) && structured.issues.length) {
+		lines.push(`Issues: ${structured.issues.join('; ')}`);
+	}
+	if (typeof structured.confidence === 'string' && structured.confidence.trim()) {
+		lines.push(`Confidence: ${structured.confidence.trim()}`);
+	}
+	return lines.join('\n') || originalText;
+}
+
 function capabilities() {
 	const ffmpeg = spawnSync('ffmpeg', ['-version'], { encoding: 'utf8', shell: false });
 	return {
@@ -223,7 +306,7 @@ function buildAnalysisMessages(payload, frames) {
 	const prompt = String(payload.prompt || 'Analyze this media and summarize the important visual content, text, timing, and likely user-facing issues.').trim();
 	const transcript = String(payload.transcript || '').trim();
 	const content = [
-		{ type: 'input_text', text: transcript ? `${prompt}\n\nProvided audio transcript:\n${transcript.slice(0, 32000)}` : prompt },
+		{ type: 'input_text', text: `${transcript ? `${prompt}\n\nProvided audio transcript:\n${transcript.slice(0, 32000)}` : prompt}\n\nIf the CLI requests structured output, fill its schema fields. Otherwise return a concise human-readable analysis.` },
 	];
 	for (const frame of frames) {
 		content.push({ type: 'input_image', image_url: frame });
@@ -233,8 +316,10 @@ function buildAnalysisMessages(payload, frames) {
 
 async function analyze(payload = {}, codexAdapter, session = {}) {
 	const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'alorbach-codex-media-'));
+	let schemaPath = '';
 	let frames = framesFromPayload(payload);
 	try {
+		schemaPath = writeAnalysisSchema(tempDir);
 		if (!frames.length && (payload.media_url || payload.media_data_url)) {
 			const materialized = await materializeMedia(payload, tempDir);
 			if (materialized && materialized.error) {
@@ -248,13 +333,23 @@ async function analyze(payload = {}, codexAdapter, session = {}) {
 		if (!frames.length) {
 			return { success: false, code: 'media_frames_required', category: 'validation', retryable: false, message: 'Provide bounded image frames, an HTTPS media URL, or a bounded video data URL for analysis.' };
 		}
-		const result = await codexAdapter.chat({
+		const chatPayload = {
 			model: payload.model || 'codex-local:auto',
 			max_tokens: resolveMaxTokens('media.analyze', payload.max_tokens),
 			messages: buildAnalysisMessages(payload, frames),
-		}, session);
+		};
+		const useOutputSchema = outputSchemaSupported(codexAdapter);
+		const result = useOutputSchema
+			? await codexAdapter.chat(chatPayload, session, { outputSchemaPath: schemaPath })
+			: await codexAdapter.chat(chatPayload, session);
 		if (!result.success) {
 			return result;
+		}
+		const message = result.response && result.response.choices && result.response.choices[0] && result.response.choices[0].message;
+		const messageContent = message && typeof message.content === 'string' ? message.content : '';
+		const structured = parseStructuredAnalysis(messageContent);
+		if (structured && message) {
+			message.content = humanReadableAnalysis(structured, messageContent);
 		}
 		result.response.provider_details = {
 			...(result.response.provider_details || {}),
@@ -263,6 +358,7 @@ async function analyze(payload = {}, codexAdapter, session = {}) {
 				transcript_supplied: !!String(payload.transcript || '').trim(),
 				extracted_from_media_url: !!payload.media_url,
 				extracted_from_media_data_url: !!payload.media_data_url,
+				...(structured ? { structured } : {}),
 			},
 		};
 		return result;

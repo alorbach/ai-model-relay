@@ -14,6 +14,7 @@ let configuredCodexBinary = '';
 const codexHome = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
 const authPath = path.join(codexHome, 'auth.json');
 const generatedImagesDir = path.join(codexHome, 'generated_images');
+let execHelpSnapshot = null;
 
 function collectCodexExe(root, matches, depth = 0) {
 	if (!root || depth > 6 || !fs.existsSync(root)) {
@@ -58,7 +59,11 @@ function findWindowsCodexExtensionBinary() {
 }
 
 function setCodexBinary(value) {
-	configuredCodexBinary = typeof value === 'string' ? value.trim() : '';
+	const nextBinary = typeof value === 'string' ? value.trim() : '';
+	if (nextBinary !== configuredCodexBinary) {
+		execHelpSnapshot = null;
+	}
+	configuredCodexBinary = nextBinary;
 }
 
 function resolveCodexBinary() {
@@ -89,6 +94,31 @@ function runCodex(args, options = {}) {
 		},
 		...options,
 	});
+}
+
+function parseExecHelpCapabilities(help) {
+	const helpText = `${help && help.stdout || ''}\n${help && help.stderr || ''}`;
+	return {
+		help_available: !!(help && !help.error && help.status === 0),
+		json: /(?:^|\s)--json(?:\s|,|$)/im.test(helpText),
+		output_schema: /(?:^|\s)--output-schema(?:\s|<|$)/im.test(helpText),
+		sandbox: /(?:^|\s)--sandbox(?:\s|<|$)/im.test(helpText),
+		image_attachments: /(?:^|\s)--image(?:\s|<|$)/im.test(helpText),
+	};
+}
+
+function rememberExecHelp(help) {
+	if (!execHelpSnapshot) {
+		execHelpSnapshot = parseExecHelpCapabilities(help);
+	}
+	return execHelpSnapshot;
+}
+
+function execCapabilities() {
+	if (!execHelpSnapshot) {
+		execHelpSnapshot = parseExecHelpCapabilities(runCodex(['exec', '--help']));
+	}
+	return { ...execHelpSnapshot };
 }
 
 function runCodexAsync(args, options = {}) {
@@ -165,13 +195,17 @@ function runCodexAsync(args, options = {}) {
 					signal,
 				});
 			}
-			resolve({
+			const result = {
 				stdout,
 				stderr,
 				status,
 				signal,
 				error: spawnError || (timedOut ? new Error('Codex CLI execution timed out.') : null),
-			});
+			};
+			if (args.length === 2 && args[0] === 'exec' && args[1] === '--help') {
+				rememberExecHelp(result);
+			}
+			resolve(result);
 		});
 	});
 }
@@ -369,6 +403,23 @@ function parseCodexJsonEvents(stdout) {
 function codexJsonUnsupported(run) {
 	const combined = `${run && run.stdout || ''}\n${run && run.stderr || ''}`;
 	return !!(run && run.status !== 0 && /(?:unknown|unexpected|unrecognized).{0,80}(?:--json|json)|(?:--json|json).{0,80}(?:unknown|unexpected|unrecognized)/i.test(combined));
+}
+
+function codexOutputSchemaUnsupported(run) {
+	const combined = `${run && run.stdout || ''}\n${run && run.stderr || ''}`;
+	return !!(run && run.status !== 0 && /(?:unknown|unexpected|unrecognized).{0,80}(?:--output-schema|output schema)|(?:--output-schema|output schema).{0,80}(?:unknown|unexpected|unrecognized)/i.test(combined));
+}
+
+function removeCodexArgPair(args, flag) {
+	const result = [];
+	for (let index = 0; index < args.length; index += 1) {
+		if (args[index] === flag) {
+			index += 1;
+			continue;
+		}
+		result.push(args[index]);
+	}
+	return result;
 }
 
 function createJsonOutputCollector(onOutput) {
@@ -699,7 +750,35 @@ function messagesToPrompt(messages, maxTokens) {
 	return buildChatPrompt(messages, maxTokens, '').prompt;
 }
 
-async function chat(payload, session = {}) {
+function buildChatArgs(tempDir, outputFile, model, attachments, options = {}) {
+	const args = [
+		'exec',
+		'--skip-git-repo-check',
+		'--ephemeral',
+	];
+	if (options.sandboxReadOnly) {
+		args.push('--sandbox', 'read-only');
+	}
+	args.push(
+		'--cd',
+		tempDir,
+		'--output-last-message',
+		outputFile,
+	);
+	if (options.outputSchemaPath) {
+		args.push('--output-schema', options.outputSchemaPath);
+	}
+	if (model !== 'auto') {
+		args.push('--model', model);
+	}
+	for (const attachment of Array.isArray(attachments) ? attachments : []) {
+		args.push('--image', attachment.path);
+	}
+	args.push('-');
+	return args;
+}
+
+async function chat(payload, session = {}, internalOptions = {}) {
 	const status = checkStatus();
 	if (!status.success) {
 		return status;
@@ -730,24 +809,20 @@ async function chat(payload, session = {}) {
 			output_file: outputFile,
 		});
 	}
-	const args = [
-		'exec',
-		'--skip-git-repo-check',
-		'--ephemeral',
-		'--cd',
-		tempDir,
-		'--output-last-message',
-		outputFile,
-	];
-	if (model !== 'auto') {
-		args.push('--model', model);
-	}
-	for (const attachment of attachments) {
-		args.push('--image', attachment.path);
-	}
-	args.push('-');
+	const execFeatures = execCapabilities();
+	const outputSchemaPath = typeof internalOptions.outputSchemaPath === 'string' ? internalOptions.outputSchemaPath.trim() : '';
+	const schemaPath = execFeatures.output_schema ? outputSchemaPath : '';
+	const args = buildChatArgs(tempDir, outputFile, model, attachments, {
+		sandboxReadOnly: execFeatures.sandbox,
+		outputSchemaPath: schemaPath,
+	});
 	if (typeof session.appendSessionInput === 'function') session.appendSessionInput('stdin', prompt);
-	const run = await runCodexExec(args, { cwd: tempDir, timeout: Number(process.env.ALORBACH_CODEX_CHAT_TIMEOUT_MS || 600000), onOutput: session.appendSessionOutput, input: prompt });
+	const runOptions = { cwd: tempDir, timeout: Number(process.env.ALORBACH_CODEX_CHAT_TIMEOUT_MS || 600000), onOutput: session.appendSessionOutput, input: prompt };
+	let run = await runCodexExec(args, runOptions);
+	if (schemaPath && codexOutputSchemaUnsupported(run)) {
+		run = await runCodexExec(removeCodexArgPair(args, '--output-schema'), runOptions);
+		run.output_schema_fallback_reason = 'Codex CLI rejected `--output-schema`; retried with free-text output.';
+	}
 	const stdout = (run.stdout || '').trim();
 	const stderr = (run.stderr || '').trim();
 	let responseText = '';
@@ -792,6 +867,7 @@ async function chat(payload, session = {}) {
 			provider_details: {
 				structured_events: !!run.used_json,
 				json_fallback_reason: run.json_fallback_reason || undefined,
+				output_schema_fallback_reason: run.output_schema_fallback_reason || undefined,
 				debug_log_dir: debugLog && debugLog.dir || undefined,
 			},
 		},
@@ -1111,9 +1187,8 @@ function models() {
 
 function capabilities() {
 	const version = runCodex(['--version']);
-	const help = runCodex(['exec', '--help']);
+	const exec = execCapabilities();
 	const appServer = runCodex(['app-server', '--help']);
-	const helpText = `${help.stdout || ''}\n${help.stderr || ''}`;
 	return {
 		success: !version.error && version.status === 0,
 		bridge_features: {
@@ -1121,16 +1196,17 @@ function capabilities() {
 			images: true,
 			audio_transcription: true,
 			media_analysis: true,
-			structured_exec_json: /--json/.test(helpText),
-			output_schema: /--output-schema/.test(helpText),
-			image_attachments: /--image/.test(helpText),
+			structured_exec_json: exec.json,
+			output_schema: exec.output_schema,
+			sandbox: exec.sandbox,
+			image_attachments: exec.image_attachments,
 			image_reference_attachments: true,
 			app_server: !appServer.error && appServer.status === 0,
 		},
 		codex: {
 			binary: resolveCodexBinary(),
 			version: (version.stdout || version.stderr || '').trim(),
-			exec_help_available: !help.error && help.status === 0,
+			exec_help_available: exec.help_available,
 			app_server_available: !appServer.error && appServer.status === 0,
 		},
 		asr: asr.capabilities(),
@@ -1138,6 +1214,7 @@ function capabilities() {
 }
 
 module.exports = {
+	buildChatArgs,
 	buildChatPrompt,
 	capabilities,
 	checkStatus,
@@ -1145,7 +1222,9 @@ module.exports = {
 	chat,
 	codexImageFailureFromOutput,
 	codexJsonUnsupported,
+	codexOutputSchemaUnsupported,
 	collectImageAttachments,
+	execCapabilities,
 	imagePrompt,
 	images,
 	messagesToPrompt,

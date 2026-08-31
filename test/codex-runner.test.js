@@ -3,7 +3,7 @@
 process.env.ALORBACH_CODEX_BINARY = process.execPath;
 
 const assert = require('assert');
-const { codexImageFailureFromOutput, codexJsonUnsupported, parseCodexJsonEvents, runCodexAsync } = require('../src/codex');
+const { buildChatArgs, codexImageFailureFromOutput, codexJsonUnsupported, codexOutputSchemaUnsupported, parseCodexJsonEvents, runCodexAsync } = require('../src/codex');
 
 (async () => {
 	const input = `start\n${'x'.repeat(128 * 1024)}\nend`;
@@ -87,6 +87,17 @@ const { codexImageFailureFromOutput, codexJsonUnsupported, parseCodexJsonEvents,
 
 	assert.strictEqual(codexJsonUnsupported({ status: 2, stderr: "error: unexpected argument '--json'" }), true);
 	assert.strictEqual(codexJsonUnsupported({ status: 1, stderr: 'model failed' }), false);
+	assert.strictEqual(codexOutputSchemaUnsupported({ status: 2, stderr: "error: unexpected argument '--output-schema'" }), true);
+	assert.strictEqual(codexOutputSchemaUnsupported({ status: 1, stderr: 'model failed' }), false);
+
+	const chatArgs = buildChatArgs('C:\\temp\\chat', 'C:\\temp\\chat\\last-message.txt', 'auto', [], {
+		sandboxReadOnly: true,
+		outputSchemaPath: 'C:\\temp\\media\\media-analysis.schema.json',
+	});
+	assert.ok(chatArgs.includes('--sandbox'));
+	assert.deepStrictEqual(chatArgs.slice(chatArgs.indexOf('--sandbox'), chatArgs.indexOf('--sandbox') + 2), ['--sandbox', 'read-only']);
+	assert.deepStrictEqual(chatArgs.slice(chatArgs.indexOf('--output-schema'), chatArgs.indexOf('--output-schema') + 2), ['--output-schema', 'C:\\temp\\media\\media-analysis.schema.json']);
+	assert.ok(!buildChatArgs('C:\\temp\\chat', 'C:\\temp\\chat\\last-message.txt', 'auto', [], { sandboxReadOnly: false }).includes('--sandbox'));
 
 	console.log('codex runner tests passed');
 })().catch((error) => {
