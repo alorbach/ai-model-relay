@@ -16,6 +16,7 @@ function statusPageHtml() {
 			--bg: #0b0f14;
 			--panel: #121923;
 			--panel-2: #172231;
+			--panel-elevated: #1a2838;
 			--line: #263445;
 			--text: #edf4fb;
 			--muted: #9cadbf;
@@ -23,6 +24,11 @@ function statusPageHtml() {
 			--warn: #fbbf24;
 			--bad: #fb7185;
 			--info: #60a5fa;
+			--accent: #38bdf8;
+			--primary: #2563eb;
+			--primary-hover: #3b82f6;
+			--shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+			--sticky-top: 0;
 		}
 		* { box-sizing: border-box; }
 		body {
@@ -33,16 +39,24 @@ function statusPageHtml() {
 			overflow-x: hidden;
 		}
 		main {
-			width: min(1120px, calc(100vw - 32px));
-			margin: 24px auto;
+			width: min(1280px, calc(100vw - 32px));
+			margin: 0 auto 24px;
 			overflow-x: hidden;
+		}
+		.app-shell {
+			position: sticky;
+			top: var(--sticky-top);
+			z-index: 10;
+			background: linear-gradient(180deg, var(--bg) 78%, rgba(11, 15, 20, 0));
+			padding: 16px 0 0;
+			margin-bottom: 12px;
 		}
 		header {
 			display: flex;
 			align-items: center;
 			justify-content: space-between;
 			gap: 16px;
-			margin-bottom: 18px;
+			margin-bottom: 12px;
 		}
 		h1 {
 			margin: 0;
@@ -498,7 +512,280 @@ function statusPageHtml() {
 			color: var(--text);
 		}
 		.setup-log[hidden] { display: none; }
+		.btn-primary {
+			background: var(--primary) !important;
+			border-color: var(--primary) !important;
+			color: #fff !important;
+		}
+		.btn-primary:hover,
+		.btn-primary:focus-visible {
+			background: var(--primary-hover) !important;
+			border-color: var(--primary-hover) !important;
+		}
+		.btn-primary:disabled {
+			opacity: 0.45;
+			cursor: not-allowed;
+		}
+		.tab-badge {
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			min-width: 18px;
+			height: 18px;
+			margin-left: 6px;
+			padding: 0 5px;
+			border-radius: 999px;
+			background: var(--panel-2);
+			border: 1px solid var(--line);
+			color: var(--muted);
+			font-size: 11px;
+			font-weight: 700;
+			line-height: 1;
+		}
+		.tab-badge.warn { color: var(--warn); border-color: rgba(251, 191, 36, 0.35); }
+		.tab-badge.bad { color: var(--bad); border-color: rgba(251, 113, 133, 0.35); }
+		.tab-badge.dirty { color: var(--accent); border-color: rgba(56, 189, 248, 0.35); }
+		.health-grid {
+			display: grid;
+			grid-template-columns: repeat(4, minmax(0, 1fr));
+			gap: 10px;
+		}
+		.health-card {
+			display: grid;
+			gap: 8px;
+			min-width: 0;
+			padding: 14px;
+			background: var(--panel);
+			border: 1px solid var(--line);
+			border-radius: 10px;
+			box-shadow: var(--shadow);
+			text-align: left;
+			cursor: pointer;
+			color: inherit;
+			font: inherit;
+		}
+		.health-card:hover,
+		.health-card:focus-visible {
+			border-color: var(--accent);
 			outline: none;
+		}
+		.health-card .health-title {
+			color: var(--muted);
+			font-size: 12px;
+			font-weight: 600;
+		}
+		.health-card .health-value {
+			font-size: 17px;
+			font-weight: 650;
+			overflow-wrap: anywhere;
+		}
+		.health-card .health-hint {
+			color: var(--muted);
+			font-size: 11px;
+		}
+		.live-inspector {
+			display: grid;
+			grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
+			gap: 12px;
+			min-height: 520px;
+		}
+		.live-list-panel,
+		.live-detail-panel {
+			background: var(--panel);
+			border: 1px solid var(--line);
+			border-radius: 10px;
+			min-width: 0;
+			overflow: hidden;
+			box-shadow: var(--shadow);
+		}
+		.live-list-toolbar {
+			display: flex;
+			flex-wrap: wrap;
+			gap: 6px;
+			padding: 10px;
+			border-bottom: 1px solid var(--line);
+		}
+		.live-filter {
+			appearance: none;
+			border: 1px solid var(--line);
+			border-radius: 999px;
+			background: var(--panel-2);
+			color: var(--muted);
+			cursor: pointer;
+			font: inherit;
+			font-size: 11px;
+			font-weight: 650;
+			padding: 5px 10px;
+		}
+		.live-filter[aria-pressed="true"] {
+			color: var(--text);
+			border-color: var(--accent);
+			background: rgba(56, 189, 248, 0.12);
+		}
+		.live-job-list {
+			display: grid;
+			gap: 0;
+			max-height: min(72vh, 720px);
+			overflow: auto;
+		}
+		.live-job-card {
+			display: grid;
+			gap: 4px;
+			width: 100%;
+			padding: 10px 12px;
+			border: 0;
+			border-bottom: 1px solid var(--line);
+			background: transparent;
+			color: inherit;
+			cursor: pointer;
+			font: inherit;
+			text-align: left;
+		}
+		.live-job-card:hover,
+		.live-job-card:focus-visible {
+			background: var(--panel-2);
+			outline: none;
+		}
+		.live-job-card[aria-selected="true"] {
+			background: rgba(56, 189, 248, 0.1);
+			box-shadow: inset 3px 0 0 var(--accent);
+		}
+		.live-job-card-head {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			gap: 8px;
+		}
+		.live-job-card-meta {
+			color: var(--muted);
+			font-size: 11px;
+			overflow-wrap: anywhere;
+		}
+		.live-detail-empty {
+			display: grid;
+			place-items: center;
+			min-height: 320px;
+			padding: 24px;
+			color: var(--muted);
+			text-align: center;
+		}
+		.live-detail-header {
+			display: flex;
+			flex-wrap: wrap;
+			align-items: flex-start;
+			justify-content: space-between;
+			gap: 10px;
+			padding: 14px;
+			border-bottom: 1px solid var(--line);
+		}
+		.live-detail-body {
+			padding: 14px;
+			max-height: min(72vh, 720px);
+			overflow: auto;
+		}
+		.live-detail-meta {
+			display: grid;
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+			gap: 8px 14px;
+			margin-bottom: 12px;
+			font-size: 12px;
+		}
+		.live-detail-meta dt {
+			color: var(--muted);
+			margin: 0;
+		}
+		.live-detail-meta dd {
+			margin: 0;
+			overflow-wrap: anywhere;
+		}
+		.settings-layout {
+			display: grid;
+			grid-template-columns: 200px minmax(0, 1fr);
+			gap: 12px;
+			align-items: start;
+		}
+		.settings-nav {
+			display: grid;
+			gap: 4px;
+			align-self: start;
+		}
+		.settings-nav button {
+			appearance: none;
+			border: 1px solid transparent;
+			border-radius: 8px;
+			background: transparent;
+			color: var(--muted);
+			cursor: pointer;
+			font: inherit;
+			font-size: 13px;
+			font-weight: 650;
+			padding: 9px 11px;
+			text-align: left;
+		}
+		.settings-nav button:hover,
+		.settings-nav button:focus-visible {
+			color: var(--text);
+			background: var(--panel-2);
+			outline: none;
+		}
+		.settings-nav button[aria-current="page"] {
+			color: var(--text);
+			background: var(--panel);
+			border-color: var(--line);
+			box-shadow: var(--shadow);
+		}
+		.settings-section[hidden] { display: none; }
+		.debug-health-list {
+			display: grid;
+			gap: 8px;
+		}
+		.debug-health-item {
+			display: flex;
+			align-items: flex-start;
+			justify-content: space-between;
+			gap: 12px;
+			padding: 10px 12px;
+			background: var(--panel-2);
+			border: 1px solid var(--line);
+			border-radius: 8px;
+		}
+		.debug-health-item.ok { border-left: 3px solid var(--ok); }
+		.debug-health-item.warn { border-left: 3px solid var(--warn); }
+		.debug-health-item.bad { border-left: 3px solid var(--bad); }
+		.debug-failure-list {
+			display: grid;
+			gap: 6px;
+		}
+		.debug-failure-item {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			gap: 10px;
+			padding: 8px 10px;
+			background: var(--panel-2);
+			border: 1px solid var(--line);
+			border-radius: 8px;
+			font-size: 12px;
+		}
+		.raw-filter {
+			display: flex;
+			gap: 8px;
+			padding: 0 14px 10px;
+		}
+		.raw-filter input {
+			flex: 1;
+			background: #0e1520;
+			border: 1px solid var(--line);
+			color: #d7e7ff;
+			border-radius: 6px;
+			font: inherit;
+			padding: 7px 9px;
+			min-width: 0;
+		}
+		.raw-status mark {
+			background: rgba(56, 189, 248, 0.28);
+			color: inherit;
+			border-radius: 2px;
 		}
 		.provider-media-tests {
 			display: grid;
@@ -642,41 +929,56 @@ function statusPageHtml() {
 			display: none;
 		}
 		@media (max-width: 760px) {
-			main { width: min(100% - 20px, 1080px); margin-top: 12px; }
+			main { width: min(100% - 20px, 1280px); }
 			header { align-items: flex-start; flex-direction: column; }
 			.status-meta { justify-content: flex-start; }
 			.tabs { gap: 4px; }
 			.tab-button { padding: 9px 10px; }
 			.span-4,
 			.span-6 { grid-column: span 12; }
-			.feature-grid { grid-template-columns: 1fr; }
+			.feature-grid,
+			.health-grid { grid-template-columns: 1fr; }
 			.settings-grid,
 			.model-settings-grid,
 			.provider-media-tests { grid-template-columns: 1fr; }
-			.table { display: block; overflow-x: auto; }
+			.live-inspector { grid-template-columns: 1fr; }
+			.settings-layout { grid-template-columns: 1fr; }
+			.settings-nav { position: static; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+			.live-detail-meta { grid-template-columns: 1fr; }
 		}
 	</style>
 </head>
 <body>
 	<main>
-		<header>
-			<div>
-				<h1>${PRODUCT_NAME}</h1>
-				<div class="updated">formerly ${LEGACY_PRODUCT_NAME}</div>
-			</div>
-			<div class="status-meta">
-				<span class="pill connection-pill warn" id="connectionPill"><span class="dot"></span><span>Connecting</span></span>
-				<div class="updated" id="updated">Loading</div>
-				<div class="updated" id="lastEvent">No live events yet</div>
-			</div>
-		</header>
-		<nav class="tabs" role="tablist" aria-label="Status page sections">
-			<button class="tab-button" type="button" role="tab" id="tab-overview" aria-controls="panel-overview" aria-selected="true">Overview</button>
-			<button class="tab-button" type="button" role="tab" id="tab-live" aria-controls="panel-live" aria-selected="false" tabindex="-1">Live</button>
-			<button class="tab-button" type="button" role="tab" id="tab-settings" aria-controls="panel-settings" aria-selected="false" tabindex="-1">Settings</button>
-			<button class="tab-button" type="button" role="tab" id="tab-debug" aria-controls="panel-debug" aria-selected="false" tabindex="-1">Debug</button>
-		</nav>
+		<div class="app-shell">
+			<header>
+				<div>
+					<h1>${PRODUCT_NAME}</h1>
+					<div class="updated">formerly ${LEGACY_PRODUCT_NAME}</div>
+				</div>
+				<div class="status-meta">
+					<span class="pill connection-pill warn" id="connectionPill"><span class="dot"></span><span>Connecting</span></span>
+					<div class="updated" id="updated">Loading</div>
+					<div class="updated" id="lastEvent">No live events yet</div>
+				</div>
+			</header>
+			<nav class="tabs" role="tablist" aria-label="Status page sections">
+				<button class="tab-button" type="button" role="tab" id="tab-overview" aria-controls="panel-overview" aria-selected="true" data-route="overview">Overview</button>
+				<button class="tab-button" type="button" role="tab" id="tab-live" aria-controls="panel-live" aria-selected="false" tabindex="-1" data-route="live">Live<span class="tab-badge" id="liveTabBadge" hidden>0</span></button>
+				<button class="tab-button" type="button" role="tab" id="tab-settings" aria-controls="panel-settings" aria-selected="false" tabindex="-1" data-route="settings">Settings<span class="tab-badge dirty" id="settingsTabBadge" hidden>•</span></button>
+				<button class="tab-button" type="button" role="tab" id="tab-debug" aria-controls="panel-debug" aria-selected="false" tabindex="-1" data-route="debug">Debug<span class="tab-badge bad" id="debugTabBadge" hidden>0</span></button>
+			</nav>
+		</div>
 		<section class="tab-panel grid" id="panel-overview" role="tabpanel" aria-labelledby="tab-overview">
+			<div class="panel span-12">
+				<div class="label">Health</div>
+				<div class="health-grid" id="healthGrid">
+					<button type="button" class="health-card" data-nav="overview"><span class="health-title">Bridge</span><span class="health-value" id="healthBridge">Checking</span><span class="health-hint">Local relay status</span></button>
+					<button type="button" class="health-card" data-nav="debug"><span class="health-title">Codex</span><span class="health-value" id="healthCodex">Checking</span><span class="health-hint">CLI readiness</span></button>
+					<button type="button" class="health-card" data-nav="live"><span class="health-title">Jobs</span><span class="health-value" id="healthJobs">Running 0 / Queued 0</span><span class="health-hint">Open live inspector</span></button>
+					<button type="button" class="health-card" data-nav="settings/asr"><span class="health-title">Local ASR</span><span class="health-value" id="healthAsr">Checking</span><span class="health-hint">Runtime and models</span></button>
+				</div>
+			</div>
 			<div class="panel span-4">
 				<div class="label">Bridge</div>
 				<div class="value"><span class="pill" id="bridgePill"><span class="dot"></span><span>Checking</span></span></div>
@@ -689,13 +991,17 @@ function statusPageHtml() {
 				<div class="label">Jobs</div>
 				<div class="value" id="jobCounts">Running 0 / Queued 0</div>
 			</div>
-			<div class="panel span-6">
+			<div class="panel span-4">
 				<div class="label">Bridge Version</div>
 				<div class="value" id="version">-</div>
 			</div>
-			<div class="panel span-6">
+			<div class="panel span-4">
 				<div class="label">Max Parallel Jobs</div>
 				<div class="value" id="maxConcurrent">-</div>
+			</div>
+			<div class="panel span-4">
+				<div class="label">Paired Sites</div>
+				<div class="value" id="overviewPairedCount">0</div>
 			</div>
 			<div class="panel span-6">
 				<div class="label">Codex CLI Version</div>
@@ -713,121 +1019,143 @@ function statusPageHtml() {
 			</div>
 		</section>
 		<section class="tab-panel grid" id="panel-live" role="tabpanel" aria-labelledby="tab-live" hidden>
-			<div class="panel span-12">
-				<div class="label">Active Jobs</div>
-				<table class="table">
-					<thead><tr><th>Request</th><th>Type</th><th>Model</th><th>Provider / API</th><th>Workflow / Skill</th><th>Status</th><th>Elapsed</th></tr></thead>
-					<tbody id="activeJobs"><tr><td colspan="7" class="muted">No active jobs</td></tr></tbody>
-				</table>
-			</div>
-			<div class="panel span-12">
-				<div class="label">Queued Jobs</div>
-				<table class="table">
-					<thead><tr><th>Request</th><th>Type</th><th>Model</th><th>Provider / API</th><th>Workflow / Skill</th><th>Status</th><th>Waited</th></tr></thead>
-					<tbody id="queuedJobs"><tr><td colspan="7" class="muted">No queued jobs</td></tr></tbody>
-				</table>
-			</div>
-			<div class="panel span-12">
-				<div class="label">Recent Activity</div>
-				<table class="table">
-					<thead><tr><th>Request</th><th>Type</th><th>Model</th><th>Provider / API</th><th>Workflow / Skill</th><th>Status</th><th>Elapsed</th><th>Finished</th></tr></thead>
-					<tbody id="recentActivity"><tr><td colspan="8" class="muted">No recent activity</td></tr></tbody>
-				</table>
+			<div class="panel span-12 live-inspector">
+				<div class="live-list-panel">
+					<div class="live-list-toolbar" role="toolbar" aria-label="Job filters">
+						<button type="button" class="live-filter" data-live-filter="all" aria-pressed="true">All</button>
+						<button type="button" class="live-filter" data-live-filter="running" aria-pressed="false">Running</button>
+						<button type="button" class="live-filter" data-live-filter="queued" aria-pressed="false">Queued</button>
+						<button type="button" class="live-filter" data-live-filter="failed" aria-pressed="false">Failed</button>
+					</div>
+					<div class="live-job-list" id="liveJobList" role="listbox" aria-label="Job activity"></div>
+				</div>
+				<div class="live-detail-panel">
+					<div class="live-detail-empty" id="liveDetailEmpty">Select a job to inspect live output, artifacts, and debug logs.</div>
+					<div id="liveDetailContent" hidden>
+						<div class="live-detail-header">
+							<div>
+								<div class="label">Job inspector</div>
+								<div class="value" id="liveDetailTitle">-</div>
+							</div>
+							<button type="button" class="copy-value" id="liveDetailCopyId">Copy request id</button>
+						</div>
+						<div class="live-detail-body" id="liveDetailBody"></div>
+					</div>
+				</div>
 			</div>
 		</section>
 		<section class="tab-panel grid" id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" hidden>
-			<div class="panel span-12">
-				<div class="label">Providers and Model Routing</div>
-				<div class="feature-grid" id="providerSettings">Loading providers</div>
-				<form class="settings-editor" id="relaySettingsForm">
-					<p class="muted">Optional executable paths are used only by this local bridge. Leave a field blank to use its configured environment variable or PATH lookup. Refresh detection saves the visible paths before probing every provider.</p>
-					<div class="settings-grid" id="relayCliPaths"></div>
-					<div class="settings-grid" id="relayDefaultSettings"></div>
-					<div class="settings-actions"><span class="muted" id="relaySettingsMessage">Loading routing settings</span><button type="button" id="refreshRelayProviders">Refresh detection</button><button type="button" id="saveRelaySettings">Save paths &amp; routing</button></div>
-				</form>
-			</div>
-			<div class="panel span-12">
-				<div class="label">Provider media and audio tests</div>
-				<p class="muted">Runs a real request against the selected ready provider. Provider usage or API charges may apply. Selecting xAI Speech-to-Text uploads the chosen audio to xAI; Local ASR and Local Music Analysis stay on this computer.</p>
-				<div class="tabs provider-test-tabs" role="tablist" aria-label="Provider test types">
-					<button class="tab-button" type="button" role="tab" id="provider-test-tab-images" data-provider-test-tab aria-controls="provider-test-panel-images" aria-selected="true">Image</button>
-					<button class="tab-button" type="button" role="tab" id="provider-test-tab-videos" data-provider-test-tab aria-controls="provider-test-panel-videos" aria-selected="false" tabindex="-1">Video</button>
-					<button class="tab-button" type="button" role="tab" id="provider-test-tab-analysis" data-provider-test-tab aria-controls="provider-test-panel-analysis" aria-selected="false" tabindex="-1">Video analysis</button>
-					<button class="tab-button" type="button" role="tab" id="provider-test-tab-audio" data-provider-test-tab aria-controls="provider-test-panel-audio" aria-selected="false" tabindex="-1">Audio</button>
-				</div>
-				<div class="provider-test-panel" id="provider-test-panel-images" role="tabpanel" aria-labelledby="provider-test-tab-images">
-					<div class="provider-media-tests" id="providerImageTests">Load routing settings to see ready image providers.</div>
-				</div>
-				<div class="provider-test-panel" id="provider-test-panel-videos" role="tabpanel" aria-labelledby="provider-test-tab-videos" hidden>
-					<div class="provider-media-tests" id="providerVideoTests">Load routing settings to see ready video providers.</div>
-				</div>
-				<div class="provider-test-panel" id="provider-test-panel-analysis" role="tabpanel" aria-labelledby="provider-test-tab-analysis" hidden>
-					<div class="provider-media-tests" id="providerAnalysisTests">Load routing settings to see ready video-analysis providers.</div>
-				</div>
-				<div class="provider-test-panel" id="provider-test-panel-audio" role="tabpanel" aria-labelledby="provider-test-tab-audio" hidden>
-					<div class="provider-media-tests" id="providerAudioTests">Load routing settings to see ready transcription and music-analysis providers.</div>
-				</div>
-			</div>
-			<div class="panel span-12">
-				<div class="label">Local CUDA Upscale Settings</div>
-				<p class="muted">Installs an official SwinIR or Real-ESRGAN checkout and the pinned ×2 weight on this computer. Setup never runs during a BuchWerk job and never falls back to CPU.</p>
-				<form class="settings-editor" id="upscaleSettingsForm">
-					<div class="settings-grid" id="upscaleSettings"></div>
-					<div class="muted" id="upscaleModelStates">Models: not checked</div>
-					<div class="settings-actions">
-						<span class="muted" id="upscaleSettingsMessage">Loading settings</span>
-						<button type="button" id="reloadUpscaleSettings">Reload</button>
-						<button type="button" id="setupSwinir">Install SwinIR ×2</button>
-						<button type="button" id="setupRealesrgan">Install Real-ESRGAN ×2</button>
-						<button type="button" id="saveUpscaleSettings">Save settings</button>
+			<div class="panel span-12 settings-layout">
+				<nav class="settings-nav" id="settings-nav" aria-label="Settings sections">
+					<button type="button" data-settings-section="providers" aria-current="page">Providers</button>
+					<button type="button" data-settings-section="tests">Tests</button>
+					<button type="button" data-settings-section="upscale">CUDA Upscale</button>
+					<button type="button" data-settings-section="music">Music Analysis</button>
+					<button type="button" data-settings-section="asr">Local ASR</button>
+				</nav>
+				<div class="settings-panels">
+					<div class="settings-section" id="settings-section-providers" data-settings-panel="providers">
+						<div class="label">Providers and Model Routing</div>
+						<div class="feature-grid" id="providerSettings">Loading providers</div>
+						<form class="settings-editor" id="relaySettingsForm">
+							<p class="muted">Optional executable paths are used only by this local bridge. Leave a field blank to use its configured environment variable or PATH lookup. Refresh detection saves the visible paths before probing every provider.</p>
+							<div class="settings-grid" id="relayCliPaths"></div>
+							<div class="settings-grid" id="relayDefaultSettings"></div>
+							<div class="settings-actions"><span class="muted" id="relaySettingsMessage">Loading routing settings</span><button type="button" id="refreshRelayProviders">Refresh detection</button><button type="button" class="btn-primary" id="saveRelaySettings" disabled>Save paths &amp; routing</button></div>
+						</form>
 					</div>
-					<pre class="setup-log" id="upscaleSetupLog" hidden></pre>
-				</form>
-			</div>
-			<div class="panel span-12">
-				<div class="label">Local Music Analysis Settings</div>
-				<p class="muted">Core album metrics run privately with ffmpeg/ffprobe, librosa, and pyloudnorm. Setup downloads Python packages only when you press Setup.</p>
-				<form class="settings-editor" id="musicAnalysisSettingsForm">
-					<div class="settings-grid" id="musicAnalysisSettings"></div>
-					<div class="settings-actions">
-						<span class="muted" id="musicAnalysisSettingsMessage">Loading settings</span>
-						<button type="button" id="reloadMusicAnalysisSettings">Reload</button>
-						<button type="button" id="refreshMusicAnalysisRuntime">Refresh runtime</button>
-						<button type="button" id="setupMusicAnalysis">Setup local runtime</button>
-						<button type="button" id="saveMusicAnalysisSettings">Save settings</button>
-					</div>
-				</form>
-			</div>
-			<div class="panel span-12">
-				<div class="label">Local ASR Settings</div>
-				<p class="muted">Install a Whisper or Qwen model onto this computer with the per-model Install button. That download is explicit; transcription jobs stay offline unless you also enable Allow ASR model downloads.</p>
-				<form class="settings-editor" id="asrSettingsForm">
-					<div class="settings-grid" id="asrGeneralSettings"></div>
-					<div>
-						<div class="settings-actions">
-							<span class="label">Models</span>
-							<button type="button" id="addAsrModel">Add model</button>
+					<div class="settings-section" id="settings-section-tests" data-settings-panel="tests" hidden>
+						<div class="label">Provider media and audio tests</div>
+						<p class="muted">Runs a real request against the selected ready provider. Provider usage or API charges may apply. Selecting xAI Speech-to-Text uploads the chosen audio to xAI; Local ASR and Local Music Analysis stay on this computer.</p>
+						<div class="tabs provider-test-tabs" role="tablist" aria-label="Provider test types">
+							<button class="tab-button" type="button" role="tab" id="provider-test-tab-images" data-provider-test-tab aria-controls="provider-test-panel-images" aria-selected="true">Image</button>
+							<button class="tab-button" type="button" role="tab" id="provider-test-tab-videos" data-provider-test-tab aria-controls="provider-test-panel-videos" aria-selected="false" tabindex="-1">Video</button>
+							<button class="tab-button" type="button" role="tab" id="provider-test-tab-analysis" data-provider-test-tab aria-controls="provider-test-panel-analysis" aria-selected="false" tabindex="-1">Video analysis</button>
+							<button class="tab-button" type="button" role="tab" id="provider-test-tab-audio" data-provider-test-tab aria-controls="provider-test-panel-audio" aria-selected="false" tabindex="-1">Audio</button>
 						</div>
-						<div class="model-settings-grid" id="asrModelSettings"></div>
-					</div>
-					<details class="settings-advanced">
-						<summary>Advanced JSON</summary>
-						<textarea id="asrSettingsJson" spellcheck="false"></textarea>
-						<div class="settings-actions">
-							<button type="button" id="applyAsrSettingsJson">Apply JSON to form</button>
+						<div class="provider-test-panel" id="provider-test-panel-images" role="tabpanel" aria-labelledby="provider-test-tab-images">
+							<div class="provider-media-tests" id="providerImageTests">Load routing settings to see ready image providers.</div>
 						</div>
-					</details>
-					<div class="settings-actions">
-						<span class="muted" id="asrSettingsMessage">Loading settings</span>
-						<button type="button" id="reloadAsrSettings">Reload</button>
-						<button type="button" id="refreshAsrRuntime">Refresh runtime</button>
-						<button type="button" id="saveAsrSettings">Save settings</button>
+						<div class="provider-test-panel" id="provider-test-panel-videos" role="tabpanel" aria-labelledby="provider-test-tab-videos" hidden>
+							<div class="provider-media-tests" id="providerVideoTests">Load routing settings to see ready video providers.</div>
+						</div>
+						<div class="provider-test-panel" id="provider-test-panel-analysis" role="tabpanel" aria-labelledby="provider-test-tab-analysis" hidden>
+							<div class="provider-media-tests" id="providerAnalysisTests">Load routing settings to see ready video-analysis providers.</div>
+						</div>
+						<div class="provider-test-panel" id="provider-test-panel-audio" role="tabpanel" aria-labelledby="provider-test-tab-audio" hidden>
+							<div class="provider-media-tests" id="providerAudioTests">Load routing settings to see ready transcription and music-analysis providers.</div>
+						</div>
 					</div>
-					<pre class="setup-log" id="asrSetupLog" hidden></pre>
-				</form>
+					<div class="settings-section" id="settings-section-upscale" data-settings-panel="upscale" hidden>
+						<div class="label">Local CUDA Upscale Settings</div>
+						<p class="muted">Installs an official SwinIR or Real-ESRGAN checkout and the pinned ×2 weight on this computer. Setup never runs during a BuchWerk job and never falls back to CPU.</p>
+						<form class="settings-editor" id="upscaleSettingsForm">
+							<div class="settings-grid" id="upscaleSettings"></div>
+							<div class="muted" id="upscaleModelStates">Models: not checked</div>
+							<div class="settings-actions">
+								<span class="muted" id="upscaleSettingsMessage">Loading settings</span>
+								<button type="button" id="reloadUpscaleSettings">Reload</button>
+								<button type="button" id="setupSwinir">Install SwinIR ×2</button>
+								<button type="button" id="setupRealesrgan">Install Real-ESRGAN ×2</button>
+								<button type="button" class="btn-primary" id="saveUpscaleSettings" disabled>Save settings</button>
+							</div>
+							<pre class="setup-log" id="upscaleSetupLog" hidden></pre>
+						</form>
+					</div>
+					<div class="settings-section" id="settings-section-music" data-settings-panel="music" hidden>
+						<div class="label">Local Music Analysis Settings</div>
+						<p class="muted">Core album metrics run privately with ffmpeg/ffprobe, librosa, and pyloudnorm. Setup downloads Python packages only when you press Setup.</p>
+						<form class="settings-editor" id="musicAnalysisSettingsForm">
+							<div class="settings-grid" id="musicAnalysisSettings"></div>
+							<div class="settings-actions">
+								<span class="muted" id="musicAnalysisSettingsMessage">Loading settings</span>
+								<button type="button" id="reloadMusicAnalysisSettings">Reload</button>
+								<button type="button" id="refreshMusicAnalysisRuntime">Refresh runtime</button>
+								<button type="button" id="setupMusicAnalysis">Setup local runtime</button>
+								<button type="button" class="btn-primary" id="saveMusicAnalysisSettings" disabled>Save settings</button>
+							</div>
+						</form>
+					</div>
+					<div class="settings-section" id="settings-section-asr" data-settings-panel="asr" hidden>
+						<div class="label">Local ASR Settings</div>
+						<p class="muted">Install a Whisper or Qwen model onto this computer with the per-model Install button. That download is explicit; transcription jobs stay offline unless you also enable Allow ASR model downloads.</p>
+						<form class="settings-editor" id="asrSettingsForm">
+							<div class="settings-grid" id="asrGeneralSettings"></div>
+							<div>
+								<div class="settings-actions">
+									<span class="label">Models</span>
+									<button type="button" id="addAsrModel">Add model</button>
+								</div>
+								<div class="model-settings-grid" id="asrModelSettings"></div>
+							</div>
+							<details class="settings-advanced">
+								<summary>Advanced JSON</summary>
+								<textarea id="asrSettingsJson" spellcheck="false"></textarea>
+								<div class="settings-actions">
+									<button type="button" id="applyAsrSettingsJson">Apply JSON to form</button>
+								</div>
+							</details>
+							<div class="settings-actions">
+								<span class="muted" id="asrSettingsMessage">Loading settings</span>
+								<button type="button" id="reloadAsrSettings">Reload</button>
+								<button type="button" id="refreshAsrRuntime">Refresh runtime</button>
+								<button type="button" class="btn-primary" id="saveAsrSettings" disabled>Save settings</button>
+							</div>
+							<pre class="setup-log" id="asrSetupLog" hidden></pre>
+						</form>
+					</div>
+				</div>
 			</div>
 		</section>
 		<section class="tab-panel grid" id="panel-debug" role="tabpanel" aria-labelledby="tab-debug" hidden>
+			<div class="panel span-12">
+				<div class="label">Health checks</div>
+				<div class="debug-health-list" id="debugHealthList"></div>
+			</div>
+			<div class="panel span-12">
+				<div class="label">Recent failures</div>
+				<div class="debug-failure-list" id="debugFailureList"><div class="muted">No recent failures</div></div>
+			</div>
 			<div class="panel span-12">
 				<div class="label">Detected Features</div>
 				<div class="feature-grid" id="detectedFeatures"></div>
@@ -841,16 +1169,6 @@ function statusPageHtml() {
 				<div id="pairedSites" class="muted">None</div>
 			</div>
 			<div class="panel span-12">
-				<div class="label">Debug Help</div>
-				<ul class="help-list">
-					<li>Check the Live tab after a request; recent jobs keep bounded Codex session output.</li>
-					<li>Use the tray menu Copy diagnostics action for a safe diagnostic payload without bearer tokens.</li>
-					<li>Run <code>codex login status</code> in the same Windows account as the tray app.</li>
-					<li>Confirm the browser origin is paired and the request includes the bridge token.</li>
-					<li>Use <code>/v1/status</code> for the raw status JSON included in failure debug output.</li>
-				</ul>
-			</div>
-			<div class="panel span-12">
 				<div class="label">Codex Details</div>
 				<table class="table">
 					<tbody id="codexDetails"></tbody>
@@ -859,6 +1177,7 @@ function statusPageHtml() {
 			<details class="panel span-12">
 				<summary>Raw Status</summary>
 				<div class="raw-actions"><button type="button" class="copy-session-output" id="copyRawStatus">Copy diagnostics JSON</button></div>
+				<div class="raw-filter"><input type="search" id="rawStatusFilter" placeholder="Filter JSON keys or values" autocomplete="off" spellcheck="false"></div>
 				<pre class="raw-status" id="rawStatus">{}</pre>
 			</details>
 		</section>
@@ -889,9 +1208,34 @@ function statusPageHtml() {
 		let fallbackPollTimer = null;
 		let providerRefreshPollTimer = null;
 		let jobEvents = null;
+		let liveFilter = 'all';
+		let selectedLiveRequestId = '';
+		let settingsSection = 'providers';
+		let suppressHashChange = false;
+		const knownSettingsSections = ['providers', 'tests', 'upscale', 'music', 'asr'];
+		let formSnapshots = { relay: '', asr: '', music: '', upscale: '' };
 		const fields = {
-			tabButtons: Array.from(document.querySelectorAll('nav.tabs[role="tablist"] [role="tab"]')),
+			tabButtons: Array.from(document.querySelectorAll('.app-shell nav.tabs[role="tablist"] [role="tab"]')),
 			tabPanels: Array.from(document.querySelectorAll('main > .tab-panel[role="tabpanel"]')),
+			liveTabBadge: document.getElementById('liveTabBadge'),
+			settingsTabBadge: document.getElementById('settingsTabBadge'),
+			debugTabBadge: document.getElementById('debugTabBadge'),
+			healthBridge: document.getElementById('healthBridge'),
+			healthCodex: document.getElementById('healthCodex'),
+			healthJobs: document.getElementById('healthJobs'),
+			healthAsr: document.getElementById('healthAsr'),
+			overviewPairedCount: document.getElementById('overviewPairedCount'),
+			liveJobList: document.getElementById('liveJobList'),
+			liveDetailEmpty: document.getElementById('liveDetailEmpty'),
+			liveDetailContent: document.getElementById('liveDetailContent'),
+			liveDetailTitle: document.getElementById('liveDetailTitle'),
+			liveDetailBody: document.getElementById('liveDetailBody'),
+			liveDetailCopyId: document.getElementById('liveDetailCopyId'),
+			settingsNavButtons: Array.from(document.querySelectorAll('#settings-nav [data-settings-section]')),
+			settingsPanels: Array.from(document.querySelectorAll('[data-settings-panel]')),
+			debugHealthList: document.getElementById('debugHealthList'),
+			debugFailureList: document.getElementById('debugFailureList'),
+			rawStatusFilter: document.getElementById('rawStatusFilter'),
 			updated: document.getElementById('updated'),
 			lastEvent: document.getElementById('lastEvent'),
 			connectionPill: document.getElementById('connectionPill'),
@@ -945,9 +1289,6 @@ function statusPageHtml() {
 			applyAsrSettingsJson: document.getElementById('applyAsrSettingsJson'),
 			addAsrModel: document.getElementById('addAsrModel'),
 			asrSetupLog: document.getElementById('asrSetupLog'),
-			activeJobs: document.getElementById('activeJobs'),
-			queuedJobs: document.getElementById('queuedJobs'),
-			recentActivity: document.getElementById('recentActivity'),
 			pairedSites: document.getElementById('pairedSites'),
 			codexDetails: document.getElementById('codexDetails'),
 			rawStatus: document.getElementById('rawStatus'),
@@ -958,10 +1299,207 @@ function statusPageHtml() {
 			closeImageLightbox: document.getElementById('closeImageLightbox'),
 		};
 
+		function parseHash() {
+			const raw = (location.hash || '#overview').replace(/^#/, '');
+			const parts = raw.split('/').filter(Boolean);
+			const root = parts[0] || 'overview';
+			if (root === 'live') {
+				return { tab: 'live', liveRequestId: parts[1] || '', settingsSection: '' };
+			}
+			if (root === 'settings') {
+				return { tab: 'settings', liveRequestId: '', settingsSection: normalizeSettingsSection(parts[1]) };
+			}
+			return { tab: root, liveRequestId: '', settingsSection: '' };
+		}
+
+		function setHash(route, options = {}) {
+			const next = route.startsWith('#') ? route : '#' + route;
+			if (location.hash !== next) {
+				if (options.replace === false) {
+					location.hash = next;
+				} else {
+					history.replaceState(null, '', next);
+				}
+			}
+		}
+
+		function tabIdForRoute(tab) {
+			const map = { overview: 'tab-overview', live: 'tab-live', settings: 'tab-settings', debug: 'tab-debug' };
+			return map[tab] || 'tab-overview';
+		}
+
+		function routeForTabId(tabId) {
+			const map = { 'tab-overview': 'overview', 'tab-live': 'live', 'tab-settings': 'settings', 'tab-debug': 'debug' };
+			return map[tabId] || 'overview';
+		}
+
+		function isFormDirty(key) {
+			if (key === 'relay') {
+				return formSnapshots.relay && serializeRelaySettingsSnapshot() !== formSnapshots.relay;
+			}
+			if (key === 'asr') {
+				try {
+					return formSnapshots.asr && JSON.stringify(serializeAsrSettingsForm()) !== formSnapshots.asr;
+				} catch (error) {
+					return true;
+				}
+			}
+			if (key === 'music') {
+				try {
+					return formSnapshots.music && JSON.stringify(serializeMusicAnalysisSettings()) !== formSnapshots.music;
+				} catch (error) {
+					return false;
+				}
+			}
+			if (key === 'upscale') {
+				try {
+					return formSnapshots.upscale && JSON.stringify(serializeUpscaleSettings()) !== formSnapshots.upscale;
+				} catch (error) {
+					return false;
+				}
+			}
+			return false;
+		}
+
+		function updateSettingsDirtyState() {
+			const dirty = isFormDirty('relay') || isFormDirty('asr') || isFormDirty('music') || isFormDirty('upscale');
+			fields.settingsTabBadge.hidden = !dirty;
+			if (fields.saveRelaySettings) fields.saveRelaySettings.disabled = !isFormDirty('relay');
+			if (fields.saveAsrSettings) fields.saveAsrSettings.disabled = !isFormDirty('asr');
+			if (fields.saveMusicAnalysisSettings) fields.saveMusicAnalysisSettings.disabled = !isFormDirty('music');
+			if (fields.saveUpscaleSettings) fields.saveUpscaleSettings.disabled = !isFormDirty('upscale');
+		}
+
+		function captureFormSnapshots(keys) {
+			const targets = Array.isArray(keys) && keys.length ? keys : ['relay', 'asr', 'music', 'upscale'];
+			if (targets.includes('relay')) {
+				try {
+					formSnapshots.relay = serializeRelaySettingsSnapshot();
+				} catch (error) {
+					formSnapshots.relay = '';
+				}
+			}
+			if (targets.includes('asr')) {
+				try {
+					formSnapshots.asr = JSON.stringify(serializeAsrSettingsForm());
+				} catch (error) {
+					formSnapshots.asr = '';
+				}
+			}
+			if (targets.includes('music')) {
+				try {
+					formSnapshots.music = JSON.stringify(serializeMusicAnalysisSettings());
+				} catch (error) {
+					formSnapshots.music = '';
+				}
+			}
+			if (targets.includes('upscale')) {
+				try {
+					formSnapshots.upscale = JSON.stringify(serializeUpscaleSettings());
+				} catch (error) {
+					formSnapshots.upscale = '';
+				}
+			}
+			updateSettingsDirtyState();
+		}
+
+		function serializeRelaySettingsSnapshot() {
+			const defaults = {};
+			const cli_paths = {};
+			fields.relayDefaultSettings.querySelectorAll('[data-relay-job]').forEach((select) => {
+				defaults[select.getAttribute('data-relay-job')] = select.value;
+			});
+			fields.relayCliPaths.querySelectorAll('[data-relay-cli-path]').forEach((input) => {
+				cli_paths[input.getAttribute('data-relay-cli-path')] = input.value.trim();
+			});
+			return JSON.stringify({ defaults, cli_paths });
+		}
+
+		function normalizeSettingsSection(section) {
+			const next = String(section || '').trim().toLowerCase();
+			return knownSettingsSections.includes(next) ? next : 'providers';
+		}
+
+		function isSettingsTabSelected() {
+			const selected = fields.tabButtons.find((button) => button.getAttribute('aria-selected') === 'true');
+			return !!(selected && selected.id === 'tab-settings');
+		}
+
+		function confirmUnsavedSettings() {
+			if (!isFormDirty('relay') && !isFormDirty('asr') && !isFormDirty('music') && !isFormDirty('upscale')) {
+				return true;
+			}
+			return window.confirm('You have unsaved settings changes. Leave this section without saving?');
+		}
+
+		function selectSettingsSection(section, options = {}) {
+			const next = normalizeSettingsSection(section);
+			if (!options.force && next !== settingsSection && !confirmUnsavedSettings()) {
+				return false;
+			}
+			settingsSection = next;
+			for (const button of fields.settingsNavButtons) {
+				const selected = button.getAttribute('data-settings-section') === next;
+				button.setAttribute('aria-current', selected ? 'page' : 'false');
+			}
+			for (const panel of fields.settingsPanels) {
+				panel.hidden = panel.getAttribute('data-settings-panel') !== next;
+			}
+			if (!options.skipHash) {
+				setHash('settings/' + next);
+			}
+			return true;
+		}
+
+		function initSettingsNav() {
+			fields.settingsNavButtons.forEach((button) => {
+				button.addEventListener('click', () => {
+					if (!selectSettingsSection(button.getAttribute('data-settings-section'))) {
+						return;
+					}
+					ensureSettingsLoaded();
+				});
+			});
+		}
+
+		function ensureSettingsLoaded() {
+			if (!settingsLoaded) {
+				settingsLoaded = true;
+				loadAsrSettings();
+				loadMusicAnalysisSettings();
+				loadUpscaleSettings();
+				loadRelaySettings();
+			}
+		}
+
+		function applyRouteFromHash(options = {}) {
+			const route = parseHash();
+			const nextTabId = tabIdForRoute(route.tab);
+			if (!options.skipGuard && nextTabId !== 'tab-settings' && isSettingsTabSelected() && !confirmUnsavedSettings()) {
+				suppressHashChange = true;
+				setHash('settings/' + settingsSection);
+				suppressHashChange = false;
+				return;
+			}
+			if (!selectTab(nextTabId, { skipHash: true, focus: options.focus, skipGuard: true })) {
+				return;
+			}
+			if (route.tab === 'settings') {
+				ensureSettingsLoaded();
+				selectSettingsSection(route.settingsSection, { skipHash: true, force: true });
+			}
+			if (route.tab === 'live' && route.liveRequestId) {
+				selectLiveJob(route.liveRequestId, { skipHash: true });
+			}
+		}
+
 		function selectTab(tabId, options = {}) {
 			const nextButton = fields.tabButtons.find((button) => button.id === tabId) || fields.tabButtons[0];
 			if (!nextButton) {
-				return;
+				return false;
+			}
+			if (!options.skipGuard && nextButton.id !== 'tab-settings' && isSettingsTabSelected() && !confirmUnsavedSettings()) {
+				return false;
 			}
 			const nextPanelId = nextButton.getAttribute('aria-controls');
 			for (const button of fields.tabButtons) {
@@ -975,18 +1513,27 @@ function statusPageHtml() {
 			if (options.focus) {
 				nextButton.focus();
 			}
-			if (nextButton.id === 'tab-settings' && !settingsLoaded) {
-				settingsLoaded = true;
-				loadAsrSettings();
-				loadMusicAnalysisSettings();
-				loadUpscaleSettings();
-				loadRelaySettings();
+			if (!options.skipHash) {
+				const route = routeForTabId(nextButton.id);
+				if (route === 'settings') {
+					setHash('settings/' + settingsSection);
+				} else if (route === 'live' && selectedLiveRequestId) {
+					setHash('live/' + encodeURIComponent(selectedLiveRequestId));
+				} else {
+					setHash(route);
+				}
 			}
+			if (nextButton.id === 'tab-settings') {
+				ensureSettingsLoaded();
+			}
+			return true;
 		}
 
 		function initTabs() {
 			fields.tabButtons.forEach((button, index) => {
-				button.addEventListener('click', () => selectTab(button.id));
+				button.addEventListener('click', () => {
+					selectTab(button.id);
+				});
 				button.addEventListener('keydown', (event) => {
 					if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
 						return;
@@ -1004,7 +1551,29 @@ function statusPageHtml() {
 					selectTab(fields.tabButtons[nextIndex].id, { focus: true });
 				});
 			});
-			selectTab('tab-overview');
+			window.addEventListener('hashchange', () => {
+				if (suppressHashChange) {
+					return;
+				}
+				applyRouteFromHash();
+			});
+			document.getElementById('healthGrid').addEventListener('click', (event) => {
+				const card = event.target.closest('[data-nav]');
+				if (!card) return;
+				const target = card.getAttribute('data-nav');
+				if (target === 'overview') return;
+				if (target.startsWith('settings/')) {
+					ensureSettingsLoaded();
+					if (!selectSettingsSection(target.split('/')[1] || 'providers')) {
+						return;
+					}
+					selectTab('tab-settings');
+					return;
+				}
+				setHash(target);
+				applyRouteFromHash();
+			});
+			applyRouteFromHash();
 		}
 
 		function selectProviderTestTab(tabId, options = {}) {
@@ -1104,24 +1673,6 @@ function statusPageHtml() {
 			fields.lastEvent.textContent = label + ' event ' + new Date().toLocaleTimeString();
 		}
 
-		function requestButton(job) {
-			const requestId = text(job.request_id || job.id || job.short_request_id);
-			const label = text(job.short_request_id || job.request_id || job.id);
-			return '<button type="button" class="copy-value" data-copy-value="' + escapeHtml(requestId) + '" title="Copy request id">' + escapeHtml(label) + '</button>';
-		}
-
-		function providerCell(job) {
-			const provider = text(job.provider || 'Unknown');
-			const label = text(job.provider_label || '');
-			return '<td><code>' + escapeHtml(provider) + '</code>' + (label && label !== provider ? '<div class="muted">' + escapeHtml(label) + '</div>' : '') + '</td>';
-		}
-
-		function workflowCell(job) {
-			const workflow = text(job.workflow || 'Pending');
-			const skills = Array.isArray(job.skills) ? job.skills.filter(Boolean) : [];
-			return '<td>' + escapeHtml(workflow) + (skills.length ? '<div class="muted">Skill: ' + escapeHtml(skills.join(', ')) + '</div>' : '') + '</td>';
-		}
-
 		function statusClass(status) {
 			const normalized = String(status || '').toLowerCase();
 			if (normalized === 'completed') {
@@ -1190,9 +1741,9 @@ function statusPageHtml() {
 			return blocks.join('');
 		}
 
-		function updateDebugLogBlocks(row, job, key) {
+		function updateDebugLogBlocks(container, job, key) {
 			const logs = Array.isArray(job.debug_logs) ? job.debug_logs : [];
-			const outputs = Array.from(row.querySelectorAll('.session-output'));
+			const outputs = Array.from(container.querySelectorAll('.session-output'));
 			const byKey = (value) => outputs.find((output) => output.dataset.sessionKey === value);
 			logs.forEach((log, index) => {
 				const promptOutput = byKey(key + ':prompt:' + index);
@@ -1204,54 +1755,6 @@ function statusPageHtml() {
 					updateSessionOutput(responseOutput, log.output || '');
 				}
 			});
-		}
-
-		function rowFor(tbody, key, kind) {
-			return Array.from(tbody.querySelectorAll('tr[data-session-row-key]')).find((row) => (
-				row.dataset.sessionRowKey === key && row.dataset.sessionRowKind === kind
-			));
-		}
-
-		function createSessionRow(key, kind) {
-			const row = document.createElement('tr');
-			row.dataset.sessionRowKey = key;
-			row.dataset.sessionRowKind = kind;
-			return row;
-		}
-
-		function jobKey(prefix, job) {
-			return prefix + ':' + text(job.request_id || job.id || job.short_request_id);
-		}
-
-		function activeSummaryCells(job) {
-			return '<td>' + requestButton(job) + '</td>' +
-				'<td>' + escapeHtml(job.type) + '</td>' +
-				'<td>' + escapeHtml(job.model) + '</td>' +
-				providerCell(job) +
-				workflowCell(job) +
-				'<td>' + statusText(job.status) + '</td>' +
-				'<td>' + elapsedSpan(job, true) + '</td>';
-		}
-
-		function queuedSummaryCells(job) {
-			return '<td>' + requestButton(job) + '</td>' +
-				'<td>' + escapeHtml(job.type) + '</td>' +
-				'<td>' + escapeHtml(job.model) + '</td>' +
-				providerCell(job) +
-				workflowCell(job) +
-				'<td>' + statusText(job.status || 'queued') + '</td>' +
-				'<td>' + elapsedSpan(job, true) + '</td>';
-		}
-
-		function recentSummaryCells(job) {
-			return '<td>' + requestButton(job) + '</td>' +
-				'<td>' + escapeHtml(job.type) + '</td>' +
-				'<td>' + escapeHtml(job.model) + '</td>' +
-				providerCell(job) +
-				workflowCell(job) +
-				'<td>' + statusText(job.status) + (job.error_message ? '<div class="muted">' + escapeHtml(job.error_message) + '</div>' : '') + '</td>' +
-				'<td>' + elapsedSpan(job, false) + '</td>' +
-				'<td>' + (job.finished_at ? new Date(job.finished_at).toLocaleTimeString() : '-') + '</td>';
 		}
 
 		function updateSessionOutput(output, nextValue) {
@@ -1276,122 +1779,284 @@ function statusPageHtml() {
 				: label.replace(/Session Output/i, 'Grok CLI stdout / stderr');
 		}
 
-		function renderJobTable(tbody, jobs, options) {
-			const visibleJobs = options.filter ? jobs.filter(options.filter) : jobs;
-			const colspan = Number(options.colspan || 5);
-			if (!visibleJobs.length) {
-				tbody.innerHTML = '<tr><td colspan="' + colspan + '" class="muted">' + escapeHtml(options.emptyText) + '</td></tr>';
+		function jobRequestId(job) {
+			return text(job.request_id || job.id || job.short_request_id, '');
+		}
+
+		function collectUnifiedJobs(jobs) {
+			const active = (Array.isArray(jobs.active) ? jobs.active : []).map((job) => ({ ...job, _bucket: 'active' }));
+			const queued = (Array.isArray(jobs.queued) ? jobs.queued : []).map((job) => ({ ...job, _bucket: 'queued' }));
+			const recent = (Array.isArray(jobs.recent) ? jobs.recent : []).map((job) => ({ ...job, _bucket: 'recent' }));
+			return [...active, ...queued, ...recent];
+		}
+
+		function liveJobMatchesFilter(job) {
+			const status = String(job.status || '').toLowerCase();
+			if (liveFilter === 'all') return true;
+			if (liveFilter === 'running') return status === 'running';
+			if (liveFilter === 'queued') return status === 'queued';
+			if (liveFilter === 'failed') return status === 'failed';
+			return true;
+		}
+
+		function renderLiveJobList(jobs) {
+			const unified = collectUnifiedJobs(jobs).filter(liveJobMatchesFilter);
+			if (!unified.length) {
+				fields.liveJobList.innerHTML = '<div class="muted" style="padding:12px;">No jobs match this filter.</div>';
 				return;
 			}
-
-			const wanted = new Set();
-			Array.from(tbody.children).forEach((row) => {
-				if (!row.dataset.sessionRowKey) {
-					row.remove();
+			Array.from(fields.liveJobList.children).forEach((child) => {
+				if (!child.matches('[data-live-request-id]')) {
+					child.remove();
 				}
 			});
-
-			for (const job of visibleJobs) {
-				const key = jobKey(options.keyPrefix, job);
-				wanted.add(key);
-
-				let summaryRow = rowFor(tbody, key, 'summary');
-				if (!summaryRow) {
-					summaryRow = createSessionRow(key, 'summary');
+			const wanted = new Set();
+			for (const job of unified) {
+				const requestId = jobRequestId(job);
+				if (!requestId) continue;
+				wanted.add(requestId);
+				let card = fields.liveJobList.querySelector('[data-live-request-id="' + CSS.escape(requestId) + '"]');
+				if (!card) {
+					card = document.createElement('button');
+					card.type = 'button';
+					card.className = 'live-job-card';
+					card.dataset.liveRequestId = requestId;
+					card.setAttribute('role', 'option');
+					card.addEventListener('click', () => selectLiveJob(requestId));
 				}
-				summaryRow.innerHTML = options.summaryCells(job);
-				tbody.appendChild(summaryRow);
+				const provider = text(job.provider || 'Unknown');
+				const status = String(job.status || '').toLowerCase();
+				card.setAttribute('aria-selected', requestId === selectedLiveRequestId ? 'true' : 'false');
+				card.innerHTML = '<div class="live-job-card-head"><strong>' + escapeHtml(text(job.short_request_id || requestId)) + '</strong>' + statusText(job.status || job._bucket) + '</div>' +
+					'<div class="live-job-card-meta">' + escapeHtml(job.type) + ' · ' + escapeHtml(job.model) + '</div>' +
+					'<div class="live-job-card-meta">' + escapeHtml(provider) + ' · ' + elapsedSpan(job, status === 'running' || status === 'queued') + '</div>';
+				fields.liveJobList.appendChild(card);
+			}
+			Array.from(fields.liveJobList.querySelectorAll('[data-live-request-id]')).forEach((card) => {
+				if (!wanted.has(card.dataset.liveRequestId)) card.remove();
+			});
+		}
 
-				let outputRow = rowFor(tbody, key, 'output');
-				const debugLogs = Array.isArray(job.debug_logs) ? job.debug_logs : [];
-				const hasDebugOutput = debugLogs.some((log) => log && (log.prompt || log.output));
-				const hasInput = !!job.session_input;
-				const preview = artifactPreviewBlock(job);
-				const hasOutput = !!preview || hasInput || !!job.session_output || hasDebugOutput;
-				if (hasOutput) {
-					const signature = JSON.stringify({
-						artifacts: (Array.isArray(job.artifacts) ? job.artifacts : []).map((artifact) => [artifact && artifact.url, artifact && artifact.mime_type, artifact && artifact.size_bytes]),
-						input: !!job.session_input,
-						session: !!job.session_output,
-						debug: debugLogs.map((log) => [!!(log && log.prompt), !!(log && log.output)]),
-					});
-					if (!outputRow || outputRow.dataset.outputSignature !== signature) {
-						if (!outputRow) {
-							outputRow = createSessionRow(key, 'output');
-						}
-						outputRow.dataset.outputSignature = signature;
-						let blocks = preview;
-						if (job.session_input) {
-							blocks += sessionOutputBlock(providerSessionLabel(job, options.inputLabel, 'input'), { live: !!options.live, key: key + ':input' });
-						}
-						if (job.session_output) {
-							blocks += sessionOutputBlock(providerSessionLabel(job, options.outputLabel, 'output'), {
-								live: !!options.live,
-								key: key + ':output',
-							});
-						}
-						blocks += debugLogBlocks(job, key);
-						outputRow.innerHTML = '<td colspan="' + colspan + '">' + blocks + '</td>';
-					}
-					tbody.appendChild(outputRow);
-					if (job.session_output) {
-						const output = Array.from(outputRow.querySelectorAll('.session-output')).find((item) => item.dataset.sessionKey === key + ':output');
-						if (output) {
-							updateSessionOutput(output, job.session_output);
-						}
-					}
-					if (job.session_input) {
-						const input = Array.from(outputRow.querySelectorAll('.session-output')).find((item) => item.dataset.sessionKey === key + ':input');
-						if (input) updateSessionOutput(input, job.session_input);
-					}
-					if (hasDebugOutput) {
-						updateDebugLogBlocks(outputRow, job, key);
-					}
-				} else if (outputRow) {
-					outputRow.remove();
+		function renderLiveDetail(job) {
+			if (!job) {
+				fields.liveDetailEmpty.hidden = false;
+				fields.liveDetailContent.hidden = true;
+				fields.liveDetailBody.innerHTML = '';
+				return;
+			}
+			const requestId = jobRequestId(job);
+			const status = String(job.status || '').toLowerCase();
+			const live = status === 'running' || status === 'queued';
+			const key = 'detail:' + requestId;
+			fields.liveDetailEmpty.hidden = true;
+			fields.liveDetailContent.hidden = false;
+			fields.liveDetailTitle.textContent = text(job.short_request_id || requestId);
+			fields.liveDetailCopyId.dataset.copyValue = requestId;
+			const skills = Array.isArray(job.skills) ? job.skills.filter(Boolean) : [];
+			let blocks = '<dl class="live-detail-meta">' +
+				'<dt>Request</dt><dd><code>' + escapeHtml(requestId) + '</code></dd>' +
+				'<dt>Type</dt><dd>' + escapeHtml(job.type) + '</dd>' +
+				'<dt>Model</dt><dd>' + escapeHtml(job.model) + '</dd>' +
+				'<dt>Provider</dt><dd><code>' + escapeHtml(text(job.provider || 'Unknown')) + '</code></dd>' +
+				'<dt>Status</dt><dd>' + statusText(job.status) + (job.error_message ? '<div class="muted">' + escapeHtml(job.error_message) + '</div>' : '') + '</dd>' +
+				'<dt>Workflow</dt><dd>' + escapeHtml(text(job.workflow || 'Pending')) + (skills.length ? '<div class="muted">Skill: ' + escapeHtml(skills.join(', ')) + '</div>' : '') + '</dd>' +
+				'<dt>Elapsed</dt><dd>' + elapsedSpan(job, live) + '</dd>' +
+				(job.finished_at ? '<dt>Finished</dt><dd>' + escapeHtml(new Date(job.finished_at).toLocaleTimeString()) + '</dd>' : '') +
+				'</dl>';
+			blocks += artifactPreviewBlock(job);
+			if (job.session_input) {
+				blocks += sessionOutputBlock(providerSessionLabel(job, live ? 'Live stdin' : 'stdin', 'input'), { live, key: key + ':input' });
+			}
+			if (job.session_output) {
+				blocks += sessionOutputBlock(providerSessionLabel(job, live ? 'Live Session Output' : 'Session Output', 'output'), { live, key: key + ':output' });
+			}
+			blocks += debugLogBlocks(job, key);
+			const signature = JSON.stringify({
+				requestId,
+				status: job.status,
+				error_message: job.error_message,
+				finished_at: job.finished_at,
+				workflow: job.workflow,
+				skills: job.skills,
+				artifacts: (Array.isArray(job.artifacts) ? job.artifacts : []).map((artifact) => [artifact && artifact.url, artifact && artifact.mime_type]),
+				input: !!job.session_input,
+				output: !!job.session_output,
+				debug: Array.isArray(job.debug_logs) ? job.debug_logs.length : 0,
+			});
+			if (fields.liveDetailBody.dataset.detailSignature !== signature) {
+				fields.liveDetailBody.dataset.detailSignature = signature;
+				fields.liveDetailBody.innerHTML = blocks;
+			}
+			if (job.session_output) {
+				const output = fields.liveDetailBody.querySelector('.session-output[data-session-key="' + key + ':output"]');
+				if (output) updateSessionOutput(output, job.session_output);
+			}
+			if (job.session_input) {
+				const input = fields.liveDetailBody.querySelector('.session-output[data-session-key="' + key + ':input"]');
+				if (input) updateSessionOutput(input, job.session_input);
+			}
+			updateDebugLogBlocks(fields.liveDetailBody, job, key);
+		}
+
+		function findJobByRequestId(requestId) {
+			const jobs = currentStatus && currentStatus.jobs || {};
+			return collectUnifiedJobs(jobs).find((job) => jobRequestId(job) === String(requestId || '')) || null;
+		}
+
+		function selectLiveJob(requestId, options = {}) {
+			selectedLiveRequestId = String(requestId || '');
+			if (!options.skipHash && selectedLiveRequestId) {
+				setHash('live/' + encodeURIComponent(selectedLiveRequestId));
+			}
+			const jobs = currentStatus && currentStatus.jobs || {};
+			renderLiveJobList(jobs);
+			renderLiveDetail(findJobByRequestId(selectedLiveRequestId));
+		}
+
+		function autoSelectLiveJob(jobs) {
+			if (selectedLiveRequestId) {
+				const selected = findJobByRequestId(selectedLiveRequestId);
+				if (selected && liveJobMatchesFilter(selected)) {
+					renderLiveDetail(selected);
+					return;
 				}
 			}
+			const active = Array.isArray(jobs.active) ? jobs.active : [];
+			if (active.length) {
+				selectLiveJob(jobRequestId(active[0]), { skipHash: parseHash().tab !== 'live' });
+				return;
+			}
+			const unified = collectUnifiedJobs(jobs).filter(liveJobMatchesFilter);
+			if (unified.length) {
+				selectLiveJob(jobRequestId(unified[0]), { skipHash: parseHash().tab !== 'live' });
+				return;
+			}
+			selectedLiveRequestId = '';
+			renderLiveDetail(null);
+		}
 
-			Array.from(tbody.querySelectorAll('tr[data-session-row-key]')).forEach((row) => {
-				if (!wanted.has(row.dataset.sessionRowKey)) {
-					row.remove();
-				}
+		function initLiveFilters() {
+			document.querySelectorAll('[data-live-filter]').forEach((button) => {
+				button.addEventListener('click', () => {
+					liveFilter = button.getAttribute('data-live-filter') || 'all';
+					document.querySelectorAll('[data-live-filter]').forEach((item) => {
+						item.setAttribute('aria-pressed', item === button ? 'true' : 'false');
+					});
+					const jobs = currentStatus && currentStatus.jobs || {};
+					renderLiveJobList(jobs);
+					autoSelectLiveJob(jobs);
+				});
 			});
 		}
 
-		function renderActiveJobs(jobs) {
-			renderJobTable(fields.activeJobs, jobs, {
-				emptyText: 'No active jobs',
-				keyPrefix: 'active',
-				live: true,
-				inputLabel: 'Live stdin',
-				outputLabel: 'Live Session Output',
-				summaryCells: activeSummaryCells,
-				colspan: 7,
-			});
+		function updateTabBadges(jobs) {
+			const running = Number(jobs.running_count || 0);
+			const queued = Number(jobs.queued_count || 0);
+			const liveCount = running + queued;
+			fields.liveTabBadge.hidden = liveCount <= 0;
+			fields.liveTabBadge.textContent = String(liveCount);
+			fields.liveTabBadge.className = 'tab-badge' + (running > 0 ? ' warn' : '');
+			const recent = Array.isArray(jobs.recent) ? jobs.recent : [];
+			const failed = recent.filter((job) => String(job.status || '').toLowerCase() === 'failed').length;
+			fields.debugTabBadge.hidden = failed <= 0;
+			fields.debugTabBadge.textContent = String(failed);
+			updateSettingsDirtyState();
 		}
 
-		function renderQueuedJobs(jobs) {
-			renderJobTable(fields.queuedJobs, jobs, {
-				emptyText: 'No queued jobs',
-				keyPrefix: 'queued',
-				live: true,
-				inputLabel: 'Queued stdin',
-				outputLabel: 'Queued Session Output',
-				summaryCells: queuedSummaryCells,
-				colspan: 7,
-			});
+		function renderDebugHealth(payload, ok) {
+			const jobs = payload.jobs || {};
+			const bridge = payload.bridge || {};
+			const paired = Array.isArray(bridge.paired_origins) ? bridge.paired_origins : [];
+			const asr = payload.asr || currentCapabilities.asr || {};
+			const queued = Number(jobs.queued_count || 0);
+			const recent = Array.isArray(jobs.recent) ? jobs.recent : [];
+			const lastFailure = recent.find((job) => String(job.status || '').toLowerCase() === 'failed');
+			const checks = [
+				{
+					state: ok ? 'ok' : 'bad',
+					title: 'Bridge reachable',
+					detail: ok ? 'Local relay is responding.' : 'Bridge status request failed.',
+					action: '<button type="button" data-nav-hash="overview">Overview</button>',
+				},
+				{
+					state: payload.success ? 'ok' : 'warn',
+					title: 'Codex ready',
+					detail: payload.success ? 'Codex CLI is ready for jobs.' : (payload.message || 'Codex needs attention.'),
+					action: '<button type="button" data-nav-hash="debug">Inspect details</button>',
+				},
+				{
+					state: paired.length ? 'ok' : 'warn',
+					title: 'Paired browser origins',
+					detail: paired.length ? paired.length + ' origin(s) paired.' : 'No browser origins are paired yet.',
+					action: '<button type="button" data-nav-hash="debug">View paired sites</button>',
+				},
+				{
+					state: queued > 0 ? 'warn' : 'ok',
+					title: 'Job queue',
+					detail: queued > 0 ? queued + ' job(s) waiting.' : 'No queued jobs.',
+					action: '<button type="button" data-nav-hash="live">Open Live</button>',
+				},
+				{
+					state: asr.ready ? 'ok' : (asr.enabled === false ? 'warn' : 'warn'),
+					title: 'Local ASR',
+					detail: asr.ready ? 'Local ASR runtime is ready.' : 'Local ASR is not ready or not checked.',
+					action: '<button type="button" data-nav-hash="settings/asr">ASR settings</button>',
+				},
+				{
+					state: lastFailure ? 'bad' : 'ok',
+					title: 'Recent failures',
+					detail: lastFailure ? 'Latest failure: ' + text(lastFailure.error_message || lastFailure.type, 'unknown') : 'No recent failed jobs.',
+					action: lastFailure ? '<button type="button" data-open-live-job="' + escapeHtml(jobRequestId(lastFailure)) + '">Inspect failure</button>' : '<button type="button" data-nav-hash="live">Open Live</button>',
+				},
+			];
+			fields.debugHealthList.innerHTML = checks.map((check) => (
+				'<div class="debug-health-item ' + check.state + '">' +
+					'<div><strong>' + escapeHtml(check.title) + '</strong><div class="muted">' + escapeHtml(check.detail) + '</div></div>' +
+					'<div>' + check.action + '</div>' +
+				'</div>'
+			)).join('');
 		}
 
-		function renderRecentActivity(jobs) {
-			renderJobTable(fields.recentActivity, jobs, {
-				emptyText: 'No recent activity',
-				keyPrefix: 'recent',
-				inputLabel: 'stdin',
-				outputLabel: 'Session Output',
-				summaryCells: recentSummaryCells,
-				colspan: 8,
-			});
+		function renderDebugFailures(jobs) {
+			const recent = Array.isArray(jobs.recent) ? jobs.recent : [];
+			const failed = recent.filter((job) => String(job.status || '').toLowerCase() === 'failed').slice(0, 8);
+			if (!failed.length) {
+				fields.debugFailureList.innerHTML = '<div class="muted">No recent failures</div>';
+				return;
+			}
+			fields.debugFailureList.innerHTML = failed.map((job) => (
+				'<div class="debug-failure-item">' +
+					'<span><code>' + escapeHtml(text(job.short_request_id || jobRequestId(job))) + '</code> · ' + escapeHtml(job.type) + ' · <span class="muted">' + escapeHtml(text(job.error_message, 'Failed')) + '</span></span>' +
+					'<button type="button" data-open-live-job="' + escapeHtml(jobRequestId(job)) + '">Inspect</button>' +
+				'</div>'
+			)).join('');
+		}
+
+		function escapeRegExp(value) {
+			return String(value).replace(/[.*+?^\${}()|[\]\\]/g, '\\$&');
+		}
+
+		function applyRawStatusFilter() {
+			const query = String(fields.rawStatusFilter && fields.rawStatusFilter.value || '').trim();
+			const json = JSON.stringify(currentStatus, null, 2);
+			if (!query) {
+				fields.rawStatus.textContent = json;
+				return;
+			}
+			const pattern = new RegExp('(' + escapeRegExp(query) + ')', 'ig');
+			fields.rawStatus.innerHTML = escapeHtml(json).replace(pattern, '<mark>$1</mark>');
+		}
+
+		function updateHealthCards(payload, ok) {
+			const jobs = payload.jobs || {};
+			const bridge = payload.bridge || {};
+			const paired = Array.isArray(bridge.paired_origins) ? bridge.paired_origins : [];
+			const asr = payload.asr || currentCapabilities.asr || {};
+			fields.healthBridge.textContent = ok ? 'Reachable' : 'Error';
+			fields.healthCodex.textContent = payload.success ? 'Ready' : 'Needs attention';
+			fields.healthJobs.textContent = 'Running ' + Number(jobs.running_count || 0) + ' / Queued ' + Number(jobs.queued_count || 0);
+			fields.healthAsr.textContent = asr.ready ? 'Ready' : (asr.enabled === false ? 'Disabled' : 'Not ready');
+			fields.overviewPairedCount.textContent = String(paired.length);
 		}
 
 		function renderDetails(details) {
@@ -1507,7 +2172,7 @@ function statusPageHtml() {
 			renderBackendDrivers(currentCapabilities.backends || []);
 			renderAsrDetails(currentCapabilities.asr || {});
 			currentStatus.capabilities = currentCapabilities;
-			fields.rawStatus.textContent = JSON.stringify(currentStatus, null, 2);
+			applyRawStatusFilter();
 		}
 
 		function renderRelaySettings(payload) {
@@ -1712,7 +2377,10 @@ function statusPageHtml() {
 			const artifacts = Array.isArray(job && job.artifacts) ? job.artifacts : [];
 			const artifact = artifacts.find((entry) => entry && /^\\/(?:v1)\\/status\\/jobs\\/\d+\\/artifacts\\/\d+$/.test(String(entry.url || '')) && /^(image|video)\\//.test(String(entry.mime_type || '')));
 			if (!artifact) {
-				result.innerHTML = '<button type="button" data-open-live>Open completed result in Live</button>';
+				const requestId = jobRequestId(job);
+				result.innerHTML = requestId
+					? '<button type="button" data-open-live-job="' + escapeHtml(requestId) + '">Open completed result in Live</button>'
+					: '<button type="button" data-open-live>Open completed result in Live</button>';
 				return;
 			}
 			const url = escapeHtml(artifact.url);
@@ -1748,6 +2416,9 @@ function statusPageHtml() {
 				if (result) result.innerHTML = '';
 				if (message) message.textContent = 'Starting provider test.';
 				updateProviderTestProgress();
+				if (selectTab('tab-live')) {
+					selectLiveJob(requestId, { skipHash: false });
+				}
 				const body = { job_type: jobType, model: button.dataset.model || '', prompt: prompt ? prompt.value.trim() : '', test_request_id: requestId };
 				Array.from(card.querySelectorAll('[data-test-option]')).forEach((field) => {
 					const key = String(field.dataset.testOption || '').trim();
@@ -1807,7 +2478,7 @@ function statusPageHtml() {
 		}
 
 		async function loadRelaySettings() {
-			try { const response = await fetch(relaySettingsUrl, { cache: 'no-store' }); const payload = await response.json(); if (!response.ok) throw new Error(payload.message || 'Routing settings unavailable'); renderRelaySettings(payload); if (!fields.refreshRelayProviders.disabled) fields.relaySettingsMessage.textContent = 'Routing settings loaded'; } catch (error) { if (!fields.refreshRelayProviders.disabled) fields.relaySettingsMessage.textContent = error.message || 'Routing settings load failed'; }
+			try { const response = await fetch(relaySettingsUrl, { cache: 'no-store' }); const payload = await response.json(); if (!response.ok) throw new Error(payload.message || 'Routing settings unavailable'); renderRelaySettings(payload); captureFormSnapshots(['relay']); if (!fields.refreshRelayProviders.disabled) fields.relaySettingsMessage.textContent = 'Routing settings loaded'; } catch (error) { if (!fields.refreshRelayProviders.disabled) fields.relaySettingsMessage.textContent = error.message || 'Routing settings load failed'; }
 		}
 
 		function followProviderRefresh(refreshState) {
@@ -1834,6 +2505,7 @@ function statusPageHtml() {
 				renderRelaySettings(payload);
 				const refreshStarted = payload.refresh_started === true && followProviderRefresh(payload.refresh);
 				if (!options.quiet && !refreshStarted) fields.relaySettingsMessage.textContent = 'CLI paths and routing saved';
+				captureFormSnapshots(['relay']);
 				return { success: true, payload, refreshStarted };
 			} catch (error) {
 				const message = error.message || 'Routing settings save failed';
@@ -1869,6 +2541,7 @@ function statusPageHtml() {
 				const payload = await response.json();
 				if (!response.ok || payload.success === false) throw new Error(payload.message || 'Music analysis settings unavailable');
 				renderMusicAnalysisSettings(payload.settings || {});
+				captureFormSnapshots(['music']);
 				fields.musicAnalysisSettingsMessage.textContent = refreshRuntime ? 'Runtime checked' : 'Settings loaded';
 			} catch (error) {
 				fields.musicAnalysisSettingsMessage.textContent = error.message || 'Music analysis settings load failed';
@@ -1884,6 +2557,7 @@ function statusPageHtml() {
 				if (!response.ok || payload.success === false) throw new Error(payload.message || 'Save failed');
 				renderMusicAnalysisSettings(payload.settings || settings);
 				fields.musicAnalysisSettingsMessage.textContent = 'Saved';
+				captureFormSnapshots(['music']);
 				await Promise.all([refresh().catch(() => {}), loadRelaySettings().catch(() => {})]);
 			} catch (error) {
 				fields.musicAnalysisSettingsMessage.textContent = error.message || 'Save failed';
@@ -1932,6 +2606,7 @@ function statusPageHtml() {
 				const payload = await response.json();
 				if (!response.ok || payload.success === false) throw new Error(payload.message || 'Local upscale settings unavailable');
 				renderUpscaleSettings(payload.settings || {}, payload.models || []);
+				captureFormSnapshots(['upscale']);
 				fields.upscaleSettingsMessage.textContent = 'Settings loaded';
 			} catch (error) {
 				fields.upscaleSettingsMessage.textContent = error.message || 'Local upscale settings load failed';
@@ -1947,6 +2622,7 @@ function statusPageHtml() {
 				if (!response.ok || payload.success === false) throw new Error(payload.message || 'Save failed');
 				renderUpscaleSettings(payload.settings || settings, payload.models || []);
 				fields.upscaleSettingsMessage.textContent = 'Saved';
+				captureFormSnapshots(['upscale']);
 				await Promise.all([refresh().catch(() => {}), loadRelaySettings().catch(() => {})]);
 			} catch (error) {
 				fields.upscaleSettingsMessage.textContent = error.message || 'Save failed';
@@ -2126,6 +2802,7 @@ function statusPageHtml() {
 					throw new Error(payload.message || 'Settings unavailable');
 				}
 				renderAsrSettingsForm(payload.settings || {});
+				captureFormSnapshots(['asr']);
 				fields.asrSettingsMessage.textContent = refreshRuntime ? 'Runtime checked' : 'Settings loaded';
 				if (payload.capabilities) {
 					renderAsrDetails(payload.capabilities);
@@ -2156,6 +2833,7 @@ function statusPageHtml() {
 				const payload = await persistAsrSettings();
 				renderAsrSettingsForm(payload.settings || serializeAsrSettingsForm());
 				fields.asrSettingsMessage.textContent = 'Saved';
+				captureFormSnapshots(['asr']);
 				if (payload.capabilities) {
 					renderAsrDetails(payload.capabilities);
 				}
@@ -2202,6 +2880,7 @@ function statusPageHtml() {
 			} catch (error) {
 				fields.asrSettingsMessage.textContent = 'Settings need review';
 			}
+			updateSettingsDirtyState();
 		}
 
 		function applyAsrSettingsJson() {
@@ -2209,6 +2888,7 @@ function statusPageHtml() {
 				const settings = JSON.parse(fields.asrSettingsJson.value || '{}');
 				renderAsrSettingsForm(settings);
 				fields.asrSettingsMessage.textContent = 'JSON applied - save to persist';
+				updateSettingsDirtyState();
 			} catch (error) {
 				fields.asrSettingsMessage.textContent = 'Invalid JSON';
 			}
@@ -2231,6 +2911,7 @@ function statusPageHtml() {
 			});
 			renderAsrSettingsForm(settings);
 			fields.asrSettingsMessage.textContent = 'Model added - edit and save';
+			updateSettingsDirtyState();
 		}
 
 		function captureSessionOutputScrolls() {
@@ -2337,7 +3018,37 @@ function statusPageHtml() {
 			const openLive = event.target.closest('[data-open-live]');
 			if (openLive) {
 				event.preventDefault();
-				selectTab('tab-live', { focus: true });
+				if (!selectTab('tab-live')) {
+					return;
+				}
+				const card = openLive.closest('[data-provider-media-test]');
+				const requestId = card && card.dataset.testRequestId;
+				if (requestId) selectLiveJob(requestId);
+				return;
+			}
+			const openLiveJob = event.target.closest('[data-open-live-job]');
+			if (openLiveJob) {
+				event.preventDefault();
+				if (!selectTab('tab-live')) {
+					return;
+				}
+				selectLiveJob(openLiveJob.getAttribute('data-open-live-job') || '');
+				return;
+			}
+			const navHash = event.target.closest('[data-nav-hash]');
+			if (navHash) {
+				event.preventDefault();
+				const target = navHash.getAttribute('data-nav-hash') || 'overview';
+				if (target.startsWith('settings/')) {
+					ensureSettingsLoaded();
+					if (!selectSettingsSection(target.split('/')[1] || 'providers')) {
+						return;
+					}
+					selectTab('tab-settings');
+					return;
+				}
+				setHash(target);
+				applyRouteFromHash();
 				return;
 			}
 			if (event.target === fields.closeImageLightbox || event.target === fields.imageLightbox) {
@@ -2388,12 +3099,18 @@ function statusPageHtml() {
 			const scrollStates = captureSessionOutputScrolls();
 			fields.jobCounts.textContent = 'Running ' + Number(jobs.running_count || 0) + ' / Queued ' + Number(jobs.queued_count || 0);
 			fields.maxConcurrent.textContent = text(jobs.max_concurrent);
-			renderActiveJobs(Array.isArray(jobs.active) ? jobs.active : []);
-			renderQueuedJobs(Array.isArray(jobs.queued) ? jobs.queued : []);
-			renderRecentActivity(Array.isArray(jobs.recent) ? jobs.recent : []);
+			renderLiveJobList(jobs);
+			const selected = selectedLiveRequestId ? findJobByRequestId(selectedLiveRequestId) : null;
+			if (selected && liveJobMatchesFilter(selected)) {
+				renderLiveDetail(selected);
+			} else {
+				autoSelectLiveJob(jobs);
+			}
 			currentStatus.jobs = jobs;
 			updateProviderTestProgress();
-			fields.rawStatus.textContent = JSON.stringify(currentStatus, null, 2);
+			updateTabBadges(jobs);
+			renderDebugFailures(jobs);
+			applyRawStatusFilter();
 			fields.updated.textContent = 'Live updates on - updated ' + new Date().toLocaleTimeString();
 			queueRestoreSessionOutputScrolls(scrollStates);
 		}
@@ -2405,6 +3122,15 @@ function statusPageHtml() {
 				cell.textContent = elapsed(base + Math.max(0, Date.now() - captured));
 			});
 			updateProviderTestProgress();
+			if (selectedLiveRequestId) {
+				const job = findJobByRequestId(selectedLiveRequestId);
+				if (job) {
+					const status = String(job.status || '').toLowerCase();
+					if (status === 'running' || status === 'queued') {
+						renderLiveDetail(job);
+					}
+				}
+			}
 		}
 
 		function renderStatus(payload, ok) {
@@ -2422,6 +3148,8 @@ function statusPageHtml() {
 			fields.pairedSites.innerHTML = paired.length ? paired.map((origin) => '<code>' + escapeHtml(origin) + '</code>').join(' ') : '<span class="muted">None</span>';
 			fields.codexDetails.innerHTML = renderDetails(details);
 			renderAsrDetails(payload.asr || currentCapabilities.asr || {});
+			updateHealthCards(payload, ok);
+			renderDebugHealth(payload, ok);
 			if (!Object.keys(currentCapabilities).length) {
 				fields.codexCliVersion.textContent = text(details.version);
 				fields.codexBinary.textContent = text(details.codex_binary);
@@ -2557,8 +3285,26 @@ function statusPageHtml() {
 		}
 
 		initTabs();
+		initSettingsNav();
+		initLiveFilters();
 		initProviderTestTabs();
 		setInterval(tickElapsedCells, 1000);
+		fields.rawStatusFilter.addEventListener('input', applyRawStatusFilter);
+		fields.relaySettingsForm.addEventListener('input', () => {
+			fields.relaySettingsMessage.textContent = 'Unsaved changes';
+			updateSettingsDirtyState();
+		});
+		fields.relaySettingsForm.addEventListener('change', updateSettingsDirtyState);
+		fields.musicAnalysisSettingsForm.addEventListener('input', () => {
+			fields.musicAnalysisSettingsMessage.textContent = 'Unsaved changes';
+			updateSettingsDirtyState();
+		});
+		fields.musicAnalysisSettingsForm.addEventListener('change', updateSettingsDirtyState);
+		fields.upscaleSettingsForm.addEventListener('input', () => {
+			fields.upscaleSettingsMessage.textContent = 'Unsaved changes';
+			updateSettingsDirtyState();
+		});
+		fields.upscaleSettingsForm.addEventListener('change', updateSettingsDirtyState);
 		fields.asrSettingsForm.addEventListener('submit', (event) => {
 			event.preventDefault();
 			saveAsrSettings();

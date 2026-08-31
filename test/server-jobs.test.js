@@ -238,8 +238,10 @@ function createMockSecurity() {
 		assert.ok(page.body.includes('id="panel-settings"'));
 		assert.ok(page.body.includes('id="panel-debug"'));
 		assert.ok(page.body.includes('selectTab'));
-		assert.ok(page.body.includes('Queued Jobs'));
-		assert.ok(page.body.includes('Recent Activity'));
+		assert.ok(page.body.includes('id="liveJobList"'));
+		assert.ok(page.body.includes('renderLiveJobList'));
+		assert.ok(page.body.includes('id="settings-nav"'));
+		assert.ok(page.body.includes('id="debugHealthList"'));
 		assert.ok(page.body.includes('connectionPill'));
 		assert.ok(page.body.includes('copyRawStatus'));
 		assert.ok(page.body.includes('tickElapsedCells'));
