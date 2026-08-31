@@ -1,0 +1,28 @@
+src/backend-registry.js
+  s_66a384a8a418ee::t_1e72a5090566b7 899
+  s_66a384a8a418ee::t_11767b7206d0d2 1018-1019
+  s_66a384a8a418ee::t_736f4e9863970b 28-30,979-983
+  s_66a384a8a418ee::t_40cc7bd1d560ad 965-978,984-1014,1058-1060,1089,1093-1101,1103-1113,1117
+test/backend-registry.test.js
+  s_66a384a8a418ee::t_6048d2efebc01f 497
+  s_66a384a8a418ee::t_4c2f258e5e7594 8
+  s_66a384a8a418ee::t_736f4e9863970b 565-590
+  s_66a384a8a418ee::t_1e72a5090566b7 623-642
+  s_66a384a8a418ee::t_f722dfb73a2902 517,519-521,561,605-622,643-654,753
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "6c46c2a4fad78ab36aff73969df243225c5946c5",
+  "prompts": {},
+  "sessions": {
+    "s_66a384a8a418ee": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0583f-8e85-7db1-886d-02293ade9cd8",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": null
+    }
+  }
+}
