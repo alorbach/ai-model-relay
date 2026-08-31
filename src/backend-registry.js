@@ -112,8 +112,87 @@ function asrModelFromRelay(model) {
 	return text || 'local-asr';
 }
 
+const DEFAULT_XAI_CHAT_MODELS = 'grok-4.6,grok-4.5,grok-4.3,latest';
+const XAI_IMAGINE_IMAGE_MODEL = 'grok-imagine-image-2.0';
+const XAI_IMAGINE_VIDEO_MODEL = 'grok-imagine-video-1.5';
+const MAX_IMAGE_REFERENCE_BYTES = 20 * 1024 * 1024;
+const XAI_IMAGE_REFERENCE_LIMIT = 3;
+const XAI_VIDEO_REFERENCE_LIMIT = 7;
+const XAI_IMAGE_ASPECT_RATIOS = new Set(['auto', '1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '2:1', '1:2', '19.5:9', '9:19.5', '20:9', '9:20', '21:9', '5:2']);
+const XAI_VIDEO_ASPECT_RATIOS = new Set(['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3']);
+const XAI_IMAGE_RESOLUTIONS = new Set(['1k', '2k']);
+const XAI_VIDEO_RESOLUTIONS = new Set(['480p', '720p', '1080p']);
+
 function xaiModelFromRelay(model) {
-	return String(model || '').replace(/^model-relay:(?:xai|grok):/, '').trim() || process.env.AI_MODEL_RELAY_XAI_MODEL || 'grok-4.3';
+	return String(model || '').replace(/^model-relay:(?:xai|grok):/, '').trim() || process.env.AI_MODEL_RELAY_XAI_MODEL || 'grok-4.6';
+}
+
+function xaiImagineImageModel(model) {
+	const slug = String(model || '').replace(/^model-relay:(?:xai|grok):/, '').trim();
+	if (!slug || slug === 'imagine-image' || slug === 'image') return XAI_IMAGINE_IMAGE_MODEL;
+	return slug;
+}
+
+function xaiImagineVideoModel(model) {
+	const slug = String(model || '').replace(/^model-relay:(?:xai|grok):/, '').trim();
+	if (!slug || slug === 'imagine-video' || slug === 'video') return XAI_IMAGINE_VIDEO_MODEL;
+	return slug;
+}
+
+function decodeImageDataUri(value) {
+	const match = String(value || '').match(/^data:(image\/(?:png|jpeg|jpg|webp));base64,([A-Za-z0-9+/=\s]+)$/i);
+	if (!match) return null;
+	const encoded = match[2].replace(/\s+/g, '');
+	if (!encoded || encoded.length % 4 === 1) return null;
+	const bytes = Buffer.from(encoded, 'base64');
+	if (!bytes.length || bytes.length > MAX_IMAGE_REFERENCE_BYTES) return null;
+	const mime = match[1].toLowerCase() === 'image/jpg' ? 'image/jpeg' : match[1].toLowerCase();
+	return `data:${mime};base64,${bytes.toString('base64')}`;
+}
+
+function xaiImageReferences(payload = {}, maxCount = XAI_IMAGE_REFERENCE_LIMIT) {
+	const entries = [payload.input_reference_data_url, payload.input_reference, ...(Array.isArray(payload.reference_images) ? payload.reference_images : []), ...(Array.isArray(payload.frames) ? payload.frames : [])].filter(Boolean);
+	const uris = [];
+	for (const entry of entries) {
+		const uri = typeof entry === 'object' && !Buffer.isBuffer(entry)
+			? decodeImageDataUri(`data:${String(entry.mime_type || 'image/jpeg').toLowerCase()};base64,${String(entry.b64_json || '')}`)
+			: decodeImageDataUri(entry);
+		if (!uri) return { error: 'xAI image references must be PNG, JPEG, or WebP data URLs or { b64_json, mime_type } objects smaller than 20 MB.' };
+		uris.push(uri);
+	}
+	if (uris.length > maxCount) {
+		return { error: `xAI Imagine accepts at most ${maxCount} reference images.` };
+	}
+	return { uris };
+}
+
+function xaiImagineUrlRef(uri, withType = false) {
+	return withType ? { url: uri, type: 'image_url' } : { url: uri };
+}
+
+function xaiImagineImageInputs(uris) {
+	if (uris.length === 1) return { image: xaiImagineUrlRef(uris[0], true) };
+	if (uris.length > 1) return { images: uris.map((uri) => xaiImagineUrlRef(uri)) };
+	return {};
+}
+
+function xaiImagineVideoInputs(uris) {
+	if (uris.length === 1) return { image: xaiImagineUrlRef(uris[0]) };
+	if (uris.length > 1) return { reference_images: uris.map((uri) => xaiImagineUrlRef(uri)) };
+	return {};
+}
+
+function mimeFromImageBytes(bytes) {
+	if (!bytes || !bytes.length) return 'image/jpeg';
+	if (bytes[0] === 0x89 && bytes[1] === 0x50) return 'image/png';
+	if (bytes[0] === 0xff && bytes[1] === 0xd8) return 'image/jpeg';
+	if (bytes[0] === 0x52 && bytes[1] === 0x49) return 'image/webp';
+	return 'image/jpeg';
+}
+
+function wantsGeneratedAudio(payload = {}) {
+	if (payload.generate_audio === undefined || payload.generate_audio === null || payload.generate_audio === '') return true;
+	return payload.generate_audio !== false && !/^(0|false|no|off)$/i.test(String(payload.generate_audio));
 }
 
 function decodeAudioBase64(value) {
@@ -214,6 +293,9 @@ function generationPreferences(payload = {}, kind) {
 	if (aspectRatio) preferences.push(`Requested aspect ratio: ${aspectRatio}.`);
 	if (resolution) preferences.push(`Requested resolution tier: ${resolution}.`);
 	if (kind === 'videos' && Number.isFinite(seconds) && seconds > 0 && seconds <= 120) preferences.push(`Requested clip length: ${seconds} seconds.`);
+	if (kind === 'videos' && payload.generate_audio !== undefined && payload.generate_audio !== null && payload.generate_audio !== '') {
+		preferences.push(wantsGeneratedAudio(payload) ? 'Include a native audio soundtrack.' : 'Request a silent video without a soundtrack.');
+	}
 	if (quality) preferences.push(`Preferred quality: ${quality}.`);
 	return preferences.join(' ');
 }
@@ -252,26 +334,96 @@ const ANTIGRAVITY_IMAGE_TEST_OPTIONS = [
 	testOption('size', 'Resolution', 'guidance', ANTIGRAVITY_IMAGE_SIZE_CHOICES),
 ];
 
+const GROK_IMAGE_ASPECT_CHOICES = [
+	{ value: 'auto', label: 'Auto · provider chooses' },
+	{ value: '1:1', label: 'Square · 1:1' },
+	{ value: '16:9', label: 'Landscape · 16:9' },
+	{ value: '9:16', label: 'Portrait · 9:16' },
+	{ value: '4:3', label: 'Landscape · 4:3' },
+	{ value: '3:4', label: 'Portrait · 3:4' },
+	{ value: '3:2', label: 'Landscape · 3:2' },
+	{ value: '2:3', label: 'Portrait · 2:3' },
+	{ value: '2:1', label: 'Wide · 2:1' },
+	{ value: '1:2', label: 'Tall · 1:2' },
+	{ value: '19.5:9', label: 'Phone wide · 19.5:9' },
+	{ value: '9:19.5', label: 'Phone tall · 9:19.5' },
+	{ value: '20:9', label: 'Ultra-wide · 20:9' },
+	{ value: '9:20', label: 'Ultra-tall · 9:20' },
+	{ value: '21:9', label: 'Cinema · 21:9' },
+	{ value: '5:2', label: 'Banner · 5:2' },
+];
+
 const GROK_IMAGE_TEST_OPTIONS = [
+	testOption('aspect_ratio', 'Aspect ratio', 'guidance', GROK_IMAGE_ASPECT_CHOICES),
+	testOption('resolution', 'Resolution', 'guidance', [
+		{ value: '1k', label: '1K' },
+		{ value: '2k', label: '2K' },
+	]),
+];
+
+const GROK_VIDEO_TEST_OPTIONS = [
 	testOption('aspect_ratio', 'Aspect ratio', 'guidance', [
-		{ value: 'auto', label: 'Auto · provider chooses' },
-		{ value: '1:1', label: 'Square · 1:1' },
 		{ value: '16:9', label: 'Landscape · 16:9' },
 		{ value: '9:16', label: 'Portrait · 9:16' },
+		{ value: '1:1', label: 'Square · 1:1' },
 		{ value: '4:3', label: 'Landscape · 4:3' },
 		{ value: '3:4', label: 'Portrait · 3:4' },
 		{ value: '3:2', label: 'Landscape · 3:2' },
 		{ value: '2:3', label: 'Portrait · 2:3' },
-		{ value: '2:1', label: 'Wide · 2:1' },
-		{ value: '1:2', label: 'Tall · 1:2' },
-		{ value: '19.5:9', label: 'Phone wide · 19.5:9' },
-		{ value: '9:19.5', label: 'Phone tall · 9:19.5' },
-		{ value: '20:9', label: 'Ultra-wide · 20:9' },
-		{ value: '9:20', label: 'Ultra-tall · 9:20' },
 	]),
 	testOption('resolution', 'Resolution', 'guidance', [
+		{ value: '480p', label: '480p' },
+		{ value: '720p', label: '720p' },
+		{ value: '1080p', label: '1080p' },
+	]),
+	testOption('seconds', 'Clip length', 'guidance', [
+		{ value: '5', label: '5 seconds' },
+		{ value: '8', label: '8 seconds' },
+		{ value: '10', label: '10 seconds' },
+		{ value: '15', label: '15 seconds' },
+	]),
+	testOption('generate_audio', 'Soundtrack', 'guidance', [
+		{ value: 'true', label: 'Native audio' },
+		{ value: 'false', label: 'Silent' },
+	]),
+];
+
+const XAI_IMAGE_TEST_OPTIONS = [
+	testOption('aspect_ratio', 'Aspect ratio', 'direct', GROK_IMAGE_ASPECT_CHOICES),
+	testOption('resolution', 'Resolution', 'direct', [
 		{ value: '1k', label: '1K' },
 		{ value: '2k', label: '2K' },
+	]),
+	testOption('quality', 'Quality', 'direct', [
+		{ value: 'medium', label: 'Medium' },
+		{ value: 'low', label: 'Low' },
+	]),
+];
+
+const XAI_VIDEO_TEST_OPTIONS = [
+	testOption('aspect_ratio', 'Aspect ratio', 'direct', [
+		{ value: '16:9', label: 'Landscape · 16:9' },
+		{ value: '9:16', label: 'Portrait · 9:16' },
+		{ value: '1:1', label: 'Square · 1:1' },
+		{ value: '4:3', label: 'Landscape · 4:3' },
+		{ value: '3:4', label: 'Portrait · 3:4' },
+		{ value: '3:2', label: 'Landscape · 3:2' },
+		{ value: '2:3', label: 'Portrait · 2:3' },
+	]),
+	testOption('resolution', 'Resolution', 'direct', [
+		{ value: '480p', label: '480p' },
+		{ value: '720p', label: '720p' },
+		{ value: '1080p', label: '1080p' },
+	]),
+	testOption('seconds', 'Clip length', 'direct', [
+		{ value: '5', label: '5 seconds' },
+		{ value: '8', label: '8 seconds' },
+		{ value: '10', label: '10 seconds' },
+		{ value: '15', label: '15 seconds' },
+	]),
+	testOption('generate_audio', 'Soundtrack', 'direct', [
+		{ value: 'true', label: 'Native audio' },
+		{ value: 'false', label: 'Silent' },
 	]),
 ];
 
@@ -529,7 +681,7 @@ function createGrokCliDriver(options = {}) {
 		const base = baseModels();
 		const state = baseCapabilities();
 		if (!state.ready || !imagine.images) return base;
-		return [...base, { id: 'model-relay:grok-cli:image', type: 'image', backend: 'grok-cli', ready: true, test_options: GROK_IMAGE_TEST_OPTIONS }, ...(imagine.videos ? [{ id: 'model-relay:grok-cli:video', type: 'video', backend: 'grok-cli', ready: true, experimental: true, verified: imagine.video_verified }] : [])];
+		return [...base, { id: 'model-relay:grok-cli:image', type: 'image', backend: 'grok-cli', ready: true, test_options: GROK_IMAGE_TEST_OPTIONS }, ...(imagine.videos ? [{ id: 'model-relay:grok-cli:video', type: 'video', backend: 'grok-cli', ready: true, experimental: true, verified: imagine.video_verified, test_options: GROK_VIDEO_TEST_OPTIONS }] : [])];
 	};
 	driver.refresh = async (refreshOptions = {}) => {
 		const state = await baseRefresh();
@@ -976,12 +1128,32 @@ function createXaiApiDriver(options = {}) {
 	const fetchImpl = options.fetch || globalThis.fetch;
 	const apiKey = options.apiKey || process.env.XAI_API_KEY || process.env.AI_MODEL_RELAY_XAI_API_KEY || '';
 	const baseUrl = String(options.baseUrl || process.env.XAI_BASE_URL || process.env.AI_MODEL_RELAY_XAI_BASE_URL || 'https://api.x.ai/v1').replace(/\/+$/, '');
-	const defaultModels = String(options.models || process.env.AI_MODEL_RELAY_XAI_MODELS || 'grok-4.3,latest').split(',').map((id) => id.trim()).filter(Boolean);
+	const defaultModels = String(options.models || process.env.AI_MODEL_RELAY_XAI_MODELS || DEFAULT_XAI_CHAT_MODELS).split(',').map((id) => id.trim()).filter(Boolean);
+	const pollTimeoutMs = Number(options.pollTimeoutMs || process.env.ALORBACH_VIDEO_POLL_TIMEOUT_MS || 600000);
+	const pollIntervalMs = Number(options.pollIntervalMs || process.env.ALORBACH_VIDEO_POLL_INTERVAL_MS || 3000);
+	const sleep = typeof options.sleep === 'function' ? options.sleep : (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+	function xaiFailure(code, response, parsed, fallback) {
+		const message = redactProviderSecret(parsed && parsed.error && parsed.error.message || fallback, apiKey);
+		return {
+			success: false,
+			category: response.status === 401 || response.status === 403 ? 'configuration' : (response.status === 413 ? 'validation' : (response.status === 429 ? 'rate_limit' : 'api')),
+			code,
+			message,
+			retryable: response.status === 429 || response.status >= 500,
+			details: { status: response.status, provider: 'xai-api' },
+		};
+	}
+	async function readJsonResponse(response) {
+		const text = typeof response.text === 'function' ? await response.text() : '';
+		let parsed = null;
+		try { parsed = text ? JSON.parse(text) : {}; } catch (error) {}
+		return { text, parsed };
+	}
 	return {
 		id: 'xai-api',
 		label: 'Grok / xAI API',
 		kind: 'api',
-		job_types: ['chat', 'transcribe'],
+		job_types: ['chat', 'transcribe', 'images', 'videos'],
 		checkStatus: () => ({ success: !!apiKey, message: apiKey ? 'xAI API key is configured.' : 'xAI API key is not configured.', details: { provider: 'xai-api', configured: !!apiKey, base_url: baseUrl } }),
 		capabilities: () => ({
 			id: 'xai-api',
@@ -990,11 +1162,17 @@ function createXaiApiDriver(options = {}) {
 			enabled: !!apiKey,
 			configured: !!apiKey,
 			ready: !!apiKey,
-			models: [...defaultModels.map((id) => relayModel('xai', id)), 'model-relay:xai:stt'],
-			features: { chat: true, speech_to_text: true, cloud_audio: true },
+			job_types: ['chat', 'transcribe', 'images', 'videos'],
+			models: [...defaultModels.map((id) => relayModel('xai', id)), 'model-relay:xai:stt', 'model-relay:xai:imagine-image', 'model-relay:xai:imagine-video'],
+			features: { chat: true, speech_to_text: true, cloud_audio: true, images: true, videos: true, image_edit: true, native_audio: true },
 			requires: ['XAI_API_KEY or AI_MODEL_RELAY_XAI_API_KEY'],
 		}),
-		models: () => [...defaultModels.map((id) => ({ id: relayModel('xai', id), type: 'text', backend: 'xai-api' })), { id: 'model-relay:xai:stt', type: 'audio', backend: 'xai-api' }],
+		models: () => [
+			...defaultModels.map((id) => ({ id: relayModel('xai', id), type: 'text', backend: 'xai-api', job_types: ['chat'] })),
+			{ id: 'model-relay:xai:stt', type: 'audio', backend: 'xai-api', job_types: ['transcribe'] },
+			{ id: 'model-relay:xai:imagine-image', type: 'image', backend: 'xai-api', job_types: ['images'], ready: !!apiKey, test_options: XAI_IMAGE_TEST_OPTIONS },
+			{ id: 'model-relay:xai:imagine-video', type: 'video', backend: 'xai-api', job_types: ['videos'], ready: !!apiKey, test_options: XAI_VIDEO_TEST_OPTIONS },
+		],
 		async chat(payload = {}) {
 			if (!apiKey) {
 				return { success: false, category: 'configuration', code: 'xai_api_key_missing', message: 'Grok/xAI API requires XAI_API_KEY or AI_MODEL_RELAY_XAI_API_KEY.' };
@@ -1090,6 +1268,163 @@ function createXaiApiDriver(options = {}) {
 					channels: Array.isArray(parsed && parsed.channels) ? parsed.channels : undefined,
 					model: 'model-relay:xai:stt',
 					provider_details: { provider: 'xai-api', raw_model: 'stt', cloud: true },
+				},
+			};
+		},
+		async images(payload = {}, session = {}) {
+			if (!apiKey) {
+				return { success: false, category: 'configuration', code: 'xai_api_key_missing', message: 'Grok/xAI API requires XAI_API_KEY or AI_MODEL_RELAY_XAI_API_KEY.' };
+			}
+			if (!fetchImpl) {
+				return { success: false, category: 'configuration', code: 'fetch_unavailable', message: 'This Node runtime does not provide fetch for API-backed drivers.' };
+			}
+			const prompt = String(payload.prompt || '').trim();
+			if (!prompt) {
+				return { success: false, category: 'validation', code: 'xai_image_prompt_required', message: 'An image prompt is required.' };
+			}
+			const references = xaiImageReferences(payload, XAI_IMAGE_REFERENCE_LIMIT);
+			if (references.error) {
+				return { success: false, category: 'validation', code: 'xai_image_reference_invalid', message: references.error };
+			}
+			const model = xaiImagineImageModel(payload.model);
+			const n = Math.min(10, Math.max(1, Number(payload.n) || 1));
+			const body = { model, prompt, n, response_format: 'b64_json' };
+			const aspectRatio = String(payload.aspect_ratio || '').trim();
+			if (aspectRatio && XAI_IMAGE_ASPECT_RATIOS.has(aspectRatio)) body.aspect_ratio = aspectRatio;
+			const resolution = String(payload.resolution || '').trim().toLowerCase();
+			if (XAI_IMAGE_RESOLUTIONS.has(resolution)) body.resolution = resolution;
+			const quality = String(payload.quality || '').trim().toLowerCase();
+			if (quality === 'low' || quality === 'medium') body.quality = quality;
+			Object.assign(body, xaiImagineImageInputs(references.uris));
+			const imagePath = references.uris.length ? '/images/edits' : '/images/generations';
+			if (typeof session.appendSessionOutput === 'function') session.appendSessionOutput('stdout', 'Submitting xAI Imagine image request.\n');
+			let response;
+			try {
+				response = await fetchImpl(`${baseUrl}${imagePath}`, {
+					method: 'POST',
+					headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+					body: JSON.stringify(body),
+				});
+			} catch (error) {
+				return { success: false, category: 'api', code: 'xai_image_request_failed', message: 'xAI Imagine image generation could not be reached.', retryable: true, details: { provider: 'xai-api' } };
+			}
+			const { parsed } = await readJsonResponse(response);
+			if (!response.ok) return xaiFailure('xai_image_failed', response, parsed, `xAI Imagine image request failed with HTTP ${response.status}.`);
+			const items = Array.isArray(parsed && parsed.data) ? parsed.data : (parsed && parsed.url ? [parsed] : []);
+			const data = [];
+			for (const item of items.slice(0, n)) {
+				if (item && item.b64_json) {
+					const bytes = Buffer.from(String(item.b64_json).replace(/\s+/g, ''), 'base64');
+					if (!bytes.length) continue;
+					data.push({ b64_json: bytes.toString('base64'), mime_type: mimeFromImageBytes(bytes) });
+					continue;
+				}
+				const url = String(item && (item.url || item.image_url) || '').trim();
+				if (!url || !/^https:\/\//i.test(url)) continue;
+				try {
+					const downloaded = await fetchImpl(url, { headers: { Authorization: `Bearer ${apiKey}` } });
+					if (!downloaded.ok || typeof downloaded.arrayBuffer !== 'function') continue;
+					const bytes = Buffer.from(await downloaded.arrayBuffer());
+					if (!bytes.length) continue;
+					data.push({ b64_json: bytes.toString('base64'), mime_type: mimeFromImageBytes(bytes) });
+				} catch (error) {}
+			}
+			if (!data.length) {
+				return { success: false, category: 'api', code: 'xai_image_artifact_missing', message: 'xAI Imagine completed without returning image data.' };
+			}
+			return { success: true, response: { data, provider_details: { provider: 'xai-api', raw_model: model, cloud: true } } };
+		},
+		async videos(payload = {}, session = {}) {
+			if (!apiKey) {
+				return { success: false, category: 'configuration', code: 'xai_api_key_missing', message: 'Grok/xAI API requires XAI_API_KEY or AI_MODEL_RELAY_XAI_API_KEY.' };
+			}
+			if (!fetchImpl) {
+				return { success: false, category: 'configuration', code: 'fetch_unavailable', message: 'This Node runtime does not provide fetch for API-backed drivers.' };
+			}
+			const prompt = String(payload.prompt || '').trim();
+			if (!prompt) {
+				return { success: false, category: 'validation', code: 'xai_video_prompt_required', message: 'A video prompt is required.' };
+			}
+			const references = xaiImageReferences(payload, XAI_VIDEO_REFERENCE_LIMIT);
+			if (references.error) {
+				return { success: false, category: 'validation', code: 'xai_video_reference_invalid', message: references.error };
+			}
+			const model = xaiImagineVideoModel(payload.model);
+			const seconds = Number(payload.seconds ?? payload.duration);
+			const body = { model, prompt, generate_audio: wantsGeneratedAudio(payload) };
+			if (Number.isFinite(seconds) && seconds >= 1 && seconds <= 15) body.duration = Math.round(seconds);
+			const aspectRatio = String(payload.aspect_ratio || '').trim();
+			if (aspectRatio && XAI_VIDEO_ASPECT_RATIOS.has(aspectRatio)) body.aspect_ratio = aspectRatio;
+			let resolution = String(payload.resolution || '').trim().toLowerCase();
+			if (references.uris.length > 1 && resolution === '1080p') resolution = '720p';
+			if (XAI_VIDEO_RESOLUTIONS.has(resolution)) body.resolution = resolution;
+			Object.assign(body, xaiImagineVideoInputs(references.uris));
+			if (typeof session.appendSessionOutput === 'function') session.appendSessionOutput('stdout', 'Submitting xAI Imagine video request.\n');
+			let created;
+			try {
+				created = await fetchImpl(`${baseUrl}/videos/generations`, {
+					method: 'POST',
+					headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+					body: JSON.stringify(body),
+				});
+			} catch (error) {
+				return { success: false, category: 'api', code: 'xai_video_request_failed', message: 'xAI Imagine video generation could not be reached.', retryable: true, details: { provider: 'xai-api' } };
+			}
+			const createdBody = await readJsonResponse(created);
+			if (!created.ok) return xaiFailure('xai_video_failed', created, createdBody.parsed, `xAI Imagine video request failed with HTTP ${created.status}.`);
+			const requestId = String(createdBody.parsed && (createdBody.parsed.request_id || createdBody.parsed.id) || '').trim();
+			let result = createdBody.parsed;
+			if (requestId) {
+				const started = Date.now();
+				while (true) {
+					let polled;
+					try {
+						polled = await fetchImpl(`${baseUrl}/videos/${encodeURIComponent(requestId)}`, { headers: { Authorization: `Bearer ${apiKey}` } });
+					} catch (error) {
+						return { success: false, category: 'api', code: 'xai_video_request_failed', message: 'xAI Imagine video polling could not be reached.', retryable: true, details: { provider: 'xai-api' } };
+					}
+					const polledBody = await readJsonResponse(polled);
+					if (!polled.ok) return xaiFailure('xai_video_failed', polled, polledBody.parsed, `xAI Imagine video poll failed with HTTP ${polled.status}.`);
+					result = polledBody.parsed;
+					const status = String(result && result.status || '').toLowerCase();
+					if (status === 'done' || status === 'completed') break;
+					if (status === 'failed' || status === 'expired' || status === 'error') {
+						return { success: false, category: status === 'expired' ? 'timeout' : 'api', code: 'xai_video_failed', message: redactProviderSecret(result && result.error && result.error.message || `xAI Imagine video ${status}.`, apiKey), details: { status: polled.status, provider: 'xai-api', request_id: requestId } };
+					}
+					if (Date.now() - started >= pollTimeoutMs) {
+						return { success: false, category: 'timeout', code: 'xai_video_timeout', message: 'xAI Imagine video generation timed out.', details: { timeout_ms: pollTimeoutMs, provider: 'xai-api', request_id: requestId } };
+					}
+					if (typeof session.appendSessionOutput === 'function') session.appendSessionOutput('stdout', `xAI Imagine video ${status || 'pending'}.\n`);
+					await sleep(pollIntervalMs);
+				}
+			}
+			const video = result && result.video && typeof result.video === 'object' ? result.video : result;
+			const videoUrl = String(video && (video.url || video.video_url) || '').trim();
+			if (video && video.b64_video) {
+				return { success: true, response: { b64_video: String(video.b64_video).replace(/\s+/g, ''), mime_type: String(video.mime_type || 'video/mp4'), provider_details: { provider: 'xai-api', raw_model: model, request_id: requestId, cloud: true } } };
+			}
+			if (!videoUrl || !/^https:\/\//i.test(videoUrl)) {
+				return { success: false, category: 'api', code: 'xai_video_artifact_missing', message: 'xAI Imagine completed without returning a video URL.' };
+			}
+			let downloaded;
+			try {
+				downloaded = await fetchImpl(videoUrl, { headers: { Authorization: `Bearer ${apiKey}` } });
+			} catch (error) {
+				return { success: false, category: 'api', code: 'xai_video_download_failed', message: 'xAI Imagine video could not be downloaded.', retryable: true, details: { provider: 'xai-api', request_id: requestId } };
+			}
+			if (!downloaded.ok || typeof downloaded.arrayBuffer !== 'function') {
+				return { success: false, category: 'api', code: 'xai_video_download_failed', message: 'xAI Imagine video download failed.', details: { status: downloaded.status, provider: 'xai-api', request_id: requestId } };
+			}
+			const bytes = Buffer.from(await downloaded.arrayBuffer());
+			if (!bytes.length) {
+				return { success: false, category: 'api', code: 'xai_video_artifact_missing', message: 'xAI Imagine video download was empty.' };
+			}
+			return {
+				success: true,
+				response: {
+					b64_video: bytes.toString('base64'),
+					mime_type: 'video/mp4',
+					provider_details: { provider: 'xai-api', raw_model: model, request_id: requestId, duration: video && video.duration, cloud: true },
 				},
 			};
 		},

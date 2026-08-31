@@ -118,7 +118,10 @@ function createMockSecurity() {
 		models: () => [
 			{ id: 'model-relay:codex:auto', legacy_id: 'codex-local:auto', type: 'text', backend: 'codex-cli' },
 			{ id: 'model-relay:xai:grok-4.3', type: 'text', backend: 'xai-api' },
+			{ id: 'model-relay:xai:grok-4.6', type: 'text', backend: 'xai-api' },
 			{ id: 'model-relay:xai:stt', type: 'audio', backend: 'xai-api' },
+			{ id: 'model-relay:xai:imagine-image', type: 'image', backend: 'xai-api' },
+			{ id: 'model-relay:xai:imagine-video', type: 'video', backend: 'xai-api' },
 			{ id: 'model-relay:music-analysis:core', type: 'audio', backend: 'music-analysis' },
 			{ id: 'model-relay:local-upscale:swinir-classical-x2', type: 'image', backend: 'local-upscale', job_types: ['upscale'] },
 		],
@@ -195,6 +198,8 @@ function createMockSecurity() {
 		assert.strictEqual(models.statusCode, 200);
 		assert.ok(models.body.models.text.includes('codex-local:auto'));
 		assert.ok(models.body.models.relay.includes('model-relay:xai:grok-4.3'));
+		assert.ok(models.body.models.relay.includes('model-relay:xai:grok-4.6'));
+		assert.ok(models.body.models.relay.includes('model-relay:xai:imagine-video'));
 		assert.ok(models.body.models.relay.includes('model-relay:xai:stt'));
 		assert.ok(models.body.models.relay.includes('model-relay:music-analysis:core'));
 		assert.ok(models.body.models.relay.includes('model-relay:local-upscale:swinir-classical-x2'));
@@ -314,6 +319,13 @@ function createMockSecurity() {
                 assert.strictEqual(calls[calls.length - 1].payload.input_reference_data_url, 'data:image/png;base64,AA==');
                 assert.strictEqual(calls[calls.length - 1].payload.size, '1280x720');
                 assert.strictEqual(calls[calls.length - 1].payload.seconds, '8');
+		const localImagineVideoTest = await requestJson(port, 'POST', '/v1/relay/test', { job_type: 'videos', model: 'model-relay:xai:imagine-video', prompt: 'test imagine video', seconds: '10', resolution: '1080p', aspect_ratio: '9:16', generate_audio: 'false' });
+		assert.strictEqual(localImagineVideoTest.statusCode, 200);
+		assert.strictEqual(calls[calls.length - 1].payload.model, 'model-relay:xai:imagine-video');
+		assert.strictEqual(calls[calls.length - 1].payload.seconds, '10');
+		assert.strictEqual(calls[calls.length - 1].payload.resolution, '1080p');
+		assert.strictEqual(calls[calls.length - 1].payload.aspect_ratio, '9:16');
+		assert.strictEqual(calls[calls.length - 1].payload.generate_audio, 'false');
 		const localGrokOptionsTest = await requestJson(port, 'POST', '/v1/relay/test', { job_type: 'images', model: 'model-relay:codex:image', prompt: 'test image guidance', aspect_ratio: '16:9', resolution: '2k' });
 		assert.strictEqual(localGrokOptionsTest.statusCode, 200);
 		assert.strictEqual(calls[calls.length - 1].payload.aspect_ratio, '16:9');

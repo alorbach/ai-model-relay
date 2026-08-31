@@ -66,7 +66,13 @@ function createFakeGrok(options = {}) {
 		assert.ok(grokImageModel);
 		assert.deepStrictEqual(grokImageModel.test_options.map((option) => option.key), ['aspect_ratio', 'resolution']);
 		assert.ok(grokImageModel.test_options.every((option) => option.delivery === 'guidance'));
-		assert.ok(fixture.driver.models().some((model) => model.id === 'model-relay:grok-cli:video'));
+		assert.ok(grokImageModel.test_options[0].choices.some((choice) => choice.value === '21:9'));
+		assert.ok(grokImageModel.test_options[0].choices.some((choice) => choice.value === '5:2'));
+		const grokVideoModel = fixture.driver.models().find((model) => model.id === 'model-relay:grok-cli:video');
+		assert.ok(grokVideoModel);
+		assert.deepStrictEqual(grokVideoModel.test_options.map((option) => option.key), ['aspect_ratio', 'resolution', 'seconds', 'generate_audio']);
+		assert.ok(grokVideoModel.test_options.every((option) => option.delivery === 'guidance'));
+		assert.ok(grokVideoModel.test_options.find((option) => option.key === 'resolution').choices.some((choice) => choice.value === '1080p'));
 
 		const image = await fixture.driver.images({ prompt: 'edit', aspect_ratio: '16:9', resolution: '2k', reference_images: [{ b64_json: Buffer.from('input image').toString('base64'), mime_type: 'image/png' }] });
 		assert.strictEqual(image.success, true);
@@ -81,11 +87,14 @@ function createFakeGrok(options = {}) {
 		assert.ok(fixture.calls.some((args) => toolForArgs(args) === 'image_gen'));
 		assert.ok(fixture.calls.some((args) => toolForArgs(args) === 'image_to_video'));
 
-		const oneReference = await fixture.driver.videos({ prompt: 'animate', frames: [`data:image/png;base64,${Buffer.from('frame').toString('base64')}`] });
+		const oneReference = await fixture.driver.videos({ prompt: 'animate', frames: [`data:image/png;base64,${Buffer.from('frame').toString('base64')}`], seconds: 10, resolution: '1080p', generate_audio: false });
 		assert.strictEqual(oneReference.success, true);
 		assert.strictEqual(Buffer.from(oneReference.response.b64_video, 'base64').toString(), 'generated video');
 		assert.strictEqual(oneReference.response.provider_details.generated_source_image, false);
 		assert.ok(fixture.calls.some((args) => toolForArgs(args) === 'image_to_video'));
+		assert.ok(fixture.calls.some((args) => toolForArgs(args) === 'image_to_video' && args[args.indexOf('--single') + 1].includes('Requested clip length: 10 seconds.')));
+		assert.ok(fixture.calls.some((args) => toolForArgs(args) === 'image_to_video' && args[args.indexOf('--single') + 1].includes('Requested resolution tier: 1080p.')));
+		assert.ok(fixture.calls.some((args) => toolForArgs(args) === 'image_to_video' && args[args.indexOf('--single') + 1].includes('Request a silent video without a soundtrack.')));
 
 		const sessionInput = [];
 		const sessionOutput = [];

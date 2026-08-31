@@ -42,6 +42,23 @@ try {
 	assert.strictEqual(pathsOnly.defaults.chat, 'model-relay:codex:auto');
 	assert.strictEqual(pathsOnly.cli_paths['codex-cli'], 'C:\\Tools\\codex.exe');
 
+	const previousXaiKey = process.env.XAI_API_KEY;
+	const previousRelayXaiKey = process.env.AI_MODEL_RELAY_XAI_API_KEY;
+	try {
+		delete process.env.XAI_API_KEY;
+		delete process.env.AI_MODEL_RELAY_XAI_API_KEY;
+		state = {};
+		assert.strictEqual(relaySettings.settings().defaults.videos, 'model-relay:openai-videos:sora-2');
+		process.env.XAI_API_KEY = 'test-xai-key';
+		state = {};
+		assert.strictEqual(relaySettings.settings().defaults.videos, 'model-relay:xai:imagine-video');
+	} finally {
+		if (previousXaiKey === undefined) delete process.env.XAI_API_KEY;
+		else process.env.XAI_API_KEY = previousXaiKey;
+		if (previousRelayXaiKey === undefined) delete process.env.AI_MODEL_RELAY_XAI_API_KEY;
+		else process.env.AI_MODEL_RELAY_XAI_API_KEY = previousRelayXaiKey;
+	}
+
 	console.log('relay settings tests passed');
 } finally {
 	security.readState = originalReadState;

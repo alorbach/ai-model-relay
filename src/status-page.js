@@ -1584,6 +1584,7 @@ function statusPageHtml() {
                                         (isAudio ? audio : (isMediaAnalysis ? media : reference)) +
                                         providerTestControls(model, jobType) +
                                         (isMediaAnalysis && model.backend === 'antigravity-cli' ? '<small class="muted">The selected video is sent to your authenticated Antigravity CLI; it is not a local-only analysis path.</small>' : '') +
+                                        ((jobType === 'images' || jobType === 'videos') && model.backend === 'xai-api' ? '<small class="muted">This request is sent to the xAI Imagine API; usage charges may apply.</small>' : '') +
 					'<button type="button" data-provider-test="' + jobType + '" data-model="' + escapeHtml(model.id) + '">Run ' + testLabel + ' test</button>' +
                                         '<div class="provider-test-status"><small class="muted" data-test-message>Ready to test ' + escapeHtml(model.id) + '.</small><small class="provider-test-progress" data-test-progress aria-live="polite">Idle</small></div>' +
                                         '<div class="provider-test-activity" data-test-progress-bar role="progressbar" aria-label="Provider test activity" aria-valuetext="Idle" hidden><span></span></div>' +

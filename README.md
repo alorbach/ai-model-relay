@@ -24,7 +24,8 @@ Windows tray companion for Alorbach AI Subscription Gateway. It exposes a secure
 - Optionally runs a separate local music-analysis pipeline for acoustic album metrics; it does not infer lyrics or send audio to a cloud provider.
 - Routes provider-neutral relay jobs through backend drivers for Codex CLI, Antigravity CLI, local ASR, Grok/xAI, configurable CLI processes, API-key chat providers, and OpenAI video.
 - Reports local bridge multimodal capabilities, including structured Codex event support and optional video/media features.
-- Optionally executes signed OpenAI Videos API jobs when explicitly configured with an API key and enable flag.
+- Optionally executes signed OpenAI Videos API jobs when explicitly configured with an API key and enable flag. OpenAI lists Sora 2 and the Videos API for removal on 24 Sep 2026.
+- When `XAI_API_KEY` is set, routes signed chat, Imagine image, Imagine video, and Speech-to-Text jobs through the xAI API (`grok-4.6` by default). Imagine video becomes the unsaved default video route.
 - Optionally analyzes bounded media frames, HTTPS media URLs, or small video data URLs through local Codex vision prompts or Antigravity CLI.
 - Runs local Codex jobs with bounded parallelism and queues overflow requests.
 - Shows bridge status, Codex login status, paired sites, diagnostics, restart, and unpair actions in the tray menu.
@@ -194,7 +195,7 @@ Execution routes require a JSON envelope containing:
 
 In production, these values come from WordPress Gateway. The relay checks that they are present, executes the selected backend driver, and returns the result to the browser. WordPress validates the one-time token and request hash when the browser completes the job.
 
-Legacy requests can keep using `codex-local:auto` and `codex-local:image`. New provider-neutral requests may use IDs such as `model-relay:codex:auto`, `model-relay:antigravity-cli:auto`, `model-relay:antigravity-cli:image`, `model-relay:antigravity-cli:media`, `model-relay:xai:grok-4.3`, `model-relay:xai:stt`, `model-relay:local-asr:qwen3-asr-0.6b`, and `model-relay:music-analysis:core`, or set `payload.provider` / `payload.backend`. Local ASR models now use `local-asr:*` IDs (e.g. `local-asr:whisper-large-v3`, `local-asr:qwen3-asr-0.6b`). `model-relay:xai:stt` deliberately uploads the supplied audio to xAI; Local ASR and music analysis stay local.
+Legacy requests can keep using `codex-local:auto` and `codex-local:image`. New provider-neutral requests may use IDs such as `model-relay:codex:auto`, `model-relay:antigravity-cli:auto`, `model-relay:antigravity-cli:image`, `model-relay:antigravity-cli:media`, `model-relay:xai:grok-4.6`, `model-relay:xai:imagine-image`, `model-relay:xai:imagine-video`, `model-relay:xai:stt`, `model-relay:local-asr:qwen3-asr-0.6b`, and `model-relay:music-analysis:core`, or set `payload.provider` / `payload.backend`. Local ASR models now use `local-asr:*` IDs (e.g. `local-asr:whisper-large-v3`, `local-asr:qwen3-asr-0.6b`). `model-relay:xai:stt`, `model-relay:xai:imagine-image`, and `model-relay:xai:imagine-video` send the supplied media to xAI; Local ASR and music analysis stay local.
 
 `GET /v1/status` also includes current local job activity:
 
@@ -276,13 +277,13 @@ for await (const chunk of response.body.pipeThrough(new TextDecoderStream())) {
 - `ALORBACH_MUSIC_ANALYSIS_MAX_SECTIONS`: maximum neutral section boundaries. Default: `12`; range: `2`-`24`.
 - `ALORBACH_MUSIC_ANALYSIS_TIMEOUT_MS`: local music-analysis timeout. Default: `1800000`.
 - `ALORBACH_MUSIC_ANALYSIS_PROBE_TTL_MS`: cached local music runtime probe lifetime. Default: `30000`.
-- `ALORBACH_CODEX_ENABLE_VIDEO`: set to `1` to enable the optional OpenAI Videos API route.
+- `ALORBACH_CODEX_ENABLE_VIDEO`: set to `1` to enable the optional OpenAI Videos API route. OpenAI lists Sora 2 for shutdown on 24 Sep 2026; prefer xAI Imagine video when an xAI key is configured.
 - `ALORBACH_OPENAI_API_KEY` or `OPENAI_API_KEY`: API key for optional video generation.
 - `ALORBACH_VIDEO_POLL_TIMEOUT_MS`: optional video polling timeout. Default: `600000`.
 - `ALORBACH_VIDEO_POLL_INTERVAL_MS`: optional video polling interval. Default: `3000`.
-- `XAI_API_KEY` or `AI_MODEL_RELAY_XAI_API_KEY`: enables the Grok/xAI API chat backend and the explicit cloud transcription model `model-relay:xai:stt`.
+- `XAI_API_KEY` or `AI_MODEL_RELAY_XAI_API_KEY`: enables the Grok/xAI API chat backend, Imagine image/video (`model-relay:xai:imagine-image`, `model-relay:xai:imagine-video`), and the explicit cloud transcription model `model-relay:xai:stt`. When this key is set and no video default has been saved, video routing defaults to `model-relay:xai:imagine-video`.
 - `XAI_BASE_URL` or `AI_MODEL_RELAY_XAI_BASE_URL`: optional xAI-compatible base URL. Default: `https://api.x.ai/v1`.
-- `AI_MODEL_RELAY_XAI_MODELS`: comma-separated Grok model IDs exposed as `model-relay:xai:*`. Default: `grok-4.3,latest`.
+- `AI_MODEL_RELAY_XAI_MODELS`: comma-separated Grok chat model IDs exposed as `model-relay:xai:*`. Default: `grok-4.6,grok-4.5,grok-4.3,latest`.
 - `AI_MODEL_RELAY_CLI_COMMAND`: enables the generic CLI process chat backend.
 - `AI_MODEL_RELAY_CLI_ARGS`: optional arguments for the CLI process backend. The prompt is sent on stdin.
 - `AI_MODEL_RELAY_CLI_TIMEOUT_MS`: CLI process timeout. Default: `600000`.

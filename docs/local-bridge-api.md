@@ -230,7 +230,7 @@ Returns persisted relay-only operation defaults plus the cached compatible model
     "defaults": {
       "chat": "model-relay:codex:auto",
       "images": "model-relay:codex:image",
-      "videos": "model-relay:openai-videos:sora-2",
+      "videos": "model-relay:xai:imagine-video",
       "transcribe": "model-relay:local-asr:auto",
       "media.analyze": "model-relay:codex:auto",
       "music.analyze": "model-relay:music-analysis:core"
@@ -459,12 +459,14 @@ Response:
       "model-relay:grok-cli:video",
       "model-relay:cursor-cli:auto",
       "model-relay:local-asr:qwen3-asr-0.6b",
-      "model-relay:xai:grok-4.3"
+      "model-relay:xai:grok-4.6",
+      "model-relay:xai:imagine-image",
+      "model-relay:xai:imagine-video"
     ]
   },
   "backends": [
     {
-      "id": "model-relay:xai:grok-4.3",
+      "id": "model-relay:xai:grok-4.6",
       "type": "text",
       "backend": "xai-api"
     }
@@ -487,11 +489,13 @@ Provider-neutral job aliases use the same signed envelope and response shapes as
 - `POST /v1/relay/jobs/media/analyze`
 - `POST /v1/relay/jobs/music/analyze`
 
-Routing is selected from an explicit `payload.provider`, `payload.backend`, or model ID. An explicit selection wins. When none is supplied, the bridge inserts the persisted relay default for the operation: `chat`, `images`, `videos`, `transcribe`, `media.analyze`, or `music.analyze`. For example, `model-relay:xai:grok-4.3` routes to the Grok/xAI API driver, `model-relay:xai:stt` routes to xAI Speech-to-Text, and `model-relay:local-asr:qwen3-asr-0.6b` routes to the local ASR driver.
+Routing is selected from an explicit `payload.provider`, `payload.backend`, or model ID. An explicit selection wins. When none is supplied, the bridge inserts the persisted relay default for the operation: `chat`, `images`, `videos`, `transcribe`, `media.analyze`, or `music.analyze`. For example, `model-relay:xai:grok-4.6` routes to the Grok/xAI API chat driver, `model-relay:xai:imagine-image` and `model-relay:xai:imagine-video` route to xAI Imagine, `model-relay:xai:stt` routes to xAI Speech-to-Text, and `model-relay:local-asr:qwen3-asr-0.6b` routes to the local ASR driver. When `XAI_API_KEY` is set and no video default has been saved, the unsaved video default is `model-relay:xai:imagine-video`.
 
 If the selected/default provider is unknown, disabled, unauthenticated, or does not support the requested operation, the route returns a configuration error naming the selected model and safe reason. It never falls back to another provider. `grok` and `grok-cli` select the local Grok CLI; `xai` and `xai-api` select the separately configured xAI API. This rule is limited to `/v1/relay/jobs/*`; legacy routes retain their existing behavior.
 
-`model-relay:grok-cli:auto` is Grok CLI chat/coding. `model-relay:grok-cli:image` runs the detected Imagine image workflow. `model-relay:grok-cli:video` runs the experimental Imagine image-to-video/reference-to-video workflow. Image references may be data URLs, `{ b64_json, mime_type }` objects, `referenced_image_paths`, or `frames`; the bridge validates and materializes them only in the per-request workspace. With one supplied image, Grok runs image-to-video; with multiple, it runs reference-to-video. Without one, the relay first generates a temporary source image and then runs image-to-video. The bridge collects only final artifacts from that workspace's output directory and fails explicitly if Imagine tooling, generated artifacts, moderation, or the bounded process run fails.
+`model-relay:grok-cli:auto` is Grok CLI chat/coding. `model-relay:grok-cli:image` runs the detected Imagine image workflow. `model-relay:grok-cli:video` runs the experimental Imagine image-to-video/reference-to-video workflow. Image references may be data URLs, `{ b64_json, mime_type }` objects, `referenced_image_paths`, or `frames`; the bridge validates and materializes them only in the per-request workspace. With one supplied image, Grok runs image-to-video; with multiple, it runs reference-to-video. Without one, the relay first generates a temporary source image and then runs image-to-video. The bridge collects only final artifacts from that workspace's output directory and fails explicitly if Imagine tooling, generated artifacts, moderation, or the bounded process run fails. Grok CLI video tests expose aspect ratio, `480p`/`720p`/`1080p`, clip length, and soundtrack guidance.
+
+`model-relay:xai:imagine-image` and `model-relay:xai:imagine-video` call the xAI Imagine HTTP API with native parameters (`aspect_ratio`, image `resolution` `1k`/`2k`, image `quality` `low`/`medium`, video `resolution` `480p`/`720p`/`1080p`, `seconds` 1–15, `generate_audio`). Image aspect ratios include `21:9` and `5:2`. Text-only image jobs POST to `/images/generations`; jobs with up to 3 references POST to `/images/edits` using a single `{ url, type: "image_url" }` object or an `images` array. Video image-to-video uses `{ image: { url } }`; reference-to-video accepts 2–7 `{ url }` objects on `reference_images` and caps `1080p` at `720p`. Responses return `response.data[].b64_json` for images and `response.b64_video` for videos. These models require `XAI_API_KEY` or `AI_MODEL_RELAY_XAI_API_KEY` and upload the prompt plus any reference images to xAI.
 
 `model-relay:antigravity-cli:auto` runs non-interactive Antigravity CLI chat. `model-relay:antigravity-cli:image` instructs the documented `generate_image` tool exactly once, with a request-unique image name; the bridge imports only a matching, newly-created PNG/JPEG/WebP artifact from the configured Antigravity CLI state root. `model-relay:antigravity-cli:media` analyzes a locally materialized video attachment or bounded visual frames and returns a normal chat-style answer. Configure `AI_MODEL_RELAY_ANTIGRAVITY_BINARY`, use the local Settings panel's **Antigravity CLI executable** field, or install authenticated `agy` on PATH; saving a changed executable path automatically re-probes every CLI provider, and **Refresh detection** always forces a probe. Neither modifies Windows PATH nor restarts the bridge. The bridge never installs it, authenticates it, changes its settings, or falls back to another provider. Antigravity analysis is not local-only: supplied media is handled by the authenticated Antigravity CLI under its Google account and policy.
 
@@ -705,7 +709,7 @@ Sections are deliberately neutral numbered boundaries, not verse/chorus labels. 
 
 ## `POST /v1/videos`
 
-Runs an optional OpenAI Videos API job. This route is disabled unless `ALORBACH_CODEX_ENABLE_VIDEO=1` and `ALORBACH_OPENAI_API_KEY` or `OPENAI_API_KEY` are configured. It is API-backed and not part of the user's local Codex allowance.
+The legacy `/v1/videos` route still runs an optional OpenAI Videos API job. It is disabled unless `ALORBACH_CODEX_ENABLE_VIDEO=1` and `ALORBACH_OPENAI_API_KEY` or `OPENAI_API_KEY` are configured. OpenAI lists Sora 2 and the Videos API for removal on 24 Sep 2026. Prefer `/v1/relay/jobs/videos` with `model-relay:xai:imagine-video` when an xAI key is configured.
 
 Request:
 

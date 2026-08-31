@@ -11,6 +11,13 @@ const DEFAULTS = {
 	'music.analyze': 'model-relay:music-analysis:core',
 };
 
+function defaultFor(jobType) {
+	if (jobType === 'videos' && (process.env.XAI_API_KEY || process.env.AI_MODEL_RELAY_XAI_API_KEY)) {
+		return 'model-relay:xai:imagine-video';
+	}
+	return DEFAULTS[jobType];
+}
+
 const CLI_PATH_KEYS = [
 	'codex-cli',
 	'grok-cli',
@@ -22,9 +29,9 @@ const CLI_PATH_KEYS = [
 function normalizeDefaults(value = {}) {
 	const source = value && typeof value === 'object' ? value : {};
 	const normalized = {};
-	for (const [jobType, fallback] of Object.entries(DEFAULTS)) {
+	for (const jobType of Object.keys(DEFAULTS)) {
 		const selected = String(source[jobType] || '').trim();
-		normalized[jobType] = selected || fallback;
+		normalized[jobType] = selected || defaultFor(jobType);
 	}
 	return normalized;
 }

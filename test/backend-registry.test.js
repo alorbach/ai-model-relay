@@ -89,8 +89,18 @@ const mediaAnalysis = require('../src/media-analysis');
 	const models = registry.models();
 	assert.ok(models.some((model) => model.id === 'model-relay:codex:auto' && model.legacy_id === 'codex-local:auto'));
 	assert.ok(models.some((model) => model.id === 'model-relay:local-asr:qwen3-asr-0.6b'));
+	assert.ok(models.some((model) => model.id === 'model-relay:xai:grok-4.6'));
 	assert.ok(models.some((model) => model.id === 'model-relay:xai:grok-4.3'));
 	assert.ok(models.some((model) => model.id === 'model-relay:xai:stt' && model.type === 'audio'));
+	assert.ok(models.some((model) => model.id === 'model-relay:xai:imagine-image' && model.type === 'image'));
+	assert.ok(models.some((model) => model.id === 'model-relay:xai:imagine-video' && model.type === 'video'));
+	const xaiImageModel = models.find((model) => model.id === 'model-relay:xai:imagine-image');
+	assert.ok(xaiImageModel.test_options.every((option) => option.delivery === 'direct'));
+	assert.ok(xaiImageModel.test_options.find((option) => option.key === 'aspect_ratio').choices.some((choice) => choice.value === '21:9'));
+	assert.ok(xaiImageModel.test_options.find((option) => option.key === 'aspect_ratio').choices.some((choice) => choice.value === '5:2'));
+	const xaiVideoModel = models.find((model) => model.id === 'model-relay:xai:imagine-video');
+	assert.deepStrictEqual(xaiVideoModel.test_options.map((option) => option.key), ['aspect_ratio', 'resolution', 'seconds', 'generate_audio']);
+	assert.ok(xaiVideoModel.test_options.find((option) => option.key === 'resolution').choices.some((choice) => choice.value === '1080p'));
 	assert.ok(models.some((model) => model.id === 'model-relay:music-analysis:core' && model.type === 'audio'));
 	assert.ok(models.some((model) => model.id === 'model-relay:openai-videos:sora-2'));
 	const codexImageModel = models.find((model) => model.id === 'model-relay:codex:image');
@@ -148,6 +158,8 @@ const mediaAnalysis = require('../src/media-analysis');
 	assert.strictEqual(xaiResult.response.model, 'model-relay:xai:grok-4.3');
 	assert.strictEqual(xaiResult.response.provider_details.provider, 'xai');
 	assert.ok(!JSON.stringify(xaiResult).includes('secret-xai-key'));
+	const xaiChatOnImage = await registry.run('chat', { model: 'model-relay:xai:imagine-image', prompt: 'hi' });
+	assert.strictEqual(xaiChatOnImage.code, 'backend_model_incompatible');
 
 	const xaiStt = createXaiApiDriver({
 		apiKey: 'secret-xai-key',
@@ -199,6 +211,134 @@ const mediaAnalysis = require('../src/media-analysis');
 	assert.strictEqual(missingResult.category, 'configuration');
 	const missingSttResult = await missingXai.transcribe({ audio_base64: Buffer.from('audio').toString('base64') });
 	assert.strictEqual(missingSttResult.code, 'xai_api_key_missing');
+	const missingImageResult = await missingXai.images({ prompt: 'a cat' });
+	assert.strictEqual(missingImageResult.code, 'xai_api_key_missing');
+	const missingVideoResult = await missingXai.videos({ prompt: 'animate' });
+	assert.strictEqual(missingVideoResult.code, 'xai_api_key_missing');
+
+	const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]);
+	const xaiImagineCalls = [];
+	const xaiImagine = createXaiApiDriver({
+		apiKey: 'secret-xai-key',
+		sleep: async () => {},
+		pollTimeoutMs: 1000,
+		pollIntervalMs: 1,
+		fetch: async (url, options = {}) => {
+			const target = String(url);
+			xaiImagineCalls.push({ target, body: options.body ? JSON.parse(options.body) : null });
+			if (target.endsWith('/images/generations') || target.endsWith('/images/edits')) {
+				const body = JSON.parse(options.body);
+				assert.strictEqual(body.model, 'grok-imagine-image-2.0');
+				assert.strictEqual(body.response_format, 'b64_json');
+				return { ok: true, status: 200, text: async () => JSON.stringify({ data: [{ b64_json: pngBytes.toString('base64') }] }) };
+			}
+			if (target.endsWith('/videos/generations')) {
+				return { ok: true, status: 200, text: async () => JSON.stringify({ request_id: 'vid-1' }) };
+			}
+			if (target.endsWith('/videos/vid-1')) {
+				return { ok: true, status: 200, text: async () => JSON.stringify({ status: 'done', video: { url: 'https://vidgen.x.ai/clip.mp4', duration: 10 } }) };
+			}
+			if (target === 'https://vidgen.x.ai/clip.mp4') {
+				return { ok: true, status: 200, arrayBuffer: async () => Buffer.from('generated video') };
+			}
+			throw new Error(`unexpected xAI Imagine request: ${target}`);
+		},
+	});
+	const imagineImage = await xaiImagine.images({
+		model: 'model-relay:xai:imagine-image',
+		prompt: 'a cat',
+		aspect_ratio: '21:9',
+		resolution: '2k',
+		quality: 'low',
+	});
+	assert.strictEqual(imagineImage.success, true);
+	assert.strictEqual(imagineImage.response.data[0].mime_type, 'image/png');
+	assert.strictEqual(Buffer.from(imagineImage.response.data[0].b64_json, 'base64').equals(pngBytes), true);
+	assert.ok(!JSON.stringify(imagineImage).includes('secret-xai-key'));
+	const generateCall = xaiImagineCalls.find((entry) => entry.target.endsWith('/images/generations'));
+	assert.ok(generateCall);
+	assert.strictEqual(generateCall.body.aspect_ratio, '21:9');
+	assert.strictEqual(generateCall.body.resolution, '2k');
+	assert.strictEqual(generateCall.body.quality, 'low');
+	assert.strictEqual(generateCall.body.image, undefined);
+	const imagineEdit = await xaiImagine.images({
+		model: 'model-relay:xai:imagine-image',
+		prompt: 'edit a cat',
+		aspect_ratio: '16:9',
+		input_reference_data_url: `data:image/png;base64,${pngBytes.toString('base64')}`,
+	});
+	assert.strictEqual(imagineEdit.success, true);
+	const editCall = xaiImagineCalls.find((entry) => entry.target.endsWith('/images/edits'));
+	assert.ok(editCall);
+	assert.strictEqual(editCall.body.aspect_ratio, '16:9');
+	assert.strictEqual(editCall.body.image.type, 'image_url');
+	assert.ok(String(editCall.body.image.url).startsWith('data:image/png;base64,'));
+	assert.strictEqual(editCall.body.images, undefined);
+	const imagineMultiEdit = await xaiImagine.images({
+		prompt: 'combine',
+		reference_images: [
+			{ b64_json: pngBytes.toString('base64'), mime_type: 'image/png' },
+			{ b64_json: pngBytes.toString('base64'), mime_type: 'image/png' },
+		],
+	});
+	assert.strictEqual(imagineMultiEdit.success, true);
+	const multiEditCall = xaiImagineCalls.filter((entry) => entry.target.endsWith('/images/edits')).pop();
+	assert.strictEqual(multiEditCall.body.image, undefined);
+	assert.strictEqual(multiEditCall.body.images.length, 2);
+	assert.ok(String(multiEditCall.body.images[0].url).startsWith('data:image/png;base64,'));
+	const imagineVideo = await xaiImagine.videos({
+		model: 'model-relay:xai:imagine-video',
+		prompt: 'animate',
+		seconds: 10,
+		resolution: '1080p',
+		aspect_ratio: '9:16',
+		generate_audio: false,
+	});
+	assert.strictEqual(imagineVideo.success, true);
+	assert.strictEqual(Buffer.from(imagineVideo.response.b64_video, 'base64').toString(), 'generated video');
+	assert.strictEqual(imagineVideo.response.provider_details.raw_model, 'grok-imagine-video-1.5');
+	const videoCreate = xaiImagineCalls.find((entry) => entry.target.endsWith('/videos/generations'));
+	assert.strictEqual(videoCreate.body.duration, 10);
+	assert.strictEqual(videoCreate.body.resolution, '1080p');
+	assert.strictEqual(videoCreate.body.generate_audio, false);
+	assert.strictEqual(videoCreate.body.aspect_ratio, '9:16');
+	assert.strictEqual(videoCreate.body.image, undefined);
+	const oneRefVideo = await xaiImagine.videos({
+		prompt: 'animate one ref',
+		input_reference_data_url: `data:image/png;base64,${pngBytes.toString('base64')}`,
+	});
+	assert.strictEqual(oneRefVideo.success, true);
+	const oneRefCreate = xaiImagineCalls.filter((entry) => entry.target.endsWith('/videos/generations')).pop();
+	assert.ok(String(oneRefCreate.body.image.url).startsWith('data:image/png;base64,'));
+	assert.strictEqual(oneRefCreate.body.reference_images, undefined);
+	const refVideo = await xaiImagine.videos({
+		prompt: 'animate two refs',
+		resolution: '1080p',
+		reference_images: [
+			{ b64_json: pngBytes.toString('base64'), mime_type: 'image/png' },
+			{ b64_json: pngBytes.toString('base64'), mime_type: 'image/png' },
+		],
+	});
+	assert.strictEqual(refVideo.success, true);
+	const refCreate = xaiImagineCalls.filter((entry) => entry.target.endsWith('/videos/generations')).pop();
+	assert.strictEqual(refCreate.body.resolution, '720p');
+	assert.strictEqual(refCreate.body.image, undefined);
+	assert.strictEqual(refCreate.body.reference_images.length, 2);
+	assert.ok(String(refCreate.body.reference_images[0].url).startsWith('data:image/png;base64,'));
+	const fourRefs = Array.from({ length: 4 }, () => ({ b64_json: pngBytes.toString('base64'), mime_type: 'image/png' }));
+	const tooManyImageRefs = await xaiImagine.images({ prompt: 'too many', reference_images: fourRefs });
+	assert.strictEqual(tooManyImageRefs.success, false);
+	assert.strictEqual(tooManyImageRefs.code, 'xai_image_reference_invalid');
+	const fourRefVideo = await xaiImagine.videos({ prompt: 'animate four refs', reference_images: fourRefs });
+	assert.strictEqual(fourRefVideo.success, true);
+	const fourRefCreate = xaiImagineCalls.filter((entry) => entry.target.endsWith('/videos/generations')).pop();
+	assert.strictEqual(fourRefCreate.body.reference_images.length, 4);
+	const tooManyVideoRefs = await xaiImagine.videos({
+		prompt: 'too many',
+		reference_images: Array.from({ length: 8 }, () => ({ b64_json: pngBytes.toString('base64'), mime_type: 'image/png' })),
+	});
+	assert.strictEqual(tooManyVideoRefs.success, false);
+	assert.strictEqual(tooManyVideoRefs.code, 'xai_video_reference_invalid');
 
 	const cliDriver = createCliProcessDriver({
 		command: process.execPath,

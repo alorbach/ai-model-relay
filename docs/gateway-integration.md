@@ -18,6 +18,7 @@ The local tray bridge owns:
 - cached provider discovery and readiness checks;
 - local Codex chat/image execution;
 - optional Grok CLI (with Imagine media exposed only after local skill detection) and Cursor Agent relay execution;
+- optional xAI API chat, Imagine image/video (`model-relay:xai:imagine-image`, `model-relay:xai:imagine-video`), and Speech-to-Text when `XAI_API_KEY` is configured;
 - normalized chat and image response shapes.
 
 The WordPress Gateway owns:

@@ -401,6 +401,8 @@ function workflowForJob(jobType, provider) {
 		'openai-videos:videos': 'OpenAI Videos API',
 		'xai-api:chat': 'xAI Chat Completions API',
 		'xai-api:transcribe': 'xAI Speech-to-Text API',
+		'xai-api:images': 'xAI Imagine images',
+		'xai-api:videos': 'xAI Imagine video',
 		'api-key-chat:chat': 'Chat Completions API',
 	};
 	return workflows[key] || '';
@@ -831,7 +833,7 @@ async function route(req, res, context) {
 		if (body.input_reference_data_url) {
 			requestedPayload.input_reference_data_url = String(body.input_reference_data_url);
 		}
-		for (const key of ['audio_base64', 'audio_format', 'language', 'locale', 'xai_options', 'media_data_url', 'media_url', 'frames', 'size', 'quality', 'seconds', 'aspect_ratio', 'resolution']) {
+		for (const key of ['audio_base64', 'audio_format', 'language', 'locale', 'xai_options', 'media_data_url', 'media_url', 'frames', 'size', 'quality', 'seconds', 'aspect_ratio', 'resolution', 'n', 'generate_audio']) {
 			if (body[key] !== undefined) requestedPayload[key] = body[key];
 		}
 		const resolved = relayPayloadFor(context, jobType, requestedPayload);

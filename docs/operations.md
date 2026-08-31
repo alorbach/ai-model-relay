@@ -19,7 +19,7 @@ The Settings page shows every supported local/API driver with an installed, read
 - **Grok CLI**: chat/coding plus Grok Imagine image generation and experimental image-reference video generation only when `%USERPROFILE%\.grok\skills\imagine\SKILL.md` declares the matching local tools.
 - **Cursor Agent**: chat/coding through `cursor-agent --print --output-format json`.
 - **Local ASR**: local transcription; its detailed runtime/model editor remains below routing.
-- **OpenAI Videos**, **Grok/xAI API**, and **API Key Chat**: separately configured API drivers.
+- **OpenAI Videos**, **Grok/xAI API**, and **API Key Chat**: separately configured API drivers. xAI Imagine image/video use the same `XAI_API_KEY` as chat and STT. OpenAI Sora 2 remains available until the Videos API shutdown on 24 Sep 2026.
 
 The five selectors route only `/v1/relay/jobs/*`: chat, images, videos, transcription, and media analysis. Explicit `payload.model`, `payload.provider`, or `payload.backend` always overrides the saved default. Legacy `/v1/chat`, `/v1/images`, `/v1/transcribe`, `/v1/videos`, and `/v1/media/analyze` remain unchanged.
 
@@ -211,6 +211,8 @@ Open **Settings**, press **Refresh detection**, and read the provider card's saf
 
 Grok CLI media requires `%USERPROFILE%\.grok\skills\imagine\SKILL.md` to declare the relevant Imagine tools. Press **Refresh detection** after installing/updating Grok. Image/video jobs fail explicitly when the Imagine tools are unavailable, no output artifact is generated, the request is moderated, or the bounded Grok process times out. Video remains experimental until a local video request succeeds; if Grok confirms that a video tool is unavailable, refresh detection and update Grok before selecting it again.
 
+xAI Imagine HTTP image and video jobs (`model-relay:xai:imagine-image`, `model-relay:xai:imagine-video`) need `XAI_API_KEY` or `AI_MODEL_RELAY_XAI_API_KEY`. Native request fields include aspect ratio (including `21:9` and `5:2` for images), image resolution `1k`/`2k`, video resolution `480p`/`720p`/`1080p`, clip length 1–15 seconds, and `generate_audio`. These upload the prompt and any reference images to xAI. When that key is set and no video default has been saved, Settings defaults video routing to Imagine video.
+
 ### Cursor Agent is unavailable
 
 Install Cursor Agent so `cursor-agent` is resolvable for the tray-app Windows user, authenticate it if required, then use **Refresh detection**. The bridge intentionally does not probe the generic `agent` command because it can refer to Grok's bundled executable.
@@ -274,7 +276,7 @@ The product was originally released as **Codex Local Bridge** and has been renam
 - The tray app title, window title, and About text now read **AI Model Relay**.
 - The product name and short name returned by `/v1/status` and `/v1/capabilities` are `AI Model Relay` and `Model Relay`. The field `legacy_name` in those responses still returns `Codex Local Bridge`.
 - Local ASR model IDs now use the `local-asr:*` prefix (e.g. `local-asr:whisper-large-v3`, `local-asr:qwen3-asr-0.6b`). The previous `codex-local:audio:*` prefix is accepted as a compatibility alias for stale clients.
-- Provider-neutral relay model IDs use the `model-relay:<backend>:<model>` form (e.g. `model-relay:local-asr:qwen3-asr-0.6b`, `model-relay:xai:grok-4.3`). These were introduced alongside the rename and have no legacy equivalent.
+- Provider-neutral relay model IDs use the `model-relay:<backend>:<model>` form (e.g. `model-relay:local-asr:qwen3-asr-0.6b`, `model-relay:xai:grok-4.6`). These were introduced alongside the rename and have no legacy equivalent.
 
 ### What remains unchanged
 
