@@ -1,0 +1,73 @@
+test/asr.test.js
+  s_b0eabc644f1cfe::t_6ea90004e5935f 206,213,220-224
+  s_b0eabc644f1cfe::t_06ce7c6b71b6e3 233-234,260-272,280-282,284-341
+  s_b0eabc644f1cfe::t_860d323267e81c 230-232
+  s_b0eabc644f1cfe::t_8fbe6478357d1b 229
+  s_b0eabc644f1cfe::t_43a3340effd3c8 273-279,283
+test/local-upscale.test.js
+  s_283fd6cff5aacb::t_8aa00144b2c282 84,87
+src/asr.js
+  s_b0eabc644f1cfe::t_0e782a673435f1 1018-1019,1021,1024-1026,1033,1038-1042,1044-1057,1060,1062,1066,1070,1072-1108,1112,1116-1117,1121-1122,1125-1126,1128,1131-1133,1140,1145-1148,1150-1152,1157-1158,1160,1165,1169
+  s_b0eabc644f1cfe::t_9c4c05c056bd3d 1061,1063-1065
+  s_b0eabc644f1cfe::t_a8c49891b8e291 532-535
+  s_b0eabc644f1cfe::t_ea2699e1258e71 341-345,348-350,353,359,362
+  s_b0eabc644f1cfe::t_cfe94b974adb99 1750
+  s_b0eabc644f1cfe::t_115fe4cc5b3826 979
+  s_b0eabc644f1cfe::t_6cd296760c89ec 31-32
+  s_b0eabc644f1cfe::t_cb37b99d048111 1485-1487
+  s_b0eabc644f1cfe::t_02a1b73fabb6ce 1519,1524-1526
+  s_b0eabc644f1cfe::t_6896744a3266b6 1719-1721,1754,1758-1769,1771,1774-1782
+  s_b0eabc644f1cfe::t_3d22a2235da6df 1617-1619
+  s_b0eabc644f1cfe::t_6441970c946363 1208,1213,1227-1230
+  s_b0eabc644f1cfe::t_e529990633b8d0 8-16
+  s_b0eabc644f1cfe::t_b818906aaac3a1 882-948
+  s_b0eabc644f1cfe::t_21ed9c69cf59f8 1333-1335
+  s_b0eabc644f1cfe::t_6a2ef4b29b4196 1384,1389-1391
+  s_b0eabc644f1cfe::t_fdd9fc3ff4c105 1773
+  s_b0eabc644f1cfe::t_13b673b3dd499f 25
+README.md
+  s_b0eabc644f1cfe::t_f7adf180eca5de 71
+  s_283fd6cff5aacb::t_0fbccfddaa8bb3 265
+src/cuda-torch-venv.js
+  s_b0eabc644f1cfe::t_84c9c8c3307f13 1-97
+src/backend-registry.js
+  s_b0eabc644f1cfe::t_f1ee2712a28392 1087,1089
+src/local-upscale.js
+  s_b0eabc644f1cfe::t_3fbebe3e123c02 17-24
+  s_b0eabc644f1cfe::t_9ca236e07edf89 388,393,395,398-399
+  s_b0eabc644f1cfe::t_785c39ec3c4ca4 302-310,315,317
+  s_b0eabc644f1cfe::t_61b25e873f0b8c 412
+  s_b0eabc644f1cfe::t_05ae109c6a9a2a 311-314
+src/status-cache.js
+  s_b0eabc644f1cfe::t_0053820a6eaabc 34-35
+src/server.js
+  s_b0eabc644f1cfe::t_7333032f85c3fc 721-723
+docs/operations.md
+  s_b0eabc644f1cfe::t_40ce679be0e4ce 170-171,173
+  s_b0eabc644f1cfe::t_0f4331c191abb9 248,264,266,268,272
+  s_b0eabc644f1cfe::t_025c51813b8924 252,256
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "a23bd6ce3ecf57556af43f1581ba485c6c8893c8",
+  "prompts": {},
+  "sessions": {
+    "s_283fd6cff5aacb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fe0c8-2012-7ae3-a5b8-7804867046e5",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_b0eabc644f1cfe": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "d035b00f-42db-4de7-aaf0-2111176e6f55",
+        "model": "composer-2.5"
+      },
+      "human_author": null
+    }
+  }
+}
