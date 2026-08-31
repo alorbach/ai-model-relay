@@ -1,0 +1,31 @@
+test/codex-prompt.test.js
+  s_66a384a8a418ee::t_b2901186e32963 22,25,35-41
+docs/local-bridge-api.md
+  s_66a384a8a418ee::t_070b181f50486f 529
+src/media-analysis.js
+  s_66a384a8a418ee::t_b2901186e32963 9,226,253
+examples/http-app/public/index.html
+  s_66a384a8a418ee::t_b2901186e32963 259
+src/codex.js
+  s_66a384a8a418ee::t_b2901186e32963 10,679,683,715,727
+test/multimodal.test.js
+  s_66a384a8a418ee::t_b2901186e32963 123,127-136,160-164,167-170
+docs/gateway-integration.md
+  s_66a384a8a418ee::t_070b181f50486f 84
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "0254d4dd637a3f94e59f6b99c18771adedd6f8af",
+  "prompts": {},
+  "sessions": {
+    "s_66a384a8a418ee": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0583f-8e85-7db1-886d-02293ade9cd8",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
