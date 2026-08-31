@@ -1,0 +1,47 @@
+src/token-policy.js
+  s_200e785415dbde::t_d73d611214b002 9-10,12-23,25-45,47,64-67
+  s_66a384a8a418ee::t_ce4f44c080f83f 24
+test/token-policy.test.js
+  s_66a384a8a418ee::t_6d9986082d852b 14
+  s_66a384a8a418ee::t_dc8a4ac8546558 4,9-10,12-13,27-32
+  s_66a384a8a418ee::t_d3aa545c7bbe9b 15-26
+test/relay-settings.test.js
+  s_66a384a8a418ee::t_a43a696a7b1a9c 6,59-60
+  s_66a384a8a418ee::t_dc8a4ac8546558 24,39,41-48
+  s_66a384a8a418ee::t_285f9b63b4b7de 57-58
+  s_66a384a8a418ee::t_0e624b5f1f3587 40,49
+test/status-page.test.js
+  s_66a384a8a418ee::t_258c31f723c008 18-20
+  s_66a384a8a418ee::t_dc8a4ac8546558 17,21
+src/relay-settings.js
+  s_66a384a8a418ee::t_35b3dc4d786b9e 54-59
+  s_66a384a8a418ee::t_0e624b5f1f3587 62,70
+  s_66a384a8a418ee::t_b26898d490b8da 4,50-53,60-61,63-69,71-74,92,100,106
+  s_66a384a8a418ee::t_eff905894fd40d 80,89,93
+src/status-page.js
+  s_66a384a8a418ee::t_6fbc7cf9e1fc49 1064,1256,1417-1421,2188,2221-2225,2511,2514,2516
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "e8cbd90334ea380a751bea22c9ee7a064dd0259c",
+  "prompts": {},
+  "sessions": {
+    "s_200e785415dbde": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a03f51-20bc-7322-87e9-4b6801da4bc2",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_66a384a8a418ee": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0583f-8e85-7db1-886d-02293ade9cd8",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": null
+    }
+  }
+}
