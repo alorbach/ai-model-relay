@@ -1,0 +1,68 @@
+src/status-page.js
+  s_1b731aa169f1cd::t_aed518ab959006 2139,2141-2142,2150
+  s_1b731aa169f1cd::t_efdbc516ac3e7c 2664
+  s_1b731aa169f1cd::t_13ceeffc75f736 2314
+  s_1b731aa169f1cd::t_0f1e3b887cbdac 42-43,46-53,59
+  s_1b731aa169f1cd::t_afc70251c72047 3260-3268
+  s_1b731aa169f1cd::t_275b2ae4c5730a 933,940-941,945-948
+  s_1b731aa169f1cd::t_845ebcfa520464 1944
+  s_1b731aa169f1cd::t_60b8da9d57e112 2559-2560
+  s_1b731aa169f1cd::t_58cdae7dda8cf4 2732
+  s_1b731aa169f1cd::t_af0239c1e5adb1 3423-3424,3427-3442
+  s_1b731aa169f1cd::t_8b251e4fdf0a9e 1307-1352,1358-1359,1365-1472
+  s_1b731aa169f1cd::t_46de1f4017feb0 1041
+  s_1b731aa169f1cd::t_f9c97db21b26cc 3471-3472
+  s_1b731aa169f1cd::t_b8ec08b68de22b 3286-3287
+  s_1b731aa169f1cd::t_4d7b7997844763 2356
+  s_1b731aa169f1cd::t_edc0efab74887f 790,1903-1943,1945-2138,2143-2149,2151-2165
+  s_1b731aa169f1cd::t_9d4cff2fbf0b68 1353-1357,1360-1364
+  s_1b731aa169f1cd::t_f2d80062031b35 2647
+  s_1b731aa169f1cd::t_13c0b90033542b 2520-2523
+  s_1b731aa169f1cd::t_dba9410099e4d9 3022
+  s_1b731aa169f1cd::t_e9506aa04fd6e9 2975
+  s_1b731aa169f1cd::t_3eeb031dbb6f66 3238-3243,3246-3248
+  s_1b731aa169f1cd::t_e149bf48fadd41 954-972,974-982,995,999,1003-1006,1023-1031,1033-1040,1042-1043,1045,1047-1049
+  s_1b731aa169f1cd::t_2554c801792cf0 1490-1501,1507-1512,1527-1529,1533-1548
+  s_1b731aa169f1cd::t_65511cf3f54efa 1734,1736
+  s_1b731aa169f1cd::t_66c2db6d439134 3459-3460
+  s_1b731aa169f1cd::t_93d99ae97b7735 1052-1069,1071-1078,1080-1087,1089-1149,1151,1155-1162,1184
+  s_1b731aa169f1cd::t_16b99d20a0d5e6 1215-1218,1222-1240
+  s_1b731aa169f1cd::t_e71851c0cd72db 19,27-31
+  s_1b731aa169f1cd::t_6b99cfa241f765 3030,3053
+  s_1b731aa169f1cd::t_c04ab0c3570d83 3476
+  s_1b731aa169f1cd::t_2613998749dcef 2140
+  s_1b731aa169f1cd::t_d4247561de9f99 515-729,732-789
+  s_1b731aa169f1cd::t_26a67f53363cc9 2699
+  s_1b731aa169f1cd::t_e004b43f719996 2897
+  s_1b731aa169f1cd::t_e155ecf9cd31b9 3160-3184
+  s_1b731aa169f1cd::t_c360e7025f2059 2764
+  s_200e785415dbde::t_4a6a774c1f5199 1050-1051
+test/status-page.test.js
+  s_1b731aa169f1cd::t_2ae98deda62f7c 92-110
+test/server-jobs.test.js
+  s_1b731aa169f1cd::t_85d31942e65e1b 241-244
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "64f20616d8fa346e8799293fa16048f7b50ea3d2",
+  "prompts": {},
+  "sessions": {
+    "s_1b731aa169f1cd": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "73ccafe5-62f9-4935-b2f6-7c4427c1ce27",
+        "model": "composer-2.5"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_200e785415dbde": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a03f51-20bc-7322-87e9-4b6801da4bc2",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
