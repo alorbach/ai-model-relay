@@ -1,0 +1,95 @@
+docs/plans/10-settings-token-overrides.md
+  s_9a93c3c25e9372::t_d569263b92de78 5
+docs/plans/11-cursor-agent-images.md
+  s_66a384a8a418ee::t_064bb624505e4a 151-152,156-158
+  s_66a384a8a418ee::t_21e1e3da055997 122
+  s_66a384a8a418ee::t_017fd71facfd71 246,251,253,263,283
+  s_66a384a8a418ee::t_89dc76ff85c9b9 81,112,114
+  s_9a93c3c25e9372::t_b51e714fa99342 1-2,5-16,18-23,28,30,32-58,60,62-68,70,72-75,83,88-89,93-100,105,116-117,119,123,125,127,134-138,142-145,148-149,159,161,173-175,178,180-181,189-190,192,196-203,205-208,212-240,247-248,264-266,269,273-275,278,284,286-290,292-299
+  s_66a384a8a418ee::t_74561afeb0105a 303
+  s_66a384a8a418ee::t_624ae6af2c2869 141
+  s_66a384a8a418ee::t_1b9a2c22cfefe4 162,182
+  s_66a384a8a418ee::t_93299ff48c93a2 194,262
+  s_66a384a8a418ee::t_7e4f425e50fc1e 108-109
+  s_66a384a8a418ee::t_4dc9150231d652 78,86
+  s_66a384a8a418ee::t_fca465932e59d7 163,166,177,179
+  s_66a384a8a418ee::t_5f388814bbdb81 3-4
+  s_66a384a8a418ee::t_85752ad8fa1539 191
+  s_66a384a8a418ee::t_ce6962f1c4686a 82
+  s_66a384a8a418ee::t_57f8cc56c9167a 252
+  s_66a384a8a418ee::t_daa11236bd3537 254,256,268,272,276-277
+  s_66a384a8a418ee::t_683411489460bd 183-184,186,188
+  s_66a384a8a418ee::t_17c10976253db7 291
+  s_66a384a8a418ee::t_bea380da8cf693 130-131
+  s_66a384a8a418ee::t_b21a9aeb8a0411 80,115,140,176,195,245,258,282,285
+  s_66a384a8a418ee::t_bb44975fa29219 259
+  s_66a384a8a418ee::t_ae2a65f810dbe0 281
+  s_66a384a8a418ee::t_f74268515eb2df 85,113
+  s_66a384a8a418ee::t_e0ee473a3dbb12 267
+  s_66a384a8a418ee::t_172a245e7ab776 120,250
+  s_283fd6cff5aacb::t_894d73848f2a67 150
+  s_66a384a8a418ee::t_fda90a88873ce0 104,118,124
+  s_66a384a8a418ee::t_f020efd7481a95 153
+  s_66a384a8a418ee::t_186d9b02f91338 300-302
+  s_66a384a8a418ee::t_bed01601f3840f 270,279
+  s_66a384a8a418ee::t_5963530e824d41 79,87
+  s_66a384a8a418ee::t_36328fd183d77a 167-168,171-172,193
+  s_66a384a8a418ee::t_b137afec1d03f5 90,110-111
+  s_66a384a8a418ee::t_7f7516305609f4 185
+  s_66a384a8a418ee::t_47d5636de7012c 244
+  s_66a384a8a418ee::t_cdf04309a391b4 255,260-261
+  s_66a384a8a418ee::t_b53d01b02a6f01 257
+  s_66a384a8a418ee::t_fe94a1ce5e8d26 77,84,92
+  s_66a384a8a418ee::t_d345cec5b1ad36 17,76,91,129,164,249,271
+  s_66a384a8a418ee::t_7532a9a24eb1ef 187
+  s_66a384a8a418ee::t_785ac33be5bb3c 128,132,139,146
+  s_66a384a8a418ee::t_f1bb172b5dcb99 133,155,165,210
+  s_66a384a8a418ee::t_6d11869df93825 211
+  s_66a384a8a418ee::t_4750288cc8acf2 242-243
+  s_66a384a8a418ee::t_7f6b18cb944a15 101-103,106-107,126
+  s_66a384a8a418ee::t_73ce6c6bf4c397 59,61,69,71
+  s_66a384a8a418ee::t_fa08266bacd898 31,121,154,160
+  s_66a384a8a418ee::t_d48c0e7ddca5f0 147
+  s_66a384a8a418ee::t_a6c6f7afdd2e25 204
+  s_66a384a8a418ee::t_347e0ba4e3677e 169-170
+  s_66a384a8a418ee::t_50e79840401534 209
+  s_66a384a8a418ee::t_808f62ca464e99 280
+  s_66a384a8a418ee::t_eff0c060974d8a 24-27,29
+  s_66a384a8a418ee::t_090a88a891737f 241
+docs/plans/README.md
+  s_9a93c3c25e9372::t_18aafa145e76da 97
+  s_9a93c3c25e9372::t_c25ed168c201d2 29-31
+  s_9a93c3c25e9372::t_a9c31e6a34b540 68-73
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "012b78ac134d1171f9d8c9d0a75f8bb374a7a942",
+  "prompts": {},
+  "sessions": {
+    "s_283fd6cff5aacb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fe0c8-2012-7ae3-a5b8-7804867046e5",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_66a384a8a418ee": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0583f-8e85-7db1-886d-02293ade9cd8",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": null
+    },
+    "s_9a93c3c25e9372": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "d1005fa3-2d5a-45bb-816e-350f2750448a",
+        "model": "composer-2.5"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
