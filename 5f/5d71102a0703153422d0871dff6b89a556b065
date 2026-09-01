@@ -1,0 +1,37 @@
+src/upscale-runner.py
+  s_10290d47949857::t_5754eda3a032fe 66,68,81-84,90-91,94-95,161-163,166
+src/local-upscale.js
+  s_10290d47949857::t_35a026f9f3953e 38-49,464,559
+  s_10290d47949857::t_5754eda3a032fe 510-512,517,550
+test/local-upscale.test.js
+  s_10290d47949857::t_35a026f9f3953e 8,11-15
+  s_10290d47949857::t_5754eda3a032fe 88-90,101-102
+package.json
+  s_66a384a8a418ee::t_ad3ed6f02c2801 3
+package-lock.json
+  s_66a384a8a418ee::t_2f620c796299fa 3,9
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "5f5d71102a0703153422d0871dff6b89a556b065",
+  "prompts": {},
+  "sessions": {
+    "s_10290d47949857": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a042f6-86f9-7493-ae27-a8387fbc9764",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_66a384a8a418ee": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0583f-8e85-7db1-886d-02293ade9cd8",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
