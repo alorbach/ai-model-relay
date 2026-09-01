@@ -1,0 +1,77 @@
+docs/plans/README.md
+  s_9a93c3c25e9372::t_a9c31e6a34b540 68-73
+  s_9a93c3c25e9372::t_18aafa145e76da 97
+  s_9a93c3c25e9372::t_c25ed168c201d2 29-31
+docs/plans/10-settings-token-overrides.md
+  s_9a93c3c25e9372::t_d569263b92de78 5
+docs/plans/11-cursor-agent-images.md
+  s_66a384a8a418ee::t_4dc9150231d652 78,82
+  s_66a384a8a418ee::t_bb44975fa29219 236,238-241
+  s_66a384a8a418ee::t_186d9b02f91338 275-277
+  s_66a384a8a418ee::t_eff0c060974d8a 24-27,29
+  s_66a384a8a418ee::t_fda90a88873ce0 99,111,117
+  s_66a384a8a418ee::t_17c10976253db7 266
+  s_66a384a8a418ee::t_1b9a2c22cfefe4 151,165
+  s_66a384a8a418ee::t_f74268515eb2df 81,107-108,121
+  s_66a384a8a418ee::t_172a245e7ab776 113,231
+  s_66a384a8a418ee::t_57f8cc56c9167a 233-234
+  s_66a384a8a418ee::t_7e4f425e50fc1e 103-104
+  s_9a93c3c25e9372::t_b51e714fa99342 1-2,5-16,18-23,28,30,32-58,60,62-68,70,72-75,79,83-84,88-95,100,109-110,112,116,118,120,123-127,131-134,137-138,148,150,156-159,161,163-164,172-173,175,179-186,188-191,195-229,242-244,247,251-253,256,259-265,267-274
+  s_66a384a8a418ee::t_87ef6ed863d85d 154
+  s_66a384a8a418ee::t_808f62ca464e99 258
+  s_66a384a8a418ee::t_fe94a1ce5e8d26 77,80,87
+  s_66a384a8a418ee::t_e0ee473a3dbb12 245
+  s_66a384a8a418ee::t_21e1e3da055997 114-115
+  s_66a384a8a418ee::t_daa11236bd3537 232,235,237,246,250,254-255
+  s_66a384a8a418ee::t_a6c6f7afdd2e25 187
+  s_66a384a8a418ee::t_d345cec5b1ad36 17,76,86,122,135,149,153,230,249
+  s_66a384a8a418ee::t_fca465932e59d7 152,155,160,162
+  s_66a384a8a418ee::t_85752ad8fa1539 174,176-178
+  s_66a384a8a418ee::t_6d11869df93825 193-194
+  s_66a384a8a418ee::t_5f388814bbdb81 3-4
+  s_66a384a8a418ee::t_b137afec1d03f5 85,105-106
+  s_66a384a8a418ee::t_7f6b18cb944a15 96-98,101-102,119
+  s_283fd6cff5aacb::t_894d73848f2a67 139
+  s_66a384a8a418ee::t_624ae6af2c2869 128-130
+  s_66a384a8a418ee::t_bed01601f3840f 248,257
+  s_66a384a8a418ee::t_73ce6c6bf4c397 59,61,69,71
+  s_66a384a8a418ee::t_74561afeb0105a 278
+  s_66a384a8a418ee::t_aa1ca6248b1bd5 31
+  s_66a384a8a418ee::t_5b1860d4132d38 142,144
+  s_66a384a8a418ee::t_683411489460bd 166-171
+  s_66a384a8a418ee::t_d48c0e7ddca5f0 136
+  s_66a384a8a418ee::t_064bb624505e4a 140-141,143,145-147
+  s_66a384a8a418ee::t_50e79840401534 192
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "cce55907567951ec88dbb18ea5a7f92c303560ae",
+  "prompts": {},
+  "sessions": {
+    "s_283fd6cff5aacb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fe0c8-2012-7ae3-a5b8-7804867046e5",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_66a384a8a418ee": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0583f-8e85-7db1-886d-02293ade9cd8",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": null
+    },
+    "s_9a93c3c25e9372": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "d1005fa3-2d5a-45bb-816e-350f2750448a",
+        "model": "composer-2.5"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
