@@ -1,0 +1,34 @@
+docs/plans/11-cursor-agent-images.md
+  s_9a93c3c25e9372::t_b51e714fa99342 1-2,5-217
+  s_66a384a8a418ee::t_5f388814bbdb81 3-4
+docs/plans/10-settings-token-overrides.md
+  s_9a93c3c25e9372::t_d569263b92de78 5
+docs/plans/README.md
+  s_9a93c3c25e9372::t_a9c31e6a34b540 68-73
+  s_9a93c3c25e9372::t_18aafa145e76da 97
+  s_9a93c3c25e9372::t_c25ed168c201d2 29-31
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "6ea85a83e5c1a5d60822859ce31304b6cca52940",
+  "prompts": {},
+  "sessions": {
+    "s_66a384a8a418ee": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0583f-8e85-7db1-886d-02293ade9cd8",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_9a93c3c25e9372": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "d1005fa3-2d5a-45bb-816e-350f2750448a",
+        "model": "composer-2.5"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
