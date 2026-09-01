@@ -5,9 +5,14 @@ const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { CHECKOUT_MARKER, INSTALL, MODELS, createLocalUpscaleDriver, modelConfig } = require('../src/local-upscale');
+const { CHECKOUT_MARKER, INSTALL, MODELS, createLocalUpscaleDriver, modelConfig, runnerPath } = require('../src/local-upscale');
 
 (async () => {
+	const sourceRunner = runnerPath('upscale-runner.py', path.join('D:', 'relay', 'src'));
+	assert.strictEqual(sourceRunner, path.join('D:', 'relay', 'src', 'upscale-runner.py'));
+	const packagedRunner = runnerPath('upscale-runner.py', path.join('C:', 'Program Files', 'AI Model Relay', 'resources', 'app.asar', 'src'));
+	assert.strictEqual(packagedRunner, path.join('C:', 'Program Files', 'AI Model Relay', 'resources', 'app.asar.unpacked', 'src', 'upscale-runner.py'));
+	assert.ok(require('../package.json').build.asarUnpack.includes('src/upscale-runner.py'));
 	const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-local-upscale-test-'));
 	const weight = path.join(directory, 'swinir-x2.pth');
 	fs.writeFileSync(weight, Buffer.from('test-pinned-weight'));
@@ -80,6 +85,9 @@ const { CHECKOUT_MARKER, INSTALL, MODELS, createLocalUpscaleDriver, modelConfig 
 		assert.ok(runner.includes('"cuda_runtime_invalid"'), 'an incomplete PyTorch import must report a safe CUDA-runtime diagnostic instead of raising an unhandled attribute error');
 		assert.ok(runner.includes('"--gpu-id", str(int(job.get("cuda_device", 0)))'), 'Real-ESRGAN must receive the selected CUDA device');
 		assert.ok(runner.includes('int(job.get("timeout_seconds", 1800))'), 'the CUDA subprocess must use the Node-configured timeout');
+		assert.ok(runner.includes('"output_policy", "")) != "retain_native_x2"'), 'the runner must require the retained native x2 output contract');
+		assert.ok(runner.includes('image.width != width or image.height != height'), 'the runner must reject an engine result that is not native x2 dimensions');
+		assert.ok(runner.includes('"downsampler": "none"'), 'the runner must record that no post-upscale downsampling occurred');
 		const driverSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'local-upscale.js'), 'utf8');
 		const cudaTorchSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'cuda-torch-venv.js'), 'utf8');
 		assert.ok(driverSource.includes('safeOutput({ output, provenance: metadata.provenance, local_job_id: session.jobId }, model.id)'), 'completion must report the requested relay model id');
@@ -90,6 +98,8 @@ const { CHECKOUT_MARKER, INSTALL, MODELS, createLocalUpscaleDriver, modelConfig 
 		assert.ok(!driverSource.includes('--extra-index-url'), 'CUDA torch setup must not add PyPI as an extra index');
 		assert.ok(driverSource.includes("'--constraint'"), 'follow-on pip installs must pin CUDA torch instead of skipping package dependencies');
 		assert.ok(driverSource.includes("'--no-deps', '-e'"), 'the Real-ESRGAN editable checkout must stay --no-deps so its setup.py cannot replace CUDA torch');
+		assert.ok(driverSource.includes("payload.output_policy !== 'retain_native_x2'"), 'the relay must reject a local-upscale request that does not retain native x2 output');
+		assert.ok(driverSource.includes("metadata.provenance.downsampler !== 'none'"), 'the relay must reject a result whose provenance reports post-upscale downsampling');
 		assert.ok(INSTALL.swinir.commit.length === 40 && INSTALL.realesrgan.commit.length === 40, 'official checkouts must be pinned to a git commit');
 		assert.ok(runner.includes('checkout_mismatch'), 'jobs must refuse an unpinned official checkout before the pickle compatibility loader runs');
 

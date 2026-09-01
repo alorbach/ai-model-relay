@@ -35,6 +35,18 @@ const MODELS = {
 	'model-relay:local-upscale:swinir-classical-x2': { id: 'model-relay:local-upscale:swinir-classical-x2', engine: 'swinir', label: 'SwinIR classical ×2' },
 	'model-relay:local-upscale:realesrgan-x2plus': { id: 'model-relay:local-upscale:realesrgan-x2plus', engine: 'realesrgan', label: 'Real-ESRGAN ×2plus (restoration)' },
 };
+
+/** Resolve Python runners outside Electron's read-only app.asar archive. */
+function unpackedAsarPath(sourcePath) {
+	const normalized = String(sourcePath || '');
+	const marker = `${path.sep}app.asar${path.sep}`;
+	const index = normalized.indexOf(marker);
+	return index === -1 ? normalized : `${normalized.slice(0, index)}${path.sep}app.asar.unpacked${path.sep}${normalized.slice(index + marker.length)}`;
+}
+
+function runnerPath(filename, baseDir = __dirname) {
+	return unpackedAsarPath(path.join(baseDir, filename));
+}
 const INSTALL = {
 	swinir: {
 		engine: 'swinir',
@@ -449,7 +461,7 @@ function safeOutput(result, modelId) {
 function createLocalUpscaleDriver(options = {}) {
 	const env = options.env || process.env;
 	const manifests = options.manifests || INSTALL;
-	const runner = options.runnerPath || path.join(__dirname, 'upscale-runner.py');
+	const runner = options.runnerPath || runnerPath('upscale-runner.py');
 	let snapshot = { id: 'local-upscale', label: 'Local CUDA Upscale', kind: 'local-runtime', ready: false, state: 'checking', diagnostic: 'Checking local CUDA upscale readiness.', gpu: gpuStatus(), models: [] };
 	function inspect() {
 		const python = pythonCommand(env);
@@ -495,11 +507,14 @@ function createLocalUpscaleDriver(options = {}) {
 			if (!model || !model.manifest_valid || !model.checkout_valid || !state.gpu.available || !(state.torch && state.torch.available)) return { success: false, category: 'configuration', code: 'local_upscale_not_ready', message: 'Pinned model, pinned checkout, or CUDA readiness is unavailable. CPU fallback is disabled.', details: { state: model ? model.state : 'unknown_model', gpu: state.gpu.state, torch: state.torch && state.torch.state } };
 			const source = Buffer.isBuffer(payload.source_bytes) ? payload.source_bytes : null;
 			if (!source || !source.length || source.length > MAX_BYTES || !['image/png', 'image/jpeg', 'image/webp'].includes(String(payload.source_mime_type || '').toLowerCase())) return { success: false, category: 'validation', code: 'local_upscale_source_invalid', message: 'The local upscale source must be a bounded PNG, JPEG, or WebP binary.' };
+			const outputPrint = payload.output_print && typeof payload.output_print === 'object' ? payload.output_print : {};
+			const cropPixels = payload.crop_pixels && typeof payload.crop_pixels === 'object' ? payload.crop_pixels : {};
+			if (payload.output_policy !== 'retain_native_x2' || !Number.isInteger(Number(outputPrint.width)) || !Number.isInteger(Number(outputPrint.height)) || Number(outputPrint.width) < Number(payload.target_print && payload.target_print.width) || Number(outputPrint.height) < Number(payload.target_print && payload.target_print.height) || Number(outputPrint.width) !== Number(cropPixels.width) * 2 || Number(outputPrint.height) !== Number(cropPixels.height) * 2) return { success: false, category: 'validation', code: 'local_upscale_contract_invalid', message: 'The signed local-upscale request must retain the approved native ×2 output.' };
 			const workdir = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-model-relay-upscale-'));
 			const sourcePath = path.join(workdir, 'source'); const outputPath = path.join(workdir, 'result.png'); const jobPath = path.join(workdir, 'job.json');
 			try {
 				fs.writeFileSync(sourcePath, source);
-				fs.writeFileSync(jobPath, JSON.stringify({ model, source_path: sourcePath, output_path: outputPath, source_mime_type: payload.source_mime_type, crop: payload.crop, target_print: payload.target_print, scale: payload.scale, cuda_device: 0, tile: Number(env.AI_MODEL_RELAY_UPSCALE_TILE || 512), precision: String(env.AI_MODEL_RELAY_UPSCALE_PRECISION || 'fp16'), timeout_seconds: Math.max(1, Math.ceil(Number(env.AI_MODEL_RELAY_UPSCALE_TIMEOUT_MS || 1800000) / 1000)) }));
+				fs.writeFileSync(jobPath, JSON.stringify({ model, source_path: sourcePath, output_path: outputPath, source_mime_type: payload.source_mime_type, crop_pixels: cropPixels, target_print: payload.target_print, output_print: outputPrint, output_policy: payload.output_policy, scale: payload.scale, cuda_device: 0, tile: Number(env.AI_MODEL_RELAY_UPSCALE_TILE || 512), precision: String(env.AI_MODEL_RELAY_UPSCALE_PRECISION || 'fp16'), timeout_seconds: Math.max(1, Math.ceil(Number(env.AI_MODEL_RELAY_UPSCALE_TIMEOUT_MS || 1800000) / 1000)) }));
 				const python = pythonCommand(env);
 				const result = await new Promise((resolve) => {
 					let stdout = ''; let stderr = ''; let settled = false; let timeout = null; let stopReason = ''; let removeAbort = () => {};
@@ -532,7 +547,7 @@ function createLocalUpscaleDriver(options = {}) {
 				if (!fs.existsSync(outputPath) || fs.statSync(outputPath).size < 1 || fs.statSync(outputPath).size > MAX_BYTES) return { success: false, category: 'validation', code: 'local_upscale_output_missing', message: 'The local CUDA runner did not produce a bounded PNG result.' };
 				const outputChecksum = sha256File(outputPath);
 				const output = { ...metadata.output, path: outputPath, checksum: outputChecksum, mime_type: 'image/png', byte_size: fs.statSync(outputPath).size };
-				if (!metadata.success || !outputChecksum || output.width !== Number(payload.target_print.width) || output.height !== Number(payload.target_print.height)) return { success: false, category: 'validation', code: 'local_upscale_manifest_invalid', message: 'The local CUDA output did not match the signed print target.' };
+				if (!metadata.success || !outputChecksum || output.width !== Number(outputPrint.width) || output.height !== Number(outputPrint.height) || !metadata.provenance || metadata.provenance.downsampler !== 'none') return { success: false, category: 'validation', code: 'local_upscale_manifest_invalid', message: 'The local CUDA output did not retain the signed native ×2 dimensions.' };
 				const value = safeOutput({ output, provenance: metadata.provenance, local_job_id: session.jobId }, model.id);
 				return value;
 			} catch (error) { return { success: false, category: 'configuration', code: 'local_upscale_failed', message: 'The local CUDA upscale runner failed; source bytes were preserved.' }; }
@@ -541,4 +556,4 @@ function createLocalUpscaleDriver(options = {}) {
 	};
 }
 
-module.exports = { MAX_BYTES, MODELS, INSTALL, CHECKOUT_MARKER, createLocalUpscaleDriver, gpuStatus, modelConfig, probeTorchStatus, publicSettings, saveSettings, settings, setup };
+module.exports = { MAX_BYTES, MODELS, INSTALL, CHECKOUT_MARKER, createLocalUpscaleDriver, gpuStatus, modelConfig, probeTorchStatus, publicSettings, runnerPath, saveSettings, settings, setup };

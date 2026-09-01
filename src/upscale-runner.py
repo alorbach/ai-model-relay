@@ -63,8 +63,9 @@ def main():
     source = Path(job.get("source_path", ""))
     output = Path(job.get("output_path", ""))
     model = job.get("model", {})
-    crop = job.get("crop", {})
+    crop_pixels = job.get("crop_pixels", {})
     target = job.get("target_print", {})
+    output_print = job.get("output_print", {})
     if not source.is_file() or not model.get("manifest_valid") or not Path(model.get("model_path", "")).is_file():
         fail("model_not_ready", "Pinned local model or source file is unavailable.")
     expected = str(model.get("expected_checksum", "")).lower()
@@ -77,20 +78,21 @@ def main():
     actual_commit = marker.read_text(encoding="utf-8").strip().lower() if marker.is_file() else ""
     if actual_commit != expected_commit:
         fail("checkout_mismatch", "The official model checkout is not the pinned git commit.")
-    width = int(target.get("width", 0)); height = int(target.get("height", 0))
-    if width < 1 or height < 1 or int(job.get("scale", 0)) != 2:
-        fail("target_invalid", "Local upscale requires a profile target and exactly x2 scale.")
+    minimum_width = int(target.get("width", 0)); minimum_height = int(target.get("height", 0))
+    width = int(output_print.get("width", 0)); height = int(output_print.get("height", 0))
+    if minimum_width < 1 or minimum_height < 1 or width < minimum_width or height < minimum_height or int(job.get("scale", 0)) != 2 or str(job.get("output_policy", "")) != "retain_native_x2":
+        fail("target_invalid", "Local upscale requires a profile target and an approved native x2 output contract.")
     started = datetime.now(timezone.utc).isoformat()
     with tempfile.TemporaryDirectory(prefix="ai-model-relay-crop-") as temp:
         crop_source = Path(temp) / "crop.png"
         result_root = Path(temp) / "result"
         with Image.open(source) as image:
-            left = round(float(crop.get("x", -1)) * image.width)
-            top = round(float(crop.get("y", -1)) * image.height)
-            right = round((float(crop.get("x", -1)) + float(crop.get("width", 0))) * image.width)
-            bottom = round((float(crop.get("y", -1)) + float(crop.get("height", 0))) * image.height)
+            left = int(crop_pixels.get("left", -1)); top = int(crop_pixels.get("top", -1))
+            right = int(crop_pixels.get("right", -1)); bottom = int(crop_pixels.get("bottom", -1))
             if left < 0 or top < 0 or right <= left or bottom <= top or right > image.width or bottom > image.height:
                 fail("crop_invalid", "The approved crop is outside the source image.")
+            if int(crop_pixels.get("width", 0)) != right - left or int(crop_pixels.get("height", 0)) != bottom - top or width != (right - left) * 2 or height != (bottom - top) * 2:
+                fail("output_contract_invalid", "The approved native x2 output does not match the approved crop.")
             image.crop((left, top, right, bottom)).convert("RGB").save(crop_source, "PNG")
         root = Path(model.get("root", ""))
         if model.get("engine") == "swinir":
@@ -156,10 +158,12 @@ def main():
         if generated is None:
             fail("engine_output_missing", "The CUDA model runner did not write a PNG result.")
         with Image.open(generated) as image:
-            image.convert("RGB").resize((width, height), Image.Resampling.LANCZOS).save(output, "PNG", optimize=True)
+            if image.width != width or image.height != height:
+                fail("engine_output_invalid", "The CUDA model runner did not retain the required native x2 dimensions.")
+            image.convert("RGB").save(output, "PNG", optimize=True)
     finished = datetime.now(timezone.utc).isoformat()
     device = torch.cuda.get_device_name(int(job.get("cuda_device", 0)))
-    print(json.dumps({"success": True, "output": {"width": width, "height": height}, "provenance": {"model_id": model["id"], "model_version": "operator-installed-official", "weight_checksum": expected, "cuda_device": device, "precision": str(job.get("precision", "fp16")), "tile": int(job.get("tile", 512)), "downsampler": "lanczos", "processing_started_at": started, "processing_finished_at": finished}}))
+    print(json.dumps({"success": True, "output": {"width": width, "height": height}, "provenance": {"model_id": model["id"], "model_version": "operator-installed-official", "weight_checksum": expected, "cuda_device": device, "precision": str(job.get("precision", "fp16")), "tile": int(job.get("tile", 512)), "downsampler": "none", "processing_started_at": started, "processing_finished_at": finished}}))
 
 
 if __name__ == "__main__":
