@@ -1,0 +1,112 @@
+docs/plans/10-settings-token-overrides.md
+  s_9a93c3c25e9372::t_d569263b92de78 5
+docs/plans/README.md
+  s_9a93c3c25e9372::t_18aafa145e76da 97
+  s_9a93c3c25e9372::t_c25ed168c201d2 29-31
+  s_9a93c3c25e9372::t_a9c31e6a34b540 68-73
+docs/plans/11-cursor-agent-images.md
+  s_66a384a8a418ee::t_502dfefdad9bf5 180
+  s_66a384a8a418ee::t_b21a9aeb8a0411 121,149,189,208,261,274,300,305
+  s_66a384a8a418ee::t_b137afec1d03f5 96,116-117
+  s_66a384a8a418ee::t_e0ee473a3dbb12 285
+  s_66a384a8a418ee::t_85752ad8fa1539 204
+  s_66a384a8a418ee::t_186d9b02f91338 320-322
+  s_66a384a8a418ee::t_017fd71facfd71 262,269,281,301
+  s_66a384a8a418ee::t_cdf04309a391b4 271,276
+  s_66a384a8a418ee::t_5e23a658f2111b 182-183
+  s_66a384a8a418ee::t_f74268515eb2df 91,119
+  s_66a384a8a418ee::t_fa08266bacd898 128,163
+  s_66a384a8a418ee::t_89dc76ff85c9b9 84,118,120
+  s_66a384a8a418ee::t_4750288cc8acf2 258-259
+  s_66a384a8a418ee::t_7e4f425e50fc1e 114-115
+  s_66a384a8a418ee::t_47d5636de7012c 260
+  s_66a384a8a418ee::t_d345cec5b1ad36 17,78,97,136,173,265,289
+  s_66a384a8a418ee::t_d9230a9be32d3d 302-303
+  s_66a384a8a418ee::t_7532a9a24eb1ef 200
+  s_66a384a8a418ee::t_9a8aaf38d422a2 216-217,222-223
+  s_66a384a8a418ee::t_bb44975fa29219 275
+  s_66a384a8a418ee::t_808f62ca464e99 298
+  s_66a384a8a418ee::t_ce6962f1c4686a 85
+  s_66a384a8a418ee::t_785ac33be5bb3c 148
+  s_66a384a8a418ee::t_bed01601f3840f 288,297
+  s_66a384a8a418ee::t_b53d01b02a6f01 273
+  s_66a384a8a418ee::t_1b9a2c22cfefe4 171,195
+  s_66a384a8a418ee::t_5963530e824d41 82,93
+  s_66a384a8a418ee::t_36328fd183d77a 176-177,181,206
+  s_283fd6cff5aacb::t_894d73848f2a67 159
+  s_66a384a8a418ee::t_347e0ba4e3677e 178-179
+  s_66a384a8a418ee::t_fe94a1ce5e8d26 80,90,98
+  s_66a384a8a418ee::t_ce42879abe77a2 248
+  s_66a384a8a418ee::t_22a7af8f7031ac 31
+  s_9a93c3c25e9372::t_b51e714fa99342 1-2,5-16,18-23,28,30,32-58,60,62,72,74-77,89,94-95,99-106,111,122-123,125,130,132,134,143-147,151-154,157-158,168,170,186-188,191,193-194,202-203,205,209,211-215,218-221,227-239,241-247,249-256,263-264,282-284,287,291-293,296,304,306-310,312-319
+  s_66a384a8a418ee::t_f30ac2c3469d78 184-185
+  s_66a384a8a418ee::t_50e79840401534 224
+  s_66a384a8a418ee::t_4dc9150231d652 81,92
+  s_66a384a8a418ee::t_eff0c060974d8a 24-27,29
+  s_66a384a8a418ee::t_f1bb172b5dcb99 140,164,225
+  s_66a384a8a418ee::t_74561afeb0105a 323
+  s_66a384a8a418ee::t_1e04d5490b7914 124,126-127,169
+  s_66a384a8a418ee::t_683411489460bd 196-197,199,201
+  s_66a384a8a418ee::t_d48c0e7ddca5f0 156
+  s_66a384a8a418ee::t_b938c72a3b3b99 83,88
+  s_66a384a8a418ee::t_090a88a891737f 257
+  s_66a384a8a418ee::t_bd633f48dc3ee7 240
+  s_66a384a8a418ee::t_6d11869df93825 226
+  s_66a384a8a418ee::t_658578dcf84010 79,87
+  s_66a384a8a418ee::t_172a245e7ab776 266
+  s_66a384a8a418ee::t_57f8cc56c9167a 268
+  s_66a384a8a418ee::t_7f7516305609f4 198
+  s_66a384a8a418ee::t_1410f5481a352d 210
+  s_66a384a8a418ee::t_daa11236bd3537 270,272,286,290,294-295
+  s_66a384a8a418ee::t_ae2a65f810dbe0 299
+  s_66a384a8a418ee::t_5b38a8674e7777 135,139
+  s_66a384a8a418ee::t_73ce6c6bf4c397 59,61
+  s_66a384a8a418ee::t_2eb175f74baa29 207,277
+  s_66a384a8a418ee::t_5a550468026043 267,279
+  s_66a384a8a418ee::t_17c10976253db7 311
+  s_66a384a8a418ee::t_bea380da8cf693 137-138
+  s_66a384a8a418ee::t_064bb624505e4a 160-161,165-167
+  s_66a384a8a418ee::t_adb56bb2ec0690 86
+  s_66a384a8a418ee::t_7f6b18cb944a15 107-109,112-113,133
+  s_66a384a8a418ee::t_624ae6af2c2869 150
+  s_66a384a8a418ee::t_21e1e3da055997 129
+  s_66a384a8a418ee::t_fda90a88873ce0 110,131
+  s_66a384a8a418ee::t_fb54fc0a3a3125 141-142
+  s_66a384a8a418ee::t_790d08b2fdd378 155,162,174
+  s_66a384a8a418ee::t_5f388814bbdb81 3-4
+  s_66a384a8a418ee::t_fca465932e59d7 172,175,190,192
+  s_66a384a8a418ee::t_7d7ec439c2072f 63-71,73
+  s_66a384a8a418ee::t_201038feec615a 278,280
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "8afc02efa46afc8bdf471dfb587e309602582925",
+  "prompts": {},
+  "sessions": {
+    "s_283fd6cff5aacb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fe0c8-2012-7ae3-a5b8-7804867046e5",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_66a384a8a418ee": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0583f-8e85-7db1-886d-02293ade9cd8",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": null
+    },
+    "s_9a93c3c25e9372": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "d1005fa3-2d5a-45bb-816e-350f2750448a",
+        "model": "composer-2.5"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
