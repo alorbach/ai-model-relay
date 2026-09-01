@@ -1,0 +1,85 @@
+docs/plans/README.md
+  s_9a93c3c25e9372::t_a9c31e6a34b540 68-73
+  s_9a93c3c25e9372::t_18aafa145e76da 97
+  s_9a93c3c25e9372::t_c25ed168c201d2 29-31
+docs/plans/10-settings-token-overrides.md
+  s_9a93c3c25e9372::t_d569263b92de78 5
+docs/plans/11-cursor-agent-images.md
+  s_66a384a8a418ee::t_daa11236bd3537 242,244,255,259,263-264
+  s_66a384a8a418ee::t_7e4f425e50fc1e 106-107
+  s_66a384a8a418ee::t_e0ee473a3dbb12 254
+  s_66a384a8a418ee::t_912838ca601e46 110
+  s_66a384a8a418ee::t_5963530e824d41 79,85
+  s_66a384a8a418ee::t_74561afeb0105a 289
+  s_66a384a8a418ee::t_85752ad8fa1539 181
+  s_66a384a8a418ee::t_cdf04309a391b4 234,239,243,248-249
+  s_66a384a8a418ee::t_4dc9150231d652 78,84
+  s_66a384a8a418ee::t_17c10976253db7 277
+  s_66a384a8a418ee::t_683411489460bd 173-174,176,178
+  s_66a384a8a418ee::t_d345cec5b1ad36 17,76,89,127,142,156,160,237,258
+  s_66a384a8a418ee::t_f1bb172b5dcb99 129,149,151,161,200
+  s_66a384a8a418ee::t_ae2a65f810dbe0 268
+  s_66a384a8a418ee::t_b21a9aeb8a0411 80,112-113,126,128,136,166,184-185,233,245-246,250,269,271
+  s_66a384a8a418ee::t_47d5636de7012c 232
+  s_66a384a8a418ee::t_064bb624505e4a 147-148,150,152-154
+  s_66a384a8a418ee::t_73ce6c6bf4c397 59,61,69,71
+  s_66a384a8a418ee::t_1b9a2c22cfefe4 158,172
+  s_66a384a8a418ee::t_fca465932e59d7 159,162,167,169
+  s_66a384a8a418ee::t_aa1ca6248b1bd5 31
+  s_66a384a8a418ee::t_57f8cc56c9167a 240-241
+  s_66a384a8a418ee::t_bb44975fa29219 247
+  s_66a384a8a418ee::t_a6c6f7afdd2e25 194
+  s_66a384a8a418ee::t_808f62ca464e99 267
+  s_66a384a8a418ee::t_186d9b02f91338 286-288
+  s_66a384a8a418ee::t_fe94a1ce5e8d26 77,82,90
+  s_66a384a8a418ee::t_624ae6af2c2869 135,137
+  s_9a93c3c25e9372::t_b51e714fa99342 1-2,5-16,18-23,28,30,32-58,60,62-68,70,72-75,81,86-87,91-98,103,114-115,117,121,123,125,130-134,138-141,144-145,155,157,163-165,168,170-171,179-180,182,186-193,195-198,202-231,235-236,251-253,256,260-262,265,270,272-276,278-285
+  s_66a384a8a418ee::t_fda90a88873ce0 102,116,122
+  s_283fd6cff5aacb::t_894d73848f2a67 146
+  s_66a384a8a418ee::t_7532a9a24eb1ef 177
+  s_66a384a8a418ee::t_eff0c060974d8a 24-27,29
+  s_66a384a8a418ee::t_7f6b18cb944a15 99-101,104-105,124
+  s_66a384a8a418ee::t_b137afec1d03f5 88,108-109
+  s_66a384a8a418ee::t_f74268515eb2df 83,111
+  s_66a384a8a418ee::t_bed01601f3840f 257,266
+  s_66a384a8a418ee::t_21e1e3da055997 119-120
+  s_66a384a8a418ee::t_7f7516305609f4 175
+  s_66a384a8a418ee::t_5f388814bbdb81 3-4
+  s_66a384a8a418ee::t_6d0798d20ad5e0 183
+  s_66a384a8a418ee::t_50e79840401534 199
+  s_66a384a8a418ee::t_6d11869df93825 201
+  s_66a384a8a418ee::t_d48c0e7ddca5f0 143
+  s_66a384a8a418ee::t_172a245e7ab776 118,238
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "7ded4e8a8eab5c07948f50954259d369cb9a4261",
+  "prompts": {},
+  "sessions": {
+    "s_283fd6cff5aacb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fe0c8-2012-7ae3-a5b8-7804867046e5",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_66a384a8a418ee": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0583f-8e85-7db1-886d-02293ade9cd8",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": null
+    },
+    "s_9a93c3c25e9372": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "d1005fa3-2d5a-45bb-816e-350f2750448a",
+        "model": "composer-2.5"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
