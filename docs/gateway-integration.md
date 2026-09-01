@@ -17,8 +17,10 @@ The local tray bridge owns:
 - origin pairing and local bearer token storage;
 - cached provider discovery and readiness checks;
 - local Codex chat/image execution;
-- optional Grok CLI (with Imagine media exposed only after local skill detection) and Cursor Agent relay execution;
+- optional Grok CLI (isolated Gateway chat; Imagine media exposed only after local skill detection) and Cursor Agent `--mode=ask` chat;
+- optional Antigravity CLI chat, images, and media analysis;
 - optional xAI API chat, Imagine image/video (`model-relay:xai:imagine-image`, `model-relay:xai:imagine-video`), and Speech-to-Text when `XAI_API_KEY` is configured;
+- resolved chat/media `max_tokens` defaults and Settings overrides;
 - normalized chat and image response shapes.
 
 The WordPress Gateway owns:
@@ -85,6 +87,8 @@ Chat request:
   }
 }
 ```
+
+`max_tokens` is optional on the signed payload. The bridge treats omitted values and integers below 512 (including leftover `256` examples) as the chat default **8192**, unless the tray Settings **Chat token default** is set. Integers `>= 512` are honored. Do not rely on `256` as a product cap. Codex uses the resolved number only as a prompt hint; xAI and API-key chat send it as `max_tokens` and `max_completion_tokens`.
 
 Image request:
 
@@ -187,9 +191,9 @@ This mirrors the current Gateway demo implementation in `assets/js/demo-pages.js
 
 ## Optional Relay Routes
 
-New integrations may send the same signed envelope to `/v1/relay/jobs/chat`, `/images`, `/videos`, `/transcribe`, or `/media/analyze`. They may set `payload.provider`, `payload.backend`, or a `model-relay:<backend>:<model>` model ID. If none is supplied, the local relay default for that operation is used. A selected unavailable or incompatible provider fails clearly; the bridge does not substitute another provider.
+New integrations may send the same signed envelope to `/v1/relay/jobs/chat`, `/images`, `/videos`, `/transcribe`, or `/media/analyze`. They may set `payload.provider`, `payload.backend`, or a `model-relay:<backend>:<model>` model ID. If none is supplied, the local relay default for that operation is used. A selected unavailable or incompatible provider fails clearly; the bridge does not substitute another provider. Chat image data URLs are supported on Codex (`--image`) and on Grok/Cursor/Antigravity via temp files in the job workspace, not as argv base64.
 
-Keep provider choice in the server-created, signed Gateway payload. Do not let browser code alter the model/provider after job creation. The legacy `codex-local:*` endpoints and contract shown above remain unchanged.
+Keep provider choice in the server-created, signed Gateway payload. Do not let browser code alter the model/provider after job creation. The legacy `codex-local:*` endpoints and contract shown above remain unchanged. Media analysis may add `response.provider_details.media_analysis.structured` when Codex supports `--output-schema`; always keep using `choices[0].message.content` as the human-readable answer.
 
 ## Model IDs
 

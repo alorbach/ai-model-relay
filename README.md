@@ -23,6 +23,8 @@ Windows tray companion for Alorbach AI Subscription Gateway. It exposes a secure
 - Executes signed Gateway audio transcription jobs through private local ASR runtimes with per-word timestamps, or through explicitly selected xAI Speech-to-Text.
 - Optionally runs a separate local music-analysis pipeline for acoustic album metrics; it does not infer lyrics or send audio to a cloud provider.
 - Routes provider-neutral relay jobs through backend drivers for Codex CLI, Antigravity CLI, local ASR, Grok/xAI, configurable CLI processes, API-key chat providers, and OpenAI video.
+- Resolves chat and media-analysis `max_tokens` (defaults 8192 / 4096; values below 512 floor up; optional Settings overrides). Codex uses a prompt hint; xAI and API-key chat send `max_tokens` and `max_completion_tokens`.
+- Runs Grok/Cursor/Antigravity Gateway chat from a temp prompt file so large transcripts are not placed on the Windows command line. Cursor chat uses `--mode=ask`.
 - Reports local bridge multimodal capabilities, including structured Codex event support and optional video/media features.
 - Optionally executes signed OpenAI Videos API jobs when explicitly configured with an API key and enable flag. OpenAI lists Sora 2 and the Videos API for removal on 24 Sep 2026.
 - When `XAI_API_KEY` is set, routes signed chat, Imagine image, Imagine video, and Speech-to-Text jobs through the xAI API (`grok-4.6` by default). Imagine video becomes the unsaved default video route.
@@ -87,9 +89,10 @@ The Relay runs SwinIR or Real-ESRGAN at exactly ×2, then applies a fixed Lanczo
 ## Documentation
 
 - [Architecture](docs/architecture.md)
-- [Local Bridge API](docs/local-bridge-api.md)
+- [Local Bridge API](docs/local-bridge-api.md) (includes chat `max_tokens` policy and `/v1/relay/settings` `token_defaults`)
 - [Gateway Integration](docs/gateway-integration.md)
 - [Operations](docs/operations.md)
+- [Implementation plans](docs/plans/README.md)
 - [Standalone HTTP example](examples/http-app/README.md)
 
 The Gateway-side reference implementation is in the [Alorbach AI Subscription Gateway](https://github.com/alorbach/alorbach-ai-subscription-gateway/) WordPress plugin:

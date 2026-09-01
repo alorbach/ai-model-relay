@@ -35,4 +35,6 @@ Use the tray app or server output to get the pairing code, pair this example ori
 - sending the token on paired bridge routes;
 - calling `/v1/models`, `/v1/chat`, `/v1/images`, and `/v1/unpair`.
 
+Chat requests in `public/index.html` send `max_tokens: 8192`. Omitting it, or sending a value below 512, uses the same bridge default. See [Chat and media `max_tokens`](../../docs/local-bridge-api.md#chat-and-media-max_tokens) in the API reference.
+
 The example creates local development request IDs and hashes in the browser. That is acceptable for a protocol smoke test only. Production Gateway integrations must use server-created `job_token`, `request_hash`, and `request_id` values.

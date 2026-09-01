@@ -15,13 +15,16 @@
 
 The Settings page shows every supported local/API driver with an installed, ready, checking, not-authenticated, or unavailable state; executable path, version, supported operations, and concise safe diagnostics are shown separately so long paths do not distort the card layout.
 
-- **Codex CLI**: chat, image generation, and media analysis.
-- **Grok CLI**: chat/coding plus Grok Imagine image generation and experimental image-reference video generation only when `%USERPROFILE%\.grok\skills\imagine\SKILL.md` or `%USERPROFILE%\.grok\bundled\skills\imagine\SKILL.md` declares the matching local tools.
-- **Cursor Agent**: chat/coding through `cursor-agent --print --output-format json`.
+- **Codex CLI**: chat, image generation, and media analysis. Chat uses stdin plus `--ephemeral` and, when advertised, `--sandbox read-only`.
+- **Grok CLI**: isolated Gateway chat (`--prompt-file` / `--prompt-json`, no shell/subagents/web search) plus Grok Imagine image generation and experimental image-reference video generation only when `%USERPROFILE%\.grok\skills\imagine\SKILL.md` or `%USERPROFILE%\.grok\bundled\skills\imagine\SKILL.md` declares the matching local tools. Imagine allowlists one tool per request.
+- **Cursor Agent**: Gateway chat through `cursor-agent --print --output-format json --mode=ask --trust` in a temp workspace. The transcript is in `prompt.txt`, not on argv.
+- **Antigravity CLI**: chat, images (`IMAGE_PATH:` import with state-root fallback), and media analysis through authenticated `agy`.
 - **Local ASR**: local transcription; its detailed runtime/model editor remains below routing.
-- **OpenAI Videos**, **Grok/xAI API**, and **API Key Chat**: separately configured API drivers. xAI Imagine image/video use the same `XAI_API_KEY` as chat and STT. OpenAI Sora 2 remains available until the Videos API shutdown on 24 Sep 2026.
+- **OpenAI Videos**, **Grok/xAI API**, and **API Key Chat**: separately configured API drivers. xAI Imagine image/video use the same `XAI_API_KEY` as chat and STT. Chat HTTP bodies include resolved `max_tokens` / `max_completion_tokens`. OpenAI Sora 2 remains available until the Videos API shutdown on 24 Sep 2026.
 
-The five selectors route only `/v1/relay/jobs/*`: chat, images, videos, transcription, and media analysis. Explicit `payload.model`, `payload.provider`, or `payload.backend` always overrides the saved default. Legacy `/v1/chat`, `/v1/images`, `/v1/transcribe`, `/v1/videos`, and `/v1/media/analyze` remain unchanged.
+The six selectors route only `/v1/relay/jobs/*`: chat, images, videos, transcription, media analysis, and music analysis. Explicit `payload.model`, `payload.provider`, or `payload.backend` always overrides the saved default. Legacy `/v1/chat`, `/v1/images`, `/v1/transcribe`, `/v1/videos`, and `/v1/media/analyze` remain unchanged for provider routing.
+
+Under **Model routing**, optional **Chat token default** (code default 8192) and **Media analysis token default** (code default 4096) override those floors when set to an integer from 512 to 128000. Leave them blank to keep the code defaults. Client `max_tokens` values of 512 or higher still win for that job. These token fields apply to legacy chat/analysis routes as well as relay jobs.
 
 The relay never silently falls back. If an explicit or saved model/provider is unknown, unavailable, unauthenticated, disabled, or incompatible with the job type, the request fails with a configuration error naming that choice. An unavailable saved selection remains visible but disabled in Settings so it can be corrected.
 

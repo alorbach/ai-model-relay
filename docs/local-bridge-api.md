@@ -27,11 +27,31 @@ X-Alorbach-Request-Id: <request-id>
 
 ## Body Limit
 
-The maximum JSON request body is 12 MiB. This is intended to support normal chat payloads and image prompts, not binary uploads.
+The maximum JSON request body is 12 MiB. This is intended to support normal chat payloads and image prompts, not binary uploads. It is independent of chat `max_tokens`.
+
+## Chat and media `max_tokens`
+
+Chat-like jobs resolve an output-token **target** in `src/token-policy.js`. This is not a model context window. Codex still has no `--max-tokens` flag: the resolved value is a prompt hint. xAI and API-key chat send it as both `max_tokens` and `max_completion_tokens`. Grok CLI, Cursor Agent, and Antigravity CLI ignore the numeric field and do not rewrite the user's CLI config files.
+
+| Job type | Code default | Used by |
+|----------|--------------|---------|
+| `chat` | **8192** | Codex chat hint; xAI / API-key HTTP bodies |
+| `media.analyze` | **4096** | Codex-backed media analysis |
+
+Resolution rules:
+
+1. Omitted, non-numeric, `<= 0`, or **below 512** (including leftover samples of `256`) → use the job-type default.
+2. Integer **>= 512** → use that value unchanged (the client may ask for more or somewhat less than the default).
+3. Status-page **Chat token default** / **Media analysis token default** (`settings.token_defaults`) replace the code default when set. Allowed range is **512–128000**. Blank means the code default.
+4. An explicit client `max_tokens >= 512` still wins over Settings.
+
+`token_defaults` apply to every chat and media-analysis driver, including legacy `/v1/chat` and `/v1/media/analyze`. Provider routing `settings.defaults` still apply only to `/v1/relay/jobs/*`.
+
+Images and videos do not use this policy. The Relay does not copy `stream` into HTTP chat bodies; chat completions are fully buffered.
 
 ## `GET /status`
 
-Shows a local HTML status page for the same runtime data exposed by `GET /v1/status`. It renders immediately from cached diagnostics, then uses the local event stream for provider updates, active jobs, queued jobs, recent activity, and heartbeat state. The Settings tab loads its Local ASR, local music-analysis, and relay-routing settings only when first opened. It also provides a real image, video, transcription, or music-analysis test action for each ready, compatible provider model. Audio tests visibly warn when the selected xAI model uploads the file to the cloud; local music-analysis tests stay on the machine. The Live tab shows the selected provider/API, workflow/skill, bounded redacted stdin, bounded stdout/stderr/session output, and recent image thumbnails that open in an in-page overlay. The tray app opens this page when the tray icon is double-clicked.
+Shows a local HTML status page for the same runtime data exposed by `GET /v1/status`. It renders immediately from cached diagnostics, then uses the local event stream for provider updates, active jobs, queued jobs, recent activity, and heartbeat state. The Settings tab loads its Local ASR, local music-analysis, relay-routing, CLI path, and chat/media token-default settings only when first opened. It also provides a real image, video, transcription, or music-analysis test action for each ready, compatible provider model. Audio tests visibly warn when the selected xAI model uploads the file to the cloud; local music-analysis tests stay on the machine. The Live tab shows the selected provider/API, workflow/skill, bounded redacted stdin, bounded stdout/stderr/session output, and recent image thumbnails that open in an in-page overlay. The tray app opens this page when the tray icon is double-clicked.
 
 ## `GET /v1/status`
 
@@ -234,6 +254,17 @@ Returns persisted relay-only operation defaults plus the cached compatible model
       "transcribe": "model-relay:local-asr:auto",
       "media.analyze": "model-relay:codex:auto",
       "music.analyze": "model-relay:music-analysis:core"
+    },
+    "cli_paths": {
+      "codex-cli": "",
+      "grok-cli": "",
+      "antigravity-cli": "",
+      "cursor-cli": "",
+      "cli-process": ""
+    },
+    "token_defaults": {
+      "chat": "",
+      "media.analyze": ""
     }
   },
   "models": [],
@@ -241,9 +272,11 @@ Returns persisted relay-only operation defaults plus the cached compatible model
 }
 ```
 
+Empty `token_defaults` values mean the code defaults (8192 / 4096). A stored integer is the Settings override.
+
 ## `POST /v1/relay/settings`
 
-Saves the provided relay-only defaults in the existing local state file. Send either a `settings.defaults` object or the defaults object directly. Omitted or blank operations retain their built-in defaults. The Settings page keeps an unavailable saved selection visible so it can be corrected; saving it does not make an unavailable provider runnable.
+Saves the provided relay-only defaults in the existing local state file. Send a `settings` object with any of `defaults`, `cli_paths`, and `token_defaults`. Omitted routing operations retain their built-in defaults. The Settings page keeps an unavailable saved selection visible so it can be corrected; saving it does not make an unavailable provider runnable. Blank `token_defaults.chat` or `token_defaults['media.analyze']` clears that override.
 
 ```json
 {
@@ -251,12 +284,15 @@ Saves the provided relay-only defaults in the existing local state file. Send ei
     "defaults": {
       "chat": "model-relay:grok-cli:auto",
       "images": "model-relay:grok-cli:image"
+    },
+    "token_defaults": {
+      "chat": 16384
     }
   }
 }
 ```
 
-These settings apply only to `/v1/relay/jobs/*`, never to legacy `/v1/chat`, `/v1/images`, `/v1/transcribe`, `/v1/videos`, `/v1/media/analyze`, or `/v1/music/analyze`.
+Provider routing `defaults` apply only to `/v1/relay/jobs/*`, never to legacy `/v1/chat`, `/v1/images`, `/v1/transcribe`, `/v1/videos`, `/v1/media/analyze`, or `/v1/music/analyze`. `token_defaults` apply to chat and media-analysis jobs on both legacy and relay routes.
 
 ## `POST /v1/relay/refresh`
 
@@ -474,7 +510,7 @@ Response:
 }
 ```
 
-Grok and Cursor entries carry readiness metadata; choose them only after local detection reports them ready. Grok Imagine image/video entries are omitted until the installed Imagine skill metadata declares their tools. The video entry is experimental and records whether a local video request has completed successfully. If `CODEX_HOME/models_cache.json` exists, additional text model IDs from that cache are returned as `codex-local:<id>`.
+Grok and Cursor entries carry readiness metadata; choose them only after local detection reports them ready. When the installed CLI lists models (`grok models`, `cursor-agent models` / `--list-models`), those IDs appear as `model-relay:grok-cli:<id>` and `model-relay:cursor-cli:<id>` in addition to `auto`. Parse failures keep `auto` only. Grok Imagine image/video entries are omitted until the installed Imagine skill metadata declares their tools. The video entry is experimental and records whether a local video request has completed successfully. If `CODEX_HOME/models_cache.json` exists, additional text model IDs from that cache are returned as `codex-local:<id>`.
 
 Provider-neutral IDs use the `model-relay:<backend>:<model>` form. Existing frontend code can keep sending `codex-local:*`; newer clients may send `model-relay:*` or specify `payload.provider` / `payload.backend`.
 
@@ -489,15 +525,19 @@ Provider-neutral job aliases use the same signed envelope and response shapes as
 - `POST /v1/relay/jobs/media/analyze`
 - `POST /v1/relay/jobs/music/analyze`
 
-Routing is selected from an explicit `payload.provider`, `payload.backend`, or model ID. An explicit selection wins. When none is supplied, the bridge inserts the persisted relay default for the operation: `chat`, `images`, `videos`, `transcribe`, `media.analyze`, or `music.analyze`. For example, `model-relay:xai:grok-4.6` routes to the Grok/xAI API chat driver, `model-relay:xai:imagine-image` and `model-relay:xai:imagine-video` route to xAI Imagine, `model-relay:xai:stt` routes to xAI Speech-to-Text, and `model-relay:local-asr:qwen3-asr-0.6b` routes to the local ASR driver. When `XAI_API_KEY` is set and no video default has been saved, the unsaved video default is `model-relay:xai:imagine-video`.
+Routing is selected from an explicit `payload.provider`, `payload.backend`, or model ID. An explicit selection wins. When none is supplied, the bridge inserts the persisted relay default for the operation: `chat`, `images`, `videos`, `transcribe`, `media.analyze`, or `music.analyze`. For example, `model-relay:xai:grok-4.6` routes to the Grok/xAI API chat driver, `model-relay:xai:imagine-image` and `model-relay:xai:imagine-video` route to xAI Imagine, `model-relay:xai:stt` routes to xAI Speech-to-Text, and `model-relay:local-asr:qwen3-asr-0.6b` routes to the local ASR driver. When `XAI_API_KEY` is set and no video default has been saved, the unsaved video default is `model-relay:xai:imagine-video`. xAI and API-key chat always include resolved `max_tokens` and `max_completion_tokens` and may pass `temperature` / `top_p` when the payload sets them; they do not send `stream`.
 
 If the selected/default provider is unknown, disabled, unauthenticated, or does not support the requested operation, the route returns a configuration error naming the selected model and safe reason. It never falls back to another provider. `grok` and `grok-cli` select the local Grok CLI; `xai` and `xai-api` select the separately configured xAI API. This rule is limited to `/v1/relay/jobs/*`; legacy routes retain their existing behavior.
 
-`model-relay:grok-cli:auto` is Grok CLI chat/coding. `model-relay:grok-cli:image` runs the detected Imagine image workflow. `model-relay:grok-cli:video` runs the experimental Imagine image-to-video/reference-to-video workflow. Image references may be data URLs, `{ b64_json, mime_type }` objects, `referenced_image_paths`, or `frames`; the bridge validates and materializes them only in the per-request workspace. With one supplied image, Grok runs image-to-video; with multiple, it runs reference-to-video. Without one, the relay first generates a temporary source image and then runs image-to-video. The bridge collects only final artifacts from that workspace's output directory and fails explicitly if Imagine tooling, generated artifacts, moderation, or the bounded process run fails. Grok CLI video tests expose aspect ratio, `480p`/`720p`/`1080p`, clip length, and soundtrack guidance.
+`model-relay:grok-cli:auto` is Grok CLI Gateway chat. The transcript is written to a temp `prompt.txt` (or `--prompt-json` when the CLI advertises it and the payload fits). The process command line does not carry the full transcript. Chat runs in that workspace with `--cwd`, `--permission-mode dontAsk`, `--no-subagents`, `--disable-web-search`, and `--disallowed-tools run_terminal_cmd`. Data-URL image parts in chat messages are materialized in the workspace; they are never placed on argv as base64. When `grok models` lists IDs, those appear as `model-relay:grok-cli:<id>` in addition to `auto`.
+
+`model-relay:grok-cli:image` runs the detected Imagine image workflow. `model-relay:grok-cli:video` runs the experimental Imagine image-to-video/reference-to-video workflow. Image references may be data URLs, `{ b64_json, mime_type }` objects, `referenced_image_paths`, or `frames`; the bridge validates and materializes them only in the per-request workspace. With one supplied image, Grok runs image-to-video; with multiple, it runs reference-to-video. Without one, the relay first generates a temporary source image and then runs image-to-video. Each Imagine invocation allowlists only the tool being called (`--tools image_gen`, `image_edit`, `image_to_video`, or `reference_to_video`) and still denies shell, subagents, and web search, with `--max-turns 2`. The bridge collects only final artifacts from that workspace's output directory (imported from the Grok session folder) and fails explicitly if Imagine tooling, generated artifacts, moderation, or the bounded process run fails. Grok CLI video tests expose aspect ratio, `480p`/`720p`/`1080p`, clip length, and soundtrack guidance.
+
+`model-relay:cursor-cli:auto` is Cursor Agent Gateway chat in `--mode=ask` with `--print --output-format json --trust --workspace <temp>`. The transcript lives in `prompt.txt`; argv only tells the agent to read that file. Ask mode is read-only: Gateway chat is not a write/shell coding agent. When `cursor-agent models` or `--list-models` lists IDs, those appear as `model-relay:cursor-cli:<id>` in addition to `auto`. Cursor does not implement transcription.
 
 `model-relay:xai:imagine-image` and `model-relay:xai:imagine-video` call the xAI Imagine HTTP API with native parameters (`aspect_ratio`, image `resolution` `1k`/`2k`, image `quality` `low`/`medium`, video `resolution` `480p`/`720p`/`1080p`, `seconds` 1–15, `generate_audio`). Image aspect ratios include `21:9` and `5:2`. Text-only image jobs POST to `/images/generations`; jobs with up to 3 references POST to `/images/edits` using a single `{ url, type: "image_url" }` object or an `images` array. Video image-to-video uses `{ image: { url } }`; reference-to-video accepts 2–7 `{ url }` objects on `reference_images` and caps `1080p` at `720p`. Responses return `response.data[].b64_json` for images and `response.b64_video` for videos. These models require `XAI_API_KEY` or `AI_MODEL_RELAY_XAI_API_KEY` and upload the prompt plus any reference images to xAI.
 
-`model-relay:antigravity-cli:auto` runs non-interactive Antigravity CLI chat. `model-relay:antigravity-cli:image` instructs the documented `generate_image` tool exactly once, with a request-unique image name; the bridge imports only a matching, newly-created PNG/JPEG/WebP artifact from the configured Antigravity CLI state root. Status-page image tests send `aspect_ratio` and Gemini-style `image_size` (`1K`/`2K`/`4K`) as generation guidance in the `generate_image` instruction. `model-relay:antigravity-cli:media` analyzes a locally materialized video attachment or bounded visual frames and returns a normal chat-style answer. Configure `AI_MODEL_RELAY_ANTIGRAVITY_BINARY`, use the local Settings panel's **Antigravity CLI executable** field, or install authenticated `agy` on PATH; saving a changed executable path automatically re-probes every CLI provider, and **Refresh detection** always forces a probe. Neither modifies Windows PATH nor restarts the bridge. The bridge never installs it, authenticates it, changes its settings, or falls back to another provider. Antigravity analysis is not local-only: supplied media is handled by the authenticated Antigravity CLI under its Google account and policy.
+`model-relay:antigravity-cli:auto` runs non-interactive Antigravity CLI chat. The full transcript is written to a temp file; `-p` only instructs `agy` to read `@prompt.txt`, so chat is not capped at 24 000 characters. Chat image data URLs are materialized in that workspace. `model-relay:antigravity-cli:image` instructs the documented `generate_image` tool exactly once, with a request-unique image name, and asks `agy` to print `IMAGE_PATH: <absolute path>`. The bridge imports that path when it is a non-empty PNG/JPEG/WebP no larger than 20 MB inside the Antigravity state root or the request workspace. If the marker is missing, it falls back to scanning the state root for a matching newly-created file. Status-page image tests send `aspect_ratio` and Gemini-style `image_size` (`1K`/`2K`/`4K`) as generation guidance in the `generate_image` instruction. `model-relay:antigravity-cli:media` analyzes a locally materialized video attachment or bounded visual frames and returns a normal chat-style answer. Configure `AI_MODEL_RELAY_ANTIGRAVITY_BINARY`, use the local Settings panel's **Antigravity CLI executable** field, or install authenticated `agy` on PATH; saving a changed executable path automatically re-probes every CLI provider, and **Refresh detection** always forces a probe. Neither modifies Windows PATH nor restarts the bridge. The bridge never installs it, authenticates it, changes its settings, or falls back to another provider. Antigravity analysis is not local-only: supplied media is handled by the authenticated Antigravity CLI under its Google account and policy.
 
 Codex CLI (`model-relay:codex:image`) and Grok CLI (`model-relay:grok-cli:image`) status-page size controls are generation guidance only. Codex embeds requested pixel sizes in the `image_gen` prompt text; Grok passes `aspect_ratio` as the native `image_gen` tool argument and keeps 1K/2K asks inside the tool prompt. Completed image jobs in `/v1/status` and on the Live tab may include measured artifact `width` and `height` next to `size_bytes`. Only xAI Imagine HTTP sends image `resolution` directly to the provider API.
 
@@ -530,6 +570,8 @@ Request:
   }
 }
 ```
+
+`max_tokens` is optional. Omit it, or send a leftover sample below 512, to use the chat default (8192 unless Settings overrides it). Codex puts the resolved value in the prompt as a response-length hint and, when `codex exec --help` lists `--sandbox`, runs chat with `--sandbox read-only` plus `--ephemeral`. Image jobs do not force `read-only`. Data-URL image parts are passed with `--image`.
 
 Response:
 
@@ -614,7 +656,7 @@ Response:
 }
 ```
 
-The bridge returns exactly one detected generated image. If Codex completes without creating a new image under `CODEX_HOME/generated_images`, the bridge returns `success: false`.
+The bridge returns exactly one detected generated image. Detection snapshots `CODEX_HOME/generated_images`, prefers a validated path named by a structured JSON event, and otherwise takes the newest file created after that boundary. If Codex completes without a new image, the bridge returns `success: false`. Image jobs that use this shared directory remain serialized to one running image job at a time.
 
 When the installed Codex CLI supports `codex exec --json`, image and chat jobs use the structured event stream for cleaner progress and error details. If an older CLI rejects `--json`, the bridge reruns the job without structured events and preserves the legacy result shape.
 
@@ -752,12 +794,15 @@ Request:
       "data:image/png;base64,..."
     ],
     "media_data_url": "data:video/mp4;base64,...",
-    "transcript": "Optional supplied audio transcript."
+    "transcript": "Optional supplied audio transcript.",
+    "max_tokens": 4096
   }
 }
 ```
 
-For Codex `media_url` or `media_data_url` analysis, `ffmpeg` must be available on PATH. This route analyzes provided visual frames and optional transcript text; use `POST /v1/transcribe` first when audio content needs local transcription. Antigravity video analysis does not add an audio-transcription or audio-analysis operation.
+`max_tokens` is optional and follows the media.analyze default (4096 unless Settings overrides it). Optional `transcript` text is sliced to 32 000 characters. For Codex `media_url` or `media_data_url` analysis, `ffmpeg` must be available on PATH. This route analyzes provided visual frames and optional transcript text; use `POST /v1/transcribe` first when audio content needs local transcription. Antigravity video analysis does not add an audio-transcription or audio-analysis operation.
+
+When Codex `exec --help` lists `--output-schema`, media analysis requests structured fields (`summary`, `visible_text`, `issues`, `confidence`, `notes`). Gateway clients that only read `choices[0].message.content` still receive a human-readable string. The parsed object is additive under `response.provider_details.media_analysis.structured`. If the CLI rejects `--output-schema`, the job retries as free text.
 
 ## Error Shape
 
