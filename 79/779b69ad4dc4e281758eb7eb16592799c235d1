@@ -1,0 +1,100 @@
+README.md
+  s_31a4e43cb0ede2::t_cf52eccfe7c110 92,95
+  s_31a4e43cb0ede2::t_7efb5be8a5c55a 26-27
+examples/http-app/README.md
+  s_31a4e43cb0ede2::t_5ccb08a977b60e 38-39
+docs/local-bridge-api.md
+  s_31a4e43cb0ede2::t_4a3c4e27b5e941 257-267,275-276,279,287-289,295
+  s_31a4e43cb0ede2::t_d6bc23ca0394ab 574-575
+  s_31a4e43cb0ede2::t_46fe487d390aa0 30-50
+  s_31a4e43cb0ede2::t_7ccbc2bb223fd3 540
+  s_31a4e43cb0ede2::t_60ba0fa5595f42 54
+  s_31a4e43cb0ede2::t_90ce5b5c2d8ecb 797-798,803-805
+  s_31a4e43cb0ede2::t_666b5b7a461b37 659
+  s_31a4e43cb0ede2::t_26c6490d00751c 532-536
+  s_31a4e43cb0ede2::t_884c1ed7874548 528
+  s_31a4e43cb0ede2::t_1e43f40945f23a 513
+docs/plans/02-codex-and-media-tokens.md
+  s_741c25ec35f0e5::t_217087a462996b 1-48
+docs/README.md
+  s_31a4e43cb0ede2::t_b07319d8ac2b57 6,8
+  s_31a4e43cb0ede2::t_4a6f46c3262852 9
+docs/plans/10-settings-token-overrides.md
+  s_6a5a87f3f40165::t_752a00f45612f6 1-42
+docs/gateway-integration.md
+  s_31a4e43cb0ede2::t_069f543ca8a35b 20-21,23
+  s_31a4e43cb0ede2::t_2fd7bf73b7d5e7 91-92
+  s_31a4e43cb0ede2::t_0013db756e24b0 194,196
+docs/architecture.md
+  s_31a4e43cb0ede2::t_a8ef6fd51de2a4 63-65
+  s_31a4e43cb0ede2::t_550db93883f96e 37-39
+  s_31a4e43cb0ede2::t_3214c4caffdbb8 71
+docs/plans/08-cli-models-and-vision.md
+  s_283fd6cff5aacb::t_eed5bf4241dec2 1-38
+docs/plans/05-chat-isolation-and-imagine.md
+  s_741c25ec35f0e5::t_c4854f59e01469 1-76
+docs/plans/09-codex-image-output.md
+  s_283fd6cff5aacb::t_dafdcf714fd465 1-41
+docs/plans/07-antigravity-image-path.md
+  s_31a4e43cb0ede2::t_e08464a23c6332 1-43
+docs/plans/01-token-policy.md
+  s_741c25ec35f0e5::t_8858d9ea74eb03 1-57
+docs/plans/03-api-chat-passthrough.md
+  s_31a4e43cb0ede2::t_26e020240c698f 1-43
+docs/plans/04-cli-prompt-files.md
+  s_31a4e43cb0ede2::t_cdf5b674cc8227 1-44
+docs/plans/06-codex-sandbox-and-schema.md
+  s_741c25ec35f0e5::t_ff7e9262f02015 1-42
+docs/operations.md
+  s_31a4e43cb0ede2::t_52b2ba21f1fe81 18-21,23,25-27
+docs/plans/README.md
+  s_66a384a8a418ee::t_d5ca4bb471f65b 1-87
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "79779b69ad4dc4e281758eb7eb16592799c235d1",
+  "prompts": {},
+  "sessions": {
+    "s_283fd6cff5aacb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fe0c8-2012-7ae3-a5b8-7804867046e5",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_31a4e43cb0ede2": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "e80e8220-6d59-444e-92bf-e1d714bf3feb",
+        "model": "grok-4.6"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_66a384a8a418ee": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0583f-8e85-7db1-886d-02293ade9cd8",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_6a5a87f3f40165": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a042de-0d59-71e2-9a67-e8ecda5a42f4",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_741c25ec35f0e5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0577d-b937-7002-a0d5-e4fc4d5cab74",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
