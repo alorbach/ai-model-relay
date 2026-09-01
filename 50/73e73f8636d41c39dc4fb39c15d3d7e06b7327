@@ -1,0 +1,44 @@
+docs/plans/README.md
+  s_9a93c3c25e9372::t_c25ed168c201d2 29-31
+  s_9a93c3c25e9372::t_18aafa145e76da 97
+  s_9a93c3c25e9372::t_a9c31e6a34b540 68-73
+docs/plans/10-settings-token-overrides.md
+  s_9a93c3c25e9372::t_d569263b92de78 5
+docs/plans/11-cursor-agent-images.md
+  s_66a384a8a418ee::t_a6c6f7afdd2e25 167
+  s_66a384a8a418ee::t_5f388814bbdb81 3-4
+  s_66a384a8a418ee::t_eff0c060974d8a 24-27,29,31
+  s_66a384a8a418ee::t_b137afec1d03f5 80,91,94-95
+  s_66a384a8a418ee::t_bed01601f3840f 217,222-223,225,245
+  s_66a384a8a418ee::t_fca465932e59d7 132,135,140,142
+  s_66a384a8a418ee::t_1b9a2c22cfefe4 131,145
+  s_66a384a8a418ee::t_73ce6c6bf4c397 59,61,69,71
+  s_66a384a8a418ee::t_57f8cc56c9167a 209-210
+  s_66a384a8a418ee::t_d345cec5b1ad36 17,76,81,98,100,103,105,107,109-110,122,129,133-134,208,211,218
+  s_66a384a8a418ee::t_683411489460bd 146-151
+  s_9a93c3c25e9372::t_b51e714fa99342 1-2,5-16,18-23,28,30,32-58,60,62-68,70,72-75,77-79,82-90,92-93,96-97,99,101-102,104,106,108,111-121,123-128,130,136-139,141,143-144,152-166,168-207,212-216,219-221,224,226-244
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "5073e73f8636d41c39dc4fb39c15d3d7e06b7327",
+  "prompts": {},
+  "sessions": {
+    "s_66a384a8a418ee": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0583f-8e85-7db1-886d-02293ade9cd8",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": null
+    },
+    "s_9a93c3c25e9372": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "d1005fa3-2d5a-45bb-816e-350f2750448a",
+        "model": "composer-2.5"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
