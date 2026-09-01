@@ -2,7 +2,7 @@
 
 **Wave:** 4 (optional)  
 **Depends on:** Wave 1 complete  
-**Next:** none (backlog after this file)
+**Next:** [11-cursor-agent-images.md](11-cursor-agent-images.md)
 
 ## Goal
 

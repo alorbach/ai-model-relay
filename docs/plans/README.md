@@ -26,6 +26,9 @@ Wave 3  Stronger existing tools
 
 Wave 4  Optional product polish
         09 → 10
+
+Wave 5  New backends / backlog
+        11
 ```
 
 Later waves assume earlier waves are merged. Plans inside a wave are sequential unless a plan says otherwise.
@@ -62,6 +65,12 @@ Later waves assume earlier waves are merged. Plans inside a wave are sequential 
 | [09](09-codex-image-output.md) | Codex image output | Less fragile generated-image detection |
 | [10](10-settings-token-overrides.md) | Settings overrides | Optional per-job `max_tokens` on the status page |
 
+### Wave 5 — Backlog
+
+| Plan | Title | Goal |
+|------|-------|------|
+| [11](11-cursor-agent-images.md) | Cursor Agent images | Gateway image jobs via Cursor `GenerateImage` |
+
 ## Constraints that apply to every plan
 
 - Do not rewrite `%USERPROFILE%\.grok\config.toml` or Codex `config.toml`.
@@ -85,3 +94,4 @@ Mark a plan done in this table when its **Done when** section is complete:
 - [x] 08 CLI models + vision
 - [x] 09 Codex image output
 - [x] 10 Settings token overrides
+- [ ] 11 Cursor Agent images
