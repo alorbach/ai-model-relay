@@ -1,0 +1,200 @@
+docs/plans/11-cursor-agent-images.md
+  s_66a384a8a418ee::t_7367772d358d2c 146
+  s_66a384a8a418ee::t_882dc45893f68a 170
+  s_66a384a8a418ee::t_f2e2254f65fcad 243
+  s_66a384a8a418ee::t_93552ee69216d8 112
+  s_66a384a8a418ee::t_056d97c2f38e3f 176-177
+  s_66a384a8a418ee::t_9a8aaf38d422a2 281-282
+  s_515d24d708742b::t_c1eb75a9d57d0f 175
+  s_66a384a8a418ee::t_adb56bb2ec0690 109
+  s_66a384a8a418ee::t_4e6bd0f2707f0c 371
+  s_66a384a8a418ee::t_68d200ae51d1e5 241
+  s_66a384a8a418ee::t_44eb784444c41a 229
+  s_66a384a8a418ee::t_ce42879abe77a2 322
+  s_66a384a8a418ee::t_0b73f62e005306 89
+  s_66a384a8a418ee::t_b113449b9368ce 227-228
+  s_66a384a8a418ee::t_172a245e7ab776 340
+  s_66a384a8a418ee::t_e0ee473a3dbb12 359
+  s_66a384a8a418ee::t_d986aa6bdbab20 93-94,97-98
+  s_66a384a8a418ee::t_9af1f22eb3dce1 220,223-224,231
+  s_66a384a8a418ee::t_d14b5ee7af67d9 382
+  s_66a384a8a418ee::t_702cb68c52bb29 235-236
+  s_283fd6cff5aacb::t_c634f3f4eb1d61 292
+  s_66a384a8a418ee::t_e377b13b3d4805 190
+  s_66a384a8a418ee::t_9b79a2732aecc8 84
+  s_66a384a8a418ee::t_7be582fb536e8e 256
+  s_66a384a8a418ee::t_04731f9f0d008b 344-345
+  s_66a384a8a418ee::t_688b8d3989e63e 48,198
+  s_66a384a8a418ee::t_b137afec1d03f5 121,142
+  s_66a384a8a418ee::t_6bbb3c9e154296 200
+  s_66a384a8a418ee::t_e215a6561c7179 77
+  s_66a384a8a418ee::t_805de58bc8e728 192-193
+  s_66a384a8a418ee::t_1d91604b3a7e7c 378
+  s_66a384a8a418ee::t_4dc9150231d652 100,117
+  s_66a384a8a418ee::t_d67a45c75adfc9 289
+  s_66a384a8a418ee::t_808f62ca464e99 372
+  s_66a384a8a418ee::t_6390e2dc01318e 381
+  s_66a384a8a418ee::t_a08fad1a267213 400
+  s_66a384a8a418ee::t_bd633f48dc3ee7 314
+  s_66a384a8a418ee::t_bed01601f3840f 362
+  s_66a384a8a418ee::t_7d7ec439c2072f 63-71,73
+  s_66a384a8a418ee::t_f74268515eb2df 116
+  s_66a384a8a418ee::t_bb13e093d56e43 293-294
+  s_66a384a8a418ee::t_ae2a65f810dbe0 373
+  s_66a384a8a418ee::t_f1bb172b5dcb99 187,215,299
+  s_66a384a8a418ee::t_36328fd183d77a 234,240,269
+  s_66a384a8a418ee::t_b938c72a3b3b99 113
+  s_66a384a8a418ee::t_8ab12fa04b8487 275
+  s_66a384a8a418ee::t_f150a9048e07d4 276
+  s_66a384a8a418ee::t_d57c2198d35c52 81,87-88
+  s_66a384a8a418ee::t_72d605abdedc0c 152
+  s_66a384a8a418ee::t_0feac07221c40d 334-335,348,352-353
+  s_66a384a8a418ee::t_2d59bef3eda50b 103,110
+  s_66a384a8a418ee::t_79cea5a99dfc32 245-247
+  s_66a384a8a418ee::t_d48c0e7ddca5f0 207
+  s_66a384a8a418ee::t_ce6962f1c4686a 108
+  s_66a384a8a418ee::t_2367f64c2053cc 233
+  s_66a384a8a418ee::t_e0ccfa3f066612 183
+  s_283fd6cff5aacb::t_894d73848f2a67 210
+  s_66a384a8a418ee::t_7f6b18cb944a15 132-134,137-138,178
+  s_66a384a8a418ee::t_f7b3054dd28199 273
+  s_66a384a8a418ee::t_5f388814bbdb81 3-4
+  s_66a384a8a418ee::t_bc7da393c7616e 189
+  s_66a384a8a418ee::t_e085032d549896 250
+  s_66a384a8a418ee::t_624ae6af2c2869 201
+  s_66a384a8a418ee::t_54ab2bfaca6569 156
+  s_66a384a8a418ee::t_95b444e8dc82ee 239
+  s_66a384a8a418ee::t_eff0c060974d8a 24-27,29
+  s_66a384a8a418ee::t_471b97df513d0b 285
+  s_66a384a8a418ee::t_6bd548f924a094 377
+  s_66a384a8a418ee::t_3a8af99d5df2d7 230
+  s_66a384a8a418ee::t_186d9b02f91338 397-399
+  s_66a384a8a418ee::t_e968dde4c34f71 288,297
+  s_66a384a8a418ee::t_f12ab3a965a9b7 270-271
+  s_66a384a8a418ee::t_50e79840401534 298
+  s_66a384a8a418ee::t_17c10976253db7 388
+  s_66a384a8a418ee::t_400fca5e8080f8 141,145
+  s_66a384a8a418ee::t_b377ea4bd584f8 225
+  s_66a384a8a418ee::t_dc570190b400cd 79-80,85-86,105
+  s_66a384a8a418ee::t_ee19a66b94850b 159
+  s_66a384a8a418ee::t_1b9a2c22cfefe4 222
+  s_66a384a8a418ee::t_090a88a891737f 331
+  s_66a384a8a418ee::t_d9c8fe39de1f9d 147-148
+  s_66a384a8a418ee::t_19509759974edd 341,343,354
+  s_66a384a8a418ee::t_fda90a88873ce0 135
+  s_66a384a8a418ee::t_9994004afb320f 380
+  s_66a384a8a418ee::t_51a545238cc059 151,284,291
+  s_66a384a8a418ee::t_89dc76ff85c9b9 107
+  s_66a384a8a418ee::t_049e4b2582acde 82-83,90,143,163-164,166
+  s_66a384a8a418ee::t_3a6b8dbbe39ecd 31
+  s_66a384a8a418ee::t_0e2804cc8b6caf 102
+  s_66a384a8a418ee::t_b4a059954f074c 104
+  s_66a384a8a418ee::t_b21a9aeb8a0411 154,374,379
+  s_c8c3474d28e6a2::t_d035fb44bb4095 232
+  s_66a384a8a418ee::t_6d11869df93825 300
+  s_66a384a8a418ee::t_d9230a9be32d3d 376
+  s_66a384a8a418ee::t_fce85c7db1ba01 144
+  s_66a384a8a418ee::t_2eb175f74baa29 351
+  s_66a384a8a418ee::t_7e4f425e50fc1e 139-140
+  s_66a384a8a418ee::t_daa11236bd3537 346,360,364,368-369
+  s_66a384a8a418ee::t_af8e96aaad6ded 169
+  s_66a384a8a418ee::t_85752ad8fa1539 267
+  s_66a384a8a418ee::t_a804b22d837457 99
+  s_66a384a8a418ee::t_38c867a11a889d 153
+  s_66a384a8a418ee::t_fe94a1ce5e8d26 115,123
+  s_66a384a8a418ee::t_b8a4ebc076afa2 172
+  s_66a384a8a418ee::t_01c2e2f25db8b0 257-258,263
+  s_66a384a8a418ee::t_a4fe4d881ac848 186
+  s_66a384a8a418ee::t_b0f84aa437ed3d 106
+  s_66a384a8a418ee::t_87ec24f7754541 184-185
+  s_66a384a8a418ee::t_064bb624505e4a 211-212,216-218
+  s_66a384a8a418ee::t_7f7516305609f4 261
+  s_66a384a8a418ee::t_dc5e6495d23cbb 347
+  s_66a384a8a418ee::t_73ce6c6bf4c397 59,61
+  s_66a384a8a418ee::t_7872f31daec551 168
+  s_66a384a8a418ee::t_fca465932e59d7 251,253
+  s_66a384a8a418ee::t_5463d7187432f1 213
+  s_66a384a8a418ee::t_5963530e824d41 101,118
+  s_66a384a8a418ee::t_7e18ba7e5d94c8 173
+  s_66a384a8a418ee::t_962dbf764f21db 342
+  s_66a384a8a418ee::t_d345cec5b1ad36 17,78,122,181,226,339,363
+  s_66a384a8a418ee::t_ed58409b490de3 349
+  s_9a93c3c25e9372::t_b51e714fa99342 1-2,5-16,18-23,28,30,32-47,49-58,60,62,72,74-76,114,119-120,124-131,136,157-158,160,165,167,179,194-197,202-205,208-209,219,221,248-249,252,254-255,265-266,268,272,274,277-280,283,286-287,301-313,315-321,323-330,337-338,356-358,361,365-367,370,383-387,389-396
+  s_66a384a8a418ee::t_4b309ae6ad1539 171,180
+  s_66a384a8a418ee::t_1e04d5490b7914 161-162
+  s_66a384a8a418ee::t_5e23a658f2111b 242
+  s_66a384a8a418ee::t_017fd71facfd71 375
+  s_66a384a8a418ee::t_208633d0aa03d2 91-92,95-96
+  s_66a384a8a418ee::t_147d88b949bc51 350
+  s_66a384a8a418ee::t_fa08266bacd898 214
+  s_66a384a8a418ee::t_4d84c01576e656 149-150
+  s_66a384a8a418ee::t_29aa8d6dedaeca 295-296
+  s_66a384a8a418ee::t_e3048ad2af5542 199
+  s_66a384a8a418ee::t_0aad01e7ed00f4 355
+  s_66a384a8a418ee::t_658578dcf84010 111
+  s_66a384a8a418ee::t_fb54fc0a3a3125 188,191
+  s_66a384a8a418ee::t_93302fb6e1a992 237-238
+  s_66a384a8a418ee::t_0f16a8b6381db3 174
+  s_66a384a8a418ee::t_4750288cc8acf2 332-333
+  s_66a384a8a418ee::t_9c94cdf59299e6 206
+  s_66a384a8a418ee::t_683411489460bd 259-260,262,264
+  s_66a384a8a418ee::t_8dcb523f3b35cf 155
+  s_66a384a8a418ee::t_8f3bd8faaa8643 290
+  s_66a384a8a418ee::t_cd75964a86f8c1 336
+  s_66a384a8a418ee::t_29f3f0c666ac10 182
+  s_66a384a8a418ee::t_0cc3b7975739bb 244
+docs/plans/README.md
+  s_9a93c3c25e9372::t_18aafa145e76da 97
+  s_9a93c3c25e9372::t_c25ed168c201d2 29-31
+  s_9a93c3c25e9372::t_a9c31e6a34b540 68-73
+docs/plans/10-settings-token-overrides.md
+  s_9a93c3c25e9372::t_d569263b92de78 5
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "6814c6e3c8ec3b47777847eba56f6c32cadaa131",
+  "prompts": {},
+  "sessions": {
+    "s_283fd6cff5aacb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fe0c8-2012-7ae3-a5b8-7804867046e5",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_515d24d708742b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a05cb6-d65b-7970-98c0-f4d357be4807",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_66a384a8a418ee": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0583f-8e85-7db1-886d-02293ade9cd8",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": null
+    },
+    "s_9a93c3c25e9372": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "d1005fa3-2d5a-45bb-816e-350f2750448a",
+        "model": "composer-2.5"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_c8c3474d28e6a2": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a05d72-55f6-7960-9581-85f48ff2ce26",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
