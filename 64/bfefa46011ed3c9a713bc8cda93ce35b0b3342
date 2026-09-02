@@ -1,0 +1,37 @@
+test/backend-registry.test.js
+  s_0c9c051d405f89::t_2d49bd2617cf3f 21,142-144,153-155,157-165
+  s_0c9c051d405f89::t_737671ad02d62c 19,156
+  s_0c9c051d405f89::t_2176a32f7a3bfa 20,152
+src/server.js
+  s_0c9c051d405f89::t_046c9be9759d84 17,358-359,380,842,847,897
+  s_0c9c051d405f89::t_5e599a38db499a 360
+docs/local-bridge-api.md
+  s_0c9c051d405f89::t_10d51e5e32e5bd 517-522
+test/relay-routes.test.js
+  s_0c9c051d405f89::t_a877f9fed17b2d 124
+  s_0c9c051d405f89::t_247cb16e86a0ba 208-211
+src/backend-registry.js
+  s_0c9c051d405f89::t_f8fe36feb2dc6c 1930-1934,1959
+  s_0c9c051d405f89::t_02114eae97f446 1965
+  s_0c9c051d405f89::t_875dd854bbb8ff 1967,1985
+  s_0c9c051d405f89::t_0b4e95c9dfa631 517-588
+  s_0c9c051d405f89::t_37b302a1f33149 465-516
+  s_0c9c051d405f89::t_799aeb35e63810 1966
+  s_0c9c051d405f89::t_f456a5699f839a 643,900,1189,1464
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "64bfefa46011ed3c9a713bc8cda93ce35b0b3342",
+  "prompts": {},
+  "sessions": {
+    "s_0c9c051d405f89": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a05c11-e99e-7112-a1dd-f3f3fe3e7271",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
