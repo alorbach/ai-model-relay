@@ -1,0 +1,32 @@
+src/backend-registry.js
+  s_5d4bdb24dd7eb5::t_5b659bc8d9e129 15,953,1007,1023,1025,1128,1131,1135
+test/backend-registry.test.js
+  s_5d4bdb24dd7eb5::t_295869193f4e62 822-866
+src/antigravity-cli.js
+  s_5d4bdb24dd7eb5::t_5b659bc8d9e129 1-19,22-68,70-156
+  s_515d24d708742b::t_82763d810a5020 20-21,69
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "7178c3020698b77e1809daf8dcfc2196dd31fd5f",
+  "prompts": {},
+  "sessions": {
+    "s_515d24d708742b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a05cb6-d65b-7970-98c0-f4d357be4807",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_5d4bdb24dd7eb5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a060e5-2efc-70a3-91b3-3c9c5063787c",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
