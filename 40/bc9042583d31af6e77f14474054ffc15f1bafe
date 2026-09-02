@@ -1,0 +1,78 @@
+test/status-page.test.js
+  s_1f38774d9ada8c::t_e9810d05032b1e 119-129
+src/status-page.js
+  s_1f38774d9ada8c::t_7cb7387257a9e3 2135
+  s_1f38774d9ada8c::t_6632517fe8c2d5 1403,1405
+  s_1f38774d9ada8c::t_6536394597be50 1422,1426-1427
+  s_1f38774d9ada8c::t_0a4aa62a1b44b4 587-593,596,598-599,603-604,607,609,616-618,620,624-626,629,642-682,685,687-688,693,695,719-722,724-727,732-793,797-798,800,804-809,815-816,818-834,837-839,844-855,859-860,862-870,874
+  s_5d4bdb24dd7eb5::t_383a271d5e70c2 1878-1880,1887-1888,1896-1900,1904,1919
+  s_1f38774d9ada8c::t_27f88378cfd227 1990-1999,2003,2006-2008,2012-2058,2060-2061,2063-2068,2092-2094,2096-2099,2112-2113,2117-2118,2122-2126,2129-2134,2136-2143,2160-2161,2182-2184,2194,2199-2201,2208,2225-2229,2232-2238
+  s_1f38774d9ada8c::t_f982e98dd8a9df 2059
+  s_1f38774d9ada8c::t_7d3c41e2f2362f 3430,3433-3434
+  s_1f38774d9ada8c::t_22744dc54fca3b 2144
+  s_1f38774d9ada8c::t_48bc87edf86779 857,871-873
+  s_1f38774d9ada8c::t_b769ad9351ba12 1205-1213,1219,1221,1223-1230
+  s_1f38774d9ada8c::t_c9e1e74f857c0d 1920,1924
+  s_1f38774d9ada8c::t_e7fe0e97010ed8 136-137
+  s_1f38774d9ada8c::t_0df2289fd711bc 3402,3406-3407
+  s_1f38774d9ada8c::t_c5118dc83cccd0 204-207
+  s_1f38774d9ada8c::t_04732efca011d6 875-878
+  s_1f38774d9ada8c::t_296026f8a1fdd1 1881-1882
+  s_1f38774d9ada8c::t_b67ae3291b4ed5 1123,1126-1127
+test/relay-routes.test.js
+  s_5d4bdb24dd7eb5::t_d5c42fa88333c6 5,88-90,433-434
+  s_5d4bdb24dd7eb5::t_3c8a9a9abd1161 429
+test/server-jobs.test.js
+  s_1f38774d9ada8c::t_96e76437c855ae 266
+test/job-manager.test.js
+  s_5d4bdb24dd7eb5::t_a79ee8c4419679 210-213
+  s_1f38774d9ada8c::t_32e577be0fb024 261-319
+  s_3d05802ef9ac1b::t_7c25ef54c63f4d 208-209
+src/job-manager.js
+  s_5d4bdb24dd7eb5::t_84d133c0716e9b 51
+  s_1f38774d9ada8c::t_95b85718e275a5 405,414,418-429
+  s_1f38774d9ada8c::t_465487f43bdbc6 409
+  s_1f38774d9ada8c::t_bc1095176e9293 191-192
+  s_1f38774d9ada8c::t_cc66783f1bfa50 518-519
+  s_1f38774d9ada8c::t_96549457ebe3e7 11-18
+  s_1f38774d9ada8c::t_4ad22b91670e47 498,503,505-506
+src/server.js
+  s_3d05802ef9ac1b::t_b5a4b5330362bf 608-609
+  s_5d4bdb24dd7eb5::t_a79ee8c4419679 602-605
+  s_5d4bdb24dd7eb5::t_bf0515dae60857 843,1057,1076,1095,1114,1133,1152
+  s_5d4bdb24dd7eb5::t_ad5d0f9edd5b25 1199
+  s_5d4bdb24dd7eb5::t_769dea6b33e7e7 1286
+  s_5d4bdb24dd7eb5::t_84d133c0716e9b 409-410,423-424,438-445,587-601,606-607
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "40bc9042583d31af6e77f14474054ffc15f1bafe",
+  "prompts": {},
+  "sessions": {
+    "s_1f38774d9ada8c": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "401e17c9-5fec-4247-9bb4-04f063f9f7e8",
+        "model": "grok-4.6"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_3d05802ef9ac1b": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "6913c7a8-c79a-4a4f-913e-fc43993249d8",
+        "model": "grok-4.6"
+      },
+      "human_author": null
+    },
+    "s_5d4bdb24dd7eb5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a060e5-2efc-70a3-91b3-3c9c5063787c",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": null
+    }
+  }
+}
