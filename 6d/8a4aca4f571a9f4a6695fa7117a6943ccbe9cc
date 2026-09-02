@@ -1,0 +1,51 @@
+test/relay-routes.test.js
+  s_5d4bdb24dd7eb5::t_4dbae04a27f220 353,355-356
+test/security.test.js
+  s_5d4bdb24dd7eb5::t_4dbae04a27f220 4-8,32-47,52-65
+  s_5d4bdb24dd7eb5::t_3ec503366dcd91 48-51
+  s_5d4bdb24dd7eb5::t_caa8bc1e507f2c 66
+src/asr.js
+  s_5d4bdb24dd7eb5::t_b12ea3d088040b 102
+  s_5d4bdb24dd7eb5::t_628b468ad9b0da 106
+src/antigravity-cli.js
+  s_5d4bdb24dd7eb5::t_5b659bc8d9e129 1-19,22-68,70-156
+  s_515d24d708742b::t_82763d810a5020 20-21,69
+test/backend-registry.test.js
+  s_5d4bdb24dd7eb5::t_295869193f4e62 822-866
+src/security.js
+  s_5d4bdb24dd7eb5::t_c670052daffe7d 10-13,43,45,47,49,53-68,70-112,115,117-132,134-171
+src/local-upscale.js
+  s_5d4bdb24dd7eb5::t_b12ea3d088040b 111
+  s_5d4bdb24dd7eb5::t_628b468ad9b0da 115
+src/music-analysis.js
+  s_5d4bdb24dd7eb5::t_b12ea3d088040b 34
+  s_5d4bdb24dd7eb5::t_628b468ad9b0da 38
+src/backend-registry.js
+  s_5d4bdb24dd7eb5::t_5b659bc8d9e129 15,953,1007,1023,1025,1128,1131,1135
+src/server.js
+  s_5d4bdb24dd7eb5::t_9ea9f2484f8864 994
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "6d8a4aca4f571a9f4a6695fa7117a6943ccbe9cc",
+  "prompts": {},
+  "sessions": {
+    "s_515d24d708742b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a05cb6-d65b-7970-98c0-f4d357be4807",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_5d4bdb24dd7eb5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a060e5-2efc-70a3-91b3-3c9c5063787c",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": null
+    }
+  }
+}
