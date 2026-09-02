@@ -29,6 +29,8 @@ assert.strictEqual(resolveMaxTokens('chat', 256, { token_defaults: { chat: 16384
 assert.strictEqual(resolveMaxTokens('media.analyze', undefined, { 'media.analyze': 32768 }), 32768);
 assert.strictEqual(resolveMaxTokens('chat', 8192, { chat: 16384 }), 8192);
 assert.strictEqual(resolveMaxTokens('chat', 128000, { chat: 16384 }), 128000);
+assert.strictEqual(resolveMaxTokens('chat', 128001, {}), 128000);
+assert.strictEqual(resolveMaxTokens('chat', 1e15, {}), 128000);
 assert.strictEqual(resolveMaxTokens('chat', undefined, { chat: 511 }), 8192);
 
 console.log('token policy tests passed');

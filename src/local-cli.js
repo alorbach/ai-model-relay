@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const { spawn, spawnSync } = require('child_process');
 const { createBoundedCollector } = require('./diagnostics');
+const { killProcessTree } = require('./cuda-torch-venv');
 
 const TIMEOUT_MS = 15000;
 const MAX_CLI_MODELS = 50;
@@ -17,7 +18,7 @@ function cleanText(value) {
 }
 
 function safeDiagnostic(value) {
-	const text = cleanText(value).replace(/(bearer|token|api[_ -]?key|authorization)\s*[:=]\s*\S+/ig, '$1: <redacted>');
+	const text = cleanText(value).replace(/\b(authorization|bearer|token|api[_ -]?key)(?:\s*[:=]\s*|\s+)(?:bearer\s+)?[^\s,;]+/ig, '$1: <redacted>');
 	if (/not logged in|not authenticated|no auth credentials|login required/i.test(text)) return 'Not authenticated.';
 	if (/access is denied|permission denied/i.test(text)) return 'Authentication state could not be read by this process.';
 	if (/timed out/i.test(text)) return 'CLI probe timed out.';
@@ -188,12 +189,12 @@ function runAsync(command, args, options = {}) {
 			resolve({ ...result, stdout: out.value(), stderr: err.value() });
 		};
 		try { const invocation = commandAndArgs(command, args); child = (options.spawn || spawn)(invocation.command, invocation.args, { shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }); } catch (error) { finish({ error, status: null }); return; }
-		timer = setTimeout(() => { timedOut = true; child.kill(); }, Number(options.timeoutMs || TIMEOUT_MS));
+		timer = setTimeout(() => { timedOut = true; killProcessTree(child); }, Number(options.timeoutMs || TIMEOUT_MS));
 		const capture = (collector, chunk) => {
 			collector.append(chunk);
 			if (!oversized && collector.stats().total_chars > maxOutputChars) {
 				oversized = true;
-				child.kill();
+				killProcessTree(child);
 			}
 		};
 		child.stdout.on('data', (chunk) => capture(out, chunk)); child.stderr.on('data', (chunk) => capture(err, chunk));
@@ -240,12 +241,15 @@ function runTextCommand(command, args, input, session = {}, options = {}) {
 		try { const invocation = commandAndArgs(command, args); child = (options.spawn || spawn)(invocation.command, invocation.args, { shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], ...(options.cwd ? { cwd: options.cwd } : {}) }); } catch (error) { resolve({ success: false, category: 'configuration', code: 'cli_spawn_failed', message: safeDiagnostic(error.message) }); return; }
 		const timeoutMs = Number(options.timeoutMs || 600000);
 		const timeoutSeconds = Math.ceil(timeoutMs / 1000);
-		const timer = setTimeout(() => { if (!settled) { settled = true; child.kill(); resolve({ success: false, category: 'timeout', code: 'cli_timeout', message: `CLI request timed out after ${timeoutSeconds} second${timeoutSeconds === 1 ? '' : 's'}.`, details: { timeout_ms: timeoutMs, stdout: out.value(), stderr: err.value() } }); } }, timeoutMs);
+		const timer = setTimeout(() => { if (!settled) { settled = true; killProcessTree(child); resolve({ success: false, category: 'timeout', code: 'cli_timeout', message: `CLI request timed out after ${timeoutSeconds} second${timeoutSeconds === 1 ? '' : 's'}.`, details: { timeout_ms: timeoutMs, stdout: out.value(), stderr: err.value() } }); } }, timeoutMs);
 		child.stdout.on('data', (chunk) => { out.append(chunk); session.appendSessionOutput && session.appendSessionOutput('stdout', String(chunk)); });
 		child.stderr.on('data', (chunk) => { err.append(chunk); session.appendSessionOutput && session.appendSessionOutput('stderr', String(chunk)); });
 		child.on('error', (error) => { if (!settled) { settled = true; clearTimeout(timer); resolve({ success: false, category: 'configuration', code: 'cli_spawn_failed', message: safeDiagnostic(error.message) }); } });
 		child.on('close', (status) => { if (settled) return; settled = true; clearTimeout(timer); if (status !== 0) { resolve({ success: false, category: 'cli_process', code: 'cli_request_failed', message: safeDiagnostic(err.value() || out.value()), details: { status } }); return; } resolve({ success: true, text: out.value().trim(), stderr: err.value().trim() }); });
-		child.stdin.end(String(input || ''));
+		if (child.stdin) {
+			if (typeof child.stdin.once === 'function') child.stdin.once('error', () => {});
+			child.stdin.end(String(input || ''));
+		}
 	});
 }
 

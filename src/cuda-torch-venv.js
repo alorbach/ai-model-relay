@@ -77,10 +77,10 @@ function probeTorchStatus(python) {
 }
 
 function killProcessTree(child) {
-	if (!child || !child.pid) return;
+	if (!child) return;
 	try {
-		if (process.platform === 'win32') spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { shell: false, windowsHide: true, stdio: 'ignore' });
-		else child.kill('SIGKILL');
+		if (process.platform === 'win32' && child.pid) spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { shell: false, windowsHide: true, stdio: 'ignore' });
+		else if (typeof child.kill === 'function') child.kill('SIGKILL');
 	} catch (error) {}
 }
 

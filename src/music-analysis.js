@@ -5,6 +5,7 @@ const os = require('os');
 const path = require('path');
 const { spawn, spawnSync } = require('child_process');
 const { createBoundedCollector } = require('./diagnostics');
+const { killProcessTree } = require('./cuda-torch-venv');
 const security = require('./security');
 
 const MODEL_ID = 'model-relay:music-analysis:core';
@@ -216,7 +217,7 @@ function runAsync(command, args, options = {}) {
 			resolve({ status: null, signal: null, stdout: '', stderr: '', error: spawnError });
 			return;
 		}
-		const timer = setTimeout(() => { timedOut = true; child.kill(); }, Math.max(1, Number(options.timeout || DEFAULT_TIMEOUT_MS) || DEFAULT_TIMEOUT_MS));
+		const timer = setTimeout(() => { timedOut = true; killProcessTree(child); }, Math.max(1, Number(options.timeout || DEFAULT_TIMEOUT_MS) || DEFAULT_TIMEOUT_MS));
 		if (typeof timer.unref === 'function') timer.unref();
 		child.stdout.on('data', (chunk) => { const text = String(chunk || ''); stdout.append(text); emitOutput('stdout', text); });
 		child.stderr.on('data', (chunk) => { const text = String(chunk || ''); stderr.append(text); emitOutput('stderr', text); });
@@ -225,7 +226,10 @@ function runAsync(command, args, options = {}) {
 			clearTimeout(timer);
 			resolve({ status, signal, stdout: stdout.value(), stderr: stderr.value(), error: error || (timedOut ? new Error('Music analysis timed out.') : null) });
 		});
-		child.stdin.end(options.input || '');
+		if (child.stdin) {
+			if (typeof child.stdin.once === 'function') child.stdin.once('error', () => {});
+			child.stdin.end(options.input || '');
+		}
 	});
 }
 

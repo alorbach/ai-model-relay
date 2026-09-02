@@ -972,6 +972,7 @@ function runAsync(command, args, options = {}) {
 			return;
 		}
 		if (options.input && child.stdin) {
+			if (typeof child.stdin.once === 'function') child.stdin.once('error', () => {});
 			child.stdin.end(options.input);
 		}
 		const timer = options.timeout ? setTimeout(() => {

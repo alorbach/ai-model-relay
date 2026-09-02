@@ -66,7 +66,27 @@ function truncateOutput(value, maxLength = 12000) {
 }
 
 function redactSessionInput(value) {
-	return String(value || '').replace(/\b(bearer|token|api[_ -]?key|authorization)\s*(?:[:=]\s*|\s+)([^\s,;]+)/ig, '$1: <redacted>');
+	return String(value || '').replace(/\b(authorization|bearer|token|api[_ -]?key)(?:\s*[:=]\s*|\s+)(?:bearer\s+)?[^\s,;]+/ig, '$1: <redacted>');
+}
+
+function stripJobDiagnostics(job) {
+	if (!job || typeof job !== 'object') {
+		return job;
+	}
+	const { session_input, session_output, debug_logs, artifacts, ...safe } = job;
+	return safe;
+}
+
+function publicJobsSnapshot(snapshot) {
+	if (!snapshot || typeof snapshot !== 'object') {
+		return snapshot;
+	}
+	return {
+		...snapshot,
+		active: Array.isArray(snapshot.active) ? snapshot.active.map(stripJobDiagnostics) : [],
+		queued: Array.isArray(snapshot.queued) ? snapshot.queued.map(stripJobDiagnostics) : [],
+		recent: Array.isArray(snapshot.recent) ? snapshot.recent.map(stripJobDiagnostics) : [],
+	};
 }
 
 function artifactWithDimensions(mimeType, bytes) {
@@ -428,10 +448,22 @@ class JobManager {
 		return compacted;
 	}
 
-	artifact(jobId, index) {
+	artifact(jobId, index, origin = '') {
 		const artifacts = this.artifacts.get(String(jobId));
 		const item = artifacts && artifacts[Number(index)];
-		return item ? { mime_type: item.mime_type, bytes: item.bytes } : null;
+		if (!item) {
+			return null;
+		}
+		if (origin) {
+			const numericId = Number(jobId);
+			const recent = this.recent.find((job) => job.id === numericId);
+			const running = this.running.get(numericId);
+			const job = recent || running;
+			if (!job || !jobMatchesOrigin(job, origin)) {
+				return null;
+			}
+		}
+		return { mime_type: item.mime_type, bytes: item.bytes };
 	}
 
 	artifactByRequestId(requestId, origin = '') {
@@ -465,6 +497,7 @@ module.exports = {
 	collectMediaArtifacts,
 	collectSessionOutput,
 	normalizeDiagnosticText,
+	publicJobsSnapshot,
 	redactSessionInput,
 	extractRuntimeMetadata,
 	shortRequestId,

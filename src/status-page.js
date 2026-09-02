@@ -2385,7 +2385,7 @@ function statusPageHtml() {
 			const result = card && card.querySelector('[data-test-result]');
 			if (!result) return;
 			const artifacts = Array.isArray(job && job.artifacts) ? job.artifacts : [];
-			const artifact = artifacts.find((entry) => entry && /^\\/(?:v1)\\/status\\/jobs\\/\d+\\/artifacts\\/\d+$/.test(String(entry.url || '')) && /^(image|video)\\//.test(String(entry.mime_type || '')));
+			const artifact = artifacts.find((entry) => entry && /^\\/(?:v1)\\/status\\/jobs\\/\\d+\\/artifacts\\/\\d+$/.test(String(entry.url || '')) && /^(image|video)\\//.test(String(entry.mime_type || '')));
 			if (!artifact) {
 				const requestId = jobRequestId(job);
 				result.innerHTML = requestId

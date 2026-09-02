@@ -4,7 +4,7 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { JobManager, collectSessionOutput, normalizeDiagnosticText, truncateOutput } = require('../src/job-manager');
+const { JobManager, collectSessionOutput, normalizeDiagnosticText, publicJobsSnapshot, redactSessionInput, truncateOutput } = require('../src/job-manager');
 
 function tick() {
 	return new Promise((resolve) => setImmediate(resolve));
@@ -258,6 +258,18 @@ function deferredRunner(label, started, resolvers, result = { success: true }) {
 	assert.strictEqual(normalizeDiagnosticText('I\u00e2\u0080\u0099m ready \u00e2\u0080\u0094 wait\u00e2\u0080\u00a6'), "I'm ready - wait...");
 	assert.strictEqual(collectSessionOutput({ details: { stderr: 'I\u00e2\u0080\u0099m ready' } }), "STDERR:\nI'm ready");
 	assert.ok(truncateOutput('x'.repeat(13000)).includes('[truncated'));
+	assert.strictEqual(redactSessionInput('Authorization: Bearer sk-abc123'), 'Authorization: <redacted>');
+	assert.strictEqual(redactSessionInput('Authorization: Bearer sk-abc123 leftover'), 'Authorization: <redacted> leftover');
+	assert.ok(!redactSessionInput('Authorization: Bearer sk-abc123').includes('sk-abc123'));
+	const publicJobs = publicJobsSnapshot({
+		running_count: 1,
+		recent: [{ request_id: 'job-1', session_input: 'STDIN:\nsecret', session_output: 'STDOUT:\nout', debug_logs: [{ prompt: 'full prompt' }], artifacts: [{ url: '/v1/status/jobs/1/artifacts/0' }] }],
+	});
+	assert.strictEqual(publicJobs.recent[0].request_id, 'job-1');
+	assert.ok(!Object.prototype.hasOwnProperty.call(publicJobs.recent[0], 'session_input'));
+	assert.ok(!Object.prototype.hasOwnProperty.call(publicJobs.recent[0], 'session_output'));
+	assert.ok(!Object.prototype.hasOwnProperty.call(publicJobs.recent[0], 'debug_logs'));
+	assert.ok(!Object.prototype.hasOwnProperty.call(publicJobs.recent[0], 'artifacts'));
 
 	console.log('job manager tests passed');
 })().catch((error) => {

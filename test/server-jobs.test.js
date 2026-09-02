@@ -27,7 +27,7 @@ function requestJson(port, method, pathname, body, headers = {}) {
 			});
 			res.on('end', () => {
 				try {
-					resolve({ statusCode: res.statusCode, body: raw ? JSON.parse(raw) : {} });
+					resolve({ statusCode: res.statusCode, headers: res.headers, body: raw ? JSON.parse(raw) : {} });
 				} catch (error) {
 					reject(error);
 				}
@@ -280,12 +280,24 @@ function createMockSecurity() {
 
 		const status = await requestJson(port, 'GET', '/v1/status');
 		assert.strictEqual(status.statusCode, 200);
+		assert.strictEqual(status.body.bridge.version, require('../package.json').version);
+		assert.strictEqual(status.body.bridge.product_name, 'AI Model Relay');
+		assert.ok(!Object.prototype.hasOwnProperty.call(status.body.bridge, 'paired_origins'));
 		assert.strictEqual(status.body.jobs.running_count, 2);
 		assert.strictEqual(status.body.jobs.queued_count, 1);
 		assert.strictEqual(status.body.jobs.max_concurrent, 2);
 		assert.strictEqual(status.body.asr.runtime_checked, false);
 		assert.deepStrictEqual(status.body.jobs.active.map((job) => job.request_id), ['request-1', 'request-2']);
 		assert.ok(status.body.jobs.active[0].session_output.includes('live output for codex-local:auto'));
+		const unpairedStatus = await requestJson(port, 'GET', '/v1/status', null, { Origin: 'https://evil.example', 'X-Alorbach-Bridge-Token': '' });
+		assert.strictEqual(unpairedStatus.statusCode, 200);
+		assert.strictEqual(unpairedStatus.headers['access-control-allow-origin'], 'https://evil.example');
+		assert.strictEqual(unpairedStatus.body.bridge.version, require('../package.json').version);
+		assert.ok(!Object.prototype.hasOwnProperty.call(unpairedStatus.body.bridge, 'paired_origins'));
+		assert.ok(!Object.prototype.hasOwnProperty.call(unpairedStatus.body.jobs.active[0], 'session_output'));
+		assert.ok(!Object.prototype.hasOwnProperty.call(unpairedStatus.body.jobs.active[0], 'session_input'));
+		assert.ok(!Object.prototype.hasOwnProperty.call(unpairedStatus.body.jobs.active[0], 'debug_logs'));
+		assert.ok(!Object.prototype.hasOwnProperty.call(unpairedStatus.body.jobs.active[0], 'artifacts'));
 		const serializedState = JSON.stringify(stateUpdates);
 		assert.ok(serializedState.includes('request-1'));
 		assert.ok(serializedState.includes('codex-local:gpt-5.4'));
@@ -357,6 +369,10 @@ function createMockSecurity() {
 		assert.strictEqual(pairedStream.events.jobs.queued_count, 1);
 		assert.ok(!pairedStream.raw.includes('test-token'));
 		assert.ok(!pairedStream.raw.includes('secret prompt'));
+
+		const localStatusEvents = await requestEvents(port, '/v1/status/events', {}, ['status']);
+		assert.strictEqual(localStatusEvents.statusCode, 200);
+		assert.ok(Array.isArray(localStatusEvents.events.status.bridge.paired_origins));
 
 		pending[1].resolve({ success: true, response: { id: 'second' } });
 		const secondResult = await second;

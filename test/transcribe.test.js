@@ -89,6 +89,7 @@ function createMockSecurity() {
 		}),
 	};
 	const server = createServer({
+		backgroundRefresh: false,
 		codex,
 		security: createMockSecurity(),
 		maxConcurrent: 1,

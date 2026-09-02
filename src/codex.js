@@ -6,6 +6,7 @@ const path = require('path');
 const { spawn, spawnSync } = require('child_process');
 const asr = require('./asr');
 const { appendLog, createBoundedCollector, safeError } = require('./diagnostics');
+const { killProcessTree } = require('./cuda-torch-venv');
 const { beginLocalModelDebugLog } = require('./temp-debug-logs');
 const { resolveMaxTokens } = require('./token-policy');
 
@@ -153,15 +154,17 @@ function runCodexAsync(args, options = {}) {
 			return;
 		}
 		if (stdinInput !== null && child.stdin) {
-			child.stdin.once('error', (error) => {
-				spawnError = spawnError || error;
-			});
+			if (typeof child.stdin.once === 'function') {
+				child.stdin.once('error', (error) => {
+					spawnError = spawnError || error;
+				});
+			}
 			child.stdin.end(stdinInput);
 		}
 
 		const timer = timeout ? setTimeout(() => {
 			timedOut = true;
-			child.kill();
+			killProcessTree(child);
 		}, timeout) : null;
 
 		if (timer && typeof timer.unref === 'function') {
@@ -780,7 +783,7 @@ function buildChatArgs(tempDir, outputFile, model, attachments, options = {}) {
 }
 
 async function chat(payload, session = {}, internalOptions = {}) {
-	const status = checkStatus();
+	const status = await checkStatusAsync();
 	if (!status.success) {
 		return status;
 	}
@@ -790,6 +793,7 @@ async function chat(payload, session = {}, internalOptions = {}) {
 	}
 	const model = String(payload.model || 'codex-local:auto').replace(/^codex-local:/, '') || 'auto';
 	const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'alorbach-codex-chat-'));
+	try {
 	const outputFile = path.join(tempDir, 'last-message.txt');
 	const { attachments, prompt } = buildChatPrompt(messages, payload.max_tokens, tempDir);
 	const resolvedMaxTokens = resolveMaxTokens('chat', payload.max_tokens);
@@ -873,6 +877,9 @@ async function chat(payload, session = {}, internalOptions = {}) {
 			},
 		},
 	};
+	} finally {
+		try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch (error) {}
+	}
 }
 
 function listGeneratedImages(dir) {
@@ -1063,7 +1070,7 @@ function imagePrompt(payload, attachments = []) {
 }
 
 async function images(payload, session = {}) {
-	const status = checkStatus();
+	const status = await checkStatusAsync();
 	if (!status.success) {
 		return status;
 	}
@@ -1074,6 +1081,7 @@ async function images(payload, session = {}) {
 	fs.mkdirSync(generatedImagesDir, { recursive: true });
 	const before = listGeneratedImages(generatedImagesDir);
 	const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'alorbach-codex-image-'));
+	try {
 	const outputFile = path.join(tempDir, 'last-message.txt');
 	const attachments = collectImageAttachments(payload, tempDir);
 	const promptText = imagePrompt(payload, attachments);
@@ -1179,6 +1187,9 @@ async function images(payload, session = {}) {
 			},
 		},
 	};
+	} finally {
+		try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch (error) {}
+	}
 }
 
 function audioExtensionForFormat(format) {

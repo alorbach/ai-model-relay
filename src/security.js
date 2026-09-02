@@ -11,10 +11,13 @@ const statePath = statePaths.statePath;
 function timingSafeEqual(left, right) {
 	const a = Buffer.from(String(left || ''), 'utf8');
 	const b = Buffer.from(String(right || ''), 'utf8');
-	if (a.length !== b.length) {
-		return false;
-	}
-	return crypto.timingSafeEqual(a, b);
+	const size = Math.max(a.length, b.length, 1);
+	const leftPadded = Buffer.alloc(size);
+	const rightPadded = Buffer.alloc(size);
+	a.copy(leftPadded);
+	b.copy(rightPadded);
+	const sameBytes = crypto.timingSafeEqual(leftPadded, rightPadded);
+	return sameBytes && a.length === b.length;
 }
 
 function normalizeOrigin(origin) {
@@ -45,7 +48,55 @@ function readState() {
 
 function writeState(state) {
 	ensureStateDir();
-	fs.writeFileSync(statePath, JSON.stringify(state, null, 2));
+	const tmpPath = `${statePath}.tmp`;
+	fs.writeFileSync(tmpPath, JSON.stringify(state, null, 2));
+	try {
+		fs.renameSync(tmpPath, statePath);
+	} catch (error) {
+		try {
+			fs.unlinkSync(statePath);
+		} catch (unlinkError) {}
+		fs.renameSync(tmpPath, statePath);
+	}
+}
+
+const PAIRING_MAX_FAILURES = 5;
+const PAIRING_WINDOW_MS = 60000;
+
+function createPairingLimiter(options = {}) {
+	const maxFailures = Number(options.maxFailures || PAIRING_MAX_FAILURES) || PAIRING_MAX_FAILURES;
+	const windowMs = Number(options.windowMs || PAIRING_WINDOW_MS) || PAIRING_WINDOW_MS;
+	const now = typeof options.now === 'function' ? options.now : () => Date.now();
+	const failures = [];
+	function prune(at) {
+		const cutoff = at - windowMs;
+		while (failures.length && failures[0] < cutoff) {
+			failures.shift();
+		}
+	}
+	return {
+		allow() {
+			const at = now();
+			prune(at);
+			return failures.length < maxFailures;
+		},
+		recordFailure() {
+			const at = now();
+			prune(at);
+			failures.push(at);
+		},
+		reset() {
+			failures.length = 0;
+		},
+		retryAfterMs() {
+			const at = now();
+			prune(at);
+			if (failures.length < maxFailures || !failures.length) {
+				return 0;
+			}
+			return Math.max(0, (failures[0] + windowMs) - at);
+		},
+	};
 }
 
 function getPairings() {
@@ -105,9 +156,12 @@ function isLocalAddress(req) {
 
 module.exports = {
 	MAX_BODY_BYTES,
+	PAIRING_MAX_FAILURES,
+	PAIRING_WINDOW_MS,
 	stateDir,
 	statePath,
 	createPairingCode,
+	createPairingLimiter,
 	createToken,
 	getPairing,
 	getPairings,
@@ -115,6 +169,7 @@ module.exports = {
 	normalizeOrigin,
 	removePairing,
 	savePairing,
+	timingSafeEqual,
 	validateBridgeToken,
 	readState,
 	writeState,

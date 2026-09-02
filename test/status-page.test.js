@@ -63,6 +63,8 @@ assert.ok(html.includes('Continuing to follow it here.'));
 assert.ok(html.includes("document.querySelector('[data-provider-media-test][data-test-request-id]')"));
 assert.ok(html.includes('data-test-result'));
 assert.ok(html.includes('function renderProviderTestResult(card, job)'));
+assert.ok(html.includes('\\/(?:v1)\\/status\\/jobs\\/\\d+\\/artifacts\\/\\d+'));
+assert.ok(!html.includes('\\/(?:v1)\\/status\\/jobs\\/d+\\/artifacts\\/d+'));
 assert.ok(html.includes('data-media-preview'));
 assert.ok(html.includes('function openMediaLightbox(url, mimeType)'));
 assert.ok(html.includes('id="mediaLightboxVideo"'));

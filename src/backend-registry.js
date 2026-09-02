@@ -6,6 +6,7 @@ const path = require('path');
 const { randomUUID } = require('crypto');
 const { spawn } = require('child_process');
 const { createBoundedCollector } = require('./diagnostics');
+const { killProcessTree } = require('./cuda-torch-venv');
 const { detectCli, detectCliAsync, materializeChatImages, messagesToPromptJson, messagesToText, runTextCommand, writePromptFile } = require('./local-cli');
 const { createLocalUpscaleDriver } = require('./local-upscale');
 const { resolveMaxTokens } = require('./token-policy');
@@ -16,6 +17,38 @@ const RELAY_MODEL_PREFIX = 'model-relay';
 const GROK_MEDIA_TIMEOUT_MS = 450000;
 const MAX_AUDIO_BASE64_LENGTH = 67108864;
 const MAX_CLI_PROMPT_JSON_ARG_CHARS = 8192;
+const PROVIDER_FETCH_TIMEOUT_MS = Number(process.env.AI_MODEL_RELAY_PROVIDER_FETCH_TIMEOUT_MS || 60000);
+const MAX_PROVIDER_DOWNLOAD_BYTES = 100 * 1024 * 1024;
+
+function withFetchTimeout(fetchImpl, timeoutMs = PROVIDER_FETCH_TIMEOUT_MS) {
+	if (typeof fetchImpl !== 'function') return fetchImpl;
+	return (url, options = {}) => fetchImpl(url, { ...options, signal: options.signal || AbortSignal.timeout(timeoutMs) });
+}
+
+async function readBoundedBytes(response, maxBytes = MAX_PROVIDER_DOWNLOAD_BYTES) {
+	const length = Number(response && response.headers && typeof response.headers.get === 'function' ? response.headers.get('content-length') || 0 : 0);
+	if (length > maxBytes) throw new Error('Provider download exceeds the maximum size.');
+	if (response && response.body && typeof response.body.getReader === 'function') {
+		const reader = response.body.getReader();
+		const chunks = [];
+		let size = 0;
+		while (true) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			const chunk = Buffer.from(value);
+			size += chunk.length;
+			if (size > maxBytes) {
+				try { await reader.cancel(); } catch (error) {}
+				throw new Error('Provider download exceeds the maximum size.');
+			}
+			chunks.push(chunk);
+		}
+		return chunks.length ? Buffer.concat(chunks) : Buffer.alloc(0);
+	}
+	const bytes = Buffer.from(await response.arrayBuffer());
+	if (bytes.length > maxBytes) throw new Error('Provider download exceeds the maximum size.');
+	return bytes;
+}
 
 function truthy(value) {
 	return /^(1|true|yes|on)$/i.test(String(value || ''));
@@ -1351,7 +1384,7 @@ function createOpenAiVideosDriver(video) {
 }
 
 function createXaiApiDriver(options = {}) {
-	const fetchImpl = options.fetch || globalThis.fetch;
+	const fetchImpl = withFetchTimeout(options.fetch || globalThis.fetch);
 	const apiKey = options.apiKey || process.env.XAI_API_KEY || process.env.AI_MODEL_RELAY_XAI_API_KEY || '';
 	const baseUrl = String(options.baseUrl || process.env.XAI_BASE_URL || process.env.AI_MODEL_RELAY_XAI_BASE_URL || 'https://api.x.ai/v1').replace(/\/+$/, '');
 	const defaultModels = String(options.models || process.env.AI_MODEL_RELAY_XAI_MODELS || DEFAULT_XAI_CHAT_MODELS).split(',').map((id) => id.trim()).filter(Boolean);
@@ -1547,7 +1580,8 @@ function createXaiApiDriver(options = {}) {
 				try {
 					const downloaded = await fetchImpl(url, { headers: { Authorization: `Bearer ${apiKey}` } });
 					if (!downloaded.ok || typeof downloaded.arrayBuffer !== 'function') continue;
-					const bytes = Buffer.from(await downloaded.arrayBuffer());
+					let bytes;
+					try { bytes = await readBoundedBytes(downloaded); } catch (error) { continue; }
 					if (!bytes.length) continue;
 					data.push({ b64_json: bytes.toString('base64'), mime_type: mimeFromImageBytes(bytes) });
 				} catch (error) {}
@@ -1638,7 +1672,10 @@ function createXaiApiDriver(options = {}) {
 			if (!downloaded.ok || typeof downloaded.arrayBuffer !== 'function') {
 				return { success: false, category: 'api', code: 'xai_video_download_failed', message: 'xAI Imagine video download failed.', details: { status: downloaded.status, provider: 'xai-api', request_id: requestId } };
 			}
-			const bytes = Buffer.from(await downloaded.arrayBuffer());
+			let bytes;
+			try { bytes = await readBoundedBytes(downloaded); } catch (error) {
+				return { success: false, category: 'api', code: 'xai_video_download_failed', message: 'xAI Imagine video download exceeded the maximum size.', details: { provider: 'xai-api', request_id: requestId } };
+			}
 			if (!bytes.length) {
 				return { success: false, category: 'api', code: 'xai_video_artifact_missing', message: 'xAI Imagine video download was empty.' };
 			}
@@ -1655,7 +1692,7 @@ function createXaiApiDriver(options = {}) {
 }
 
 function createApiKeyChatDriver(options = {}) {
-	const fetchImpl = options.fetch || globalThis.fetch;
+	const fetchImpl = withFetchTimeout(options.fetch || globalThis.fetch);
 	const apiKey = options.apiKey || process.env.AI_MODEL_RELAY_CHAT_API_KEY || '';
 	const baseUrl = String(options.baseUrl || process.env.AI_MODEL_RELAY_CHAT_BASE_URL || '').replace(/\/+$/, '');
 	const providerId = String(options.providerId || process.env.AI_MODEL_RELAY_CHAT_PROVIDER_ID || 'api-key-chat').replace(/[^a-z0-9_.-]/gi, '-').toLowerCase();
@@ -1741,7 +1778,7 @@ function createCliProcessDriver(options = {}) {
 					if (settled) {
 						return;
 					}
-					child.kill();
+					killProcessTree(child);
 					settled = true;
 					resolve({ success: false, category: 'timeout', code: 'cli_process_timeout', message: 'CLI process timed out.', details: { timeout_ms: timeoutMs } });
 				}, timeoutMs);
@@ -1784,7 +1821,10 @@ function createCliProcessDriver(options = {}) {
 					resolve(normalizeChatResponse('cli', 'default', parsed, out));
 				});
 				const input = payload.input || payload.prompt || textFromMessages(payload.messages);
-				child.stdin.end(String(input || ''));
+				if (child.stdin) {
+					if (typeof child.stdin.once === 'function') child.stdin.once('error', () => {});
+					child.stdin.end(String(input || ''));
+				}
 			});
 		},
 	};

@@ -2,7 +2,7 @@
 
 const assert = require('assert');
 const http = require('http');
-const { createServer } = require('../src/server');
+const { createServer, getPairingCode } = require('../src/server');
 const { GROK_IMAGE_CAPABILITIES, isCompleteImageCapabilityContract, relayCatalogEntrySupportsImages } = require('../src/backend-registry');
 
 function requestJson(port, method, pathname, body, headers = {}) {
@@ -68,7 +68,7 @@ function createMockSecurity() {
 		MAX_BODY_BYTES: 12 * 1024 * 1024,
 		createPairingCode: () => '123456',
 		createToken: () => 'test-token',
-		getPairing: () => ({ token: 'test-token', paired_at: 'now' }),
+		getPairing: (origin) => origin === 'http://127.0.0.1:8787' ? ({ token: 'test-token', paired_at: 'now' }) : null,
 		getPairings: () => ({ 'http://127.0.0.1:8787': { token: 'test-token', paired_at: 'now' } }),
 		isLocalAddress: () => true,
 		normalizeOrigin: (origin) => {
@@ -236,6 +236,20 @@ function createMockSecurity() {
 		const musicSettings = await requestJson(port, 'GET', '/v1/music-analysis/settings');
 		assert.strictEqual(musicSettings.statusCode, 200);
 		const pageOrigin = { Origin: `http://127.0.0.1:${port}` };
+		const bootstrapCors = await requestJson(port, 'OPTIONS', '/v1/status', null, { Origin: 'https://evil.example', 'X-Alorbach-Bridge-Token': '' });
+		assert.strictEqual(bootstrapCors.statusCode, 204);
+		assert.strictEqual(bootstrapCors.headers['access-control-allow-origin'], 'https://evil.example');
+		const mutatorCors = await requestJson(port, 'OPTIONS', '/v1/relay/settings', null, { Origin: 'https://evil.example' });
+		assert.strictEqual(mutatorCors.statusCode, 403);
+		assert.ok(!mutatorCors.headers['access-control-allow-origin']);
+		const jobCors = await requestJson(port, 'OPTIONS', '/v1/relay/jobs/chat', null, { Origin: 'https://evil.example' });
+		assert.strictEqual(jobCors.statusCode, 204);
+		assert.ok(!jobCors.headers['access-control-allow-origin']);
+		const unpairedStatus = await requestJson(port, 'GET', '/v1/status', null, { Origin: 'https://evil.example', 'X-Alorbach-Bridge-Token': '' });
+		assert.ok(unpairedStatus.statusCode === 200 || unpairedStatus.statusCode === 503);
+		assert.strictEqual(unpairedStatus.headers['access-control-allow-origin'], 'https://evil.example');
+		assert.ok(!Object.prototype.hasOwnProperty.call(unpairedStatus.body.bridge || {}, 'paired_origins'));
+		assert.strictEqual(unpairedStatus.body.bridge.version, require('../package.json').version);
 		const savedMusicSettings = await requestJson(port, 'POST', '/v1/music-analysis/settings', { settings: { sample_rate: 24000 } }, pageOrigin);
 		assert.strictEqual(savedMusicSettings.statusCode, 200);
 		const musicSetup = await requestJson(port, 'POST', '/v1/music-analysis/setup', {}, pageOrigin);
@@ -255,11 +269,16 @@ function createMockSecurity() {
 		const foreignSetup = await requestJson(port, 'POST', '/v1/upscale/setup', { engine: 'swinir' }, { Origin: 'https://evil.example' });
 		assert.strictEqual(foreignSetup.statusCode, 403);
 		assert.ok(!foreignSetup.headers['access-control-allow-origin']);
-		const savedRelaySettings = await requestJson(port, 'POST', '/v1/relay/settings', { settings: { defaults: { chat: 'model-relay:cursor-cli:auto' }, cli_paths: { 'antigravity-cli': 'C:\\Tools\\agy.exe' } } });
+		const foreignRelaySettings = await requestJson(port, 'POST', '/v1/relay/settings', { settings: { defaults: { chat: 'model-relay:cursor-cli:auto' } } }, { Origin: 'https://evil.example' });
+		assert.strictEqual(foreignRelaySettings.statusCode, 403);
+		assert.ok(!foreignRelaySettings.headers['access-control-allow-origin']);
+		const anonymousRelaySettings = await requestJson(port, 'POST', '/v1/relay/settings', { settings: { defaults: { chat: 'model-relay:cursor-cli:auto' } } }, { Origin: '' });
+		assert.strictEqual(anonymousRelaySettings.statusCode, 403);
+		const savedRelaySettings = await requestJson(port, 'POST', '/v1/relay/settings', { settings: { defaults: { chat: 'model-relay:cursor-cli:auto' }, cli_paths: { 'antigravity-cli': 'C:\\Tools\\agy.exe' } } }, pageOrigin);
 		assert.strictEqual(savedRelaySettings.statusCode, 200);
 		assert.strictEqual(savedRelaySettingsInput.cli_paths['antigravity-cli'], 'C:\\Tools\\agy.exe');
 		assert.strictEqual(savedRelaySettings.body.refresh_started, true);
-		const refresh = await requestJson(port, 'POST', '/v1/relay/refresh', {});
+		const refresh = await requestJson(port, 'POST', '/v1/relay/refresh', {}, pageOrigin);
 		assert.strictEqual(refresh.statusCode, 202);
 		assert.strictEqual(refresh.body.checking, true);
 		assert.strictEqual(refresh.body.refresh.active, true);
@@ -313,18 +332,18 @@ function createMockSecurity() {
 		assert.strictEqual(artifact.body.toString(), 'derived-png');
 		const foreignArtifact = await requestBinary(port, 'GET', binaryResult.artifact_url, Buffer.alloc(0), { Origin: 'http://127.0.0.1:9999' });
 		assert.strictEqual(foreignArtifact.statusCode, 404);
-		const statusPreview = await requestPlain(port, `/v1/status/jobs/${binaryResult.local_job_id}/artifacts/0`);
+		const statusPreview = await requestPlain(port, `/v1/status/jobs/${binaryResult.local_job_id}/artifacts/0`, { Origin: `http://127.0.0.1:${port}` });
 		assert.strictEqual(statusPreview.statusCode, 200);
 		assert.strictEqual(statusPreview.body.toString(), 'derived-png');
 		const corsPreview = await requestPlain(port, `/v1/status/jobs/${binaryResult.local_job_id}/artifacts/0`, { Origin: 'https://evil.example' });
-		assert.strictEqual(corsPreview.statusCode, 200);
+		assert.strictEqual(corsPreview.statusCode, 403);
 		assert.ok(!corsPreview.headers['access-control-allow-origin']);
 		const invalidBinaryUpscale = await requestBinary(port, 'POST', '/v1/relay/jobs/upscale', Buffer.from('protected-source-png'), { 'X-Alorbach-Request-Id': 'upscale-request' });
 		assert.strictEqual(invalidBinaryUpscale.statusCode, 400);
 
 		const refreshesBeforeImageTest = backendRefreshes;
 		const localTestRequestId = 'status-test-ui-route-image';
-                const localImageTest = await requestJson(port, 'POST', '/v1/relay/test', { job_type: 'images', model: 'model-relay:codex:image', prompt: 'test image', size: '1536x1024', quality: 'high', test_request_id: localTestRequestId });
+                const localImageTest = await requestJson(port, 'POST', '/v1/relay/test', { job_type: 'images', model: 'model-relay:codex:image', prompt: 'test image', size: '1536x1024', quality: 'high', test_request_id: localTestRequestId }, pageOrigin);
 		assert.strictEqual(localImageTest.statusCode, 200);
 		assert.strictEqual(localImageTest.body.success, true);
 		assert.strictEqual(localImageTest.body.request_id, localTestRequestId);
@@ -333,52 +352,52 @@ function createMockSecurity() {
                 assert.strictEqual(calls[calls.length - 1].payload.prompt, 'test image');
                 assert.strictEqual(calls[calls.length - 1].payload.size, '1536x1024');
 		assert.strictEqual(calls[calls.length - 1].payload.quality, 'high');
-		const rateLimitedImageTest = await requestJson(port, 'POST', '/v1/relay/test', { job_type: 'images', model: 'model-relay:codex:image', prompt: 'rate limited' });
+		const rateLimitedImageTest = await requestJson(port, 'POST', '/v1/relay/test', { job_type: 'images', model: 'model-relay:codex:image', prompt: 'rate limited' }, pageOrigin);
 		assert.strictEqual(rateLimitedImageTest.statusCode, 429);
 		assert.strictEqual(rateLimitedImageTest.body.category, 'rate_limit');
 		assert.strictEqual(rateLimitedImageTest.body.code, 'provider_quota_exhausted');
-		const invalidTestRequestId = await requestJson(port, 'POST', '/v1/relay/test', { job_type: 'images', model: 'model-relay:codex:image', prompt: 'test image', test_request_id: 'invalid value' });
+		const invalidTestRequestId = await requestJson(port, 'POST', '/v1/relay/test', { job_type: 'images', model: 'model-relay:codex:image', prompt: 'test image', test_request_id: 'invalid value' }, pageOrigin);
 		assert.strictEqual(invalidTestRequestId.statusCode, 400);
 		assert.match(invalidTestRequestId.body.message, /request IDs must start with status-test/i);
 
-                const localVideoTest = await requestJson(port, 'POST', '/v1/relay/test', { job_type: 'videos', model: 'model-relay:openai-videos:sora-2', prompt: 'test video', input_reference_data_url: 'data:image/png;base64,AA==', size: '1280x720', seconds: '8' });
+                const localVideoTest = await requestJson(port, 'POST', '/v1/relay/test', { job_type: 'videos', model: 'model-relay:openai-videos:sora-2', prompt: 'test video', input_reference_data_url: 'data:image/png;base64,AA==', size: '1280x720', seconds: '8' }, pageOrigin);
 		assert.strictEqual(localVideoTest.statusCode, 200);
                 assert.strictEqual(calls[calls.length - 1].route, 'relay-videos');
                 assert.strictEqual(calls[calls.length - 1].payload.input_reference_data_url, 'data:image/png;base64,AA==');
                 assert.strictEqual(calls[calls.length - 1].payload.size, '1280x720');
                 assert.strictEqual(calls[calls.length - 1].payload.seconds, '8');
-		const localImagineVideoTest = await requestJson(port, 'POST', '/v1/relay/test', { job_type: 'videos', model: 'model-relay:xai:imagine-video', prompt: 'test imagine video', seconds: '10', resolution: '1080p', aspect_ratio: '9:16', generate_audio: 'false' });
+		const localImagineVideoTest = await requestJson(port, 'POST', '/v1/relay/test', { job_type: 'videos', model: 'model-relay:xai:imagine-video', prompt: 'test imagine video', seconds: '10', resolution: '1080p', aspect_ratio: '9:16', generate_audio: 'false' }, pageOrigin);
 		assert.strictEqual(localImagineVideoTest.statusCode, 200);
 		assert.strictEqual(calls[calls.length - 1].payload.model, 'model-relay:xai:imagine-video');
 		assert.strictEqual(calls[calls.length - 1].payload.seconds, '10');
 		assert.strictEqual(calls[calls.length - 1].payload.resolution, '1080p');
 		assert.strictEqual(calls[calls.length - 1].payload.aspect_ratio, '9:16');
 		assert.strictEqual(calls[calls.length - 1].payload.generate_audio, 'false');
-		const localXaiImageTest = await requestJson(port, 'POST', '/v1/relay/test', { job_type: 'images', model: 'model-relay:xai:imagine-image', prompt: 'test imagine image', aspect_ratio: '16:9', resolution: '2k' });
+		const localXaiImageTest = await requestJson(port, 'POST', '/v1/relay/test', { job_type: 'images', model: 'model-relay:xai:imagine-image', prompt: 'test imagine image', aspect_ratio: '16:9', resolution: '2k' }, pageOrigin);
 		assert.strictEqual(localXaiImageTest.statusCode, 200);
 		assert.strictEqual(calls[calls.length - 1].payload.model, 'model-relay:xai:imagine-image');
 		assert.strictEqual(calls[calls.length - 1].payload.cloud_upload_confirmed, true);
-		const localGrokOptionsTest = await requestJson(port, 'POST', '/v1/relay/test', { job_type: 'images', model: 'model-relay:codex:image', prompt: 'test image guidance', aspect_ratio: '16:9', resolution: '2k' });
+		const localGrokOptionsTest = await requestJson(port, 'POST', '/v1/relay/test', { job_type: 'images', model: 'model-relay:codex:image', prompt: 'test image guidance', aspect_ratio: '16:9', resolution: '2k' }, pageOrigin);
 		assert.strictEqual(localGrokOptionsTest.statusCode, 200);
 		assert.strictEqual(calls[calls.length - 1].payload.aspect_ratio, '16:9');
 		assert.strictEqual(calls[calls.length - 1].payload.resolution, '2k');
-		const localAntigravityImageTest = await requestJson(port, 'POST', '/v1/relay/test', { job_type: 'images', model: 'model-relay:antigravity-cli:image', prompt: 'test antigravity image', aspect_ratio: '16:9', image_size: '2K' });
+		const localAntigravityImageTest = await requestJson(port, 'POST', '/v1/relay/test', { job_type: 'images', model: 'model-relay:antigravity-cli:image', prompt: 'test antigravity image', aspect_ratio: '16:9', image_size: '2K' }, pageOrigin);
 		assert.strictEqual(localAntigravityImageTest.statusCode, 200);
 		assert.strictEqual(calls[calls.length - 1].payload.aspect_ratio, '16:9');
 		assert.strictEqual(calls[calls.length - 1].payload.image_size, '2K');
-		const localMediaTest = await requestJson(port, 'POST', '/v1/relay/test', { job_type: 'media.analyze', model: 'model-relay:codex:auto', prompt: 'test media', media_data_url: `data:video/mp4;base64,${Buffer.from('mp4').toString('base64')}` });
+		const localMediaTest = await requestJson(port, 'POST', '/v1/relay/test', { job_type: 'media.analyze', model: 'model-relay:codex:auto', prompt: 'test media', media_data_url: `data:video/mp4;base64,${Buffer.from('mp4').toString('base64')}` }, pageOrigin);
 		assert.strictEqual(localMediaTest.statusCode, 200);
 		assert.strictEqual(calls[calls.length - 1].route, 'relay-media.analyze');
 		assert.ok(String(calls[calls.length - 1].payload.media_data_url).startsWith('data:video/mp4;base64,'));
 
-		const missingTestModel = await requestJson(port, 'POST', '/v1/relay/test', { job_type: 'images', prompt: 'x' });
+		const missingTestModel = await requestJson(port, 'POST', '/v1/relay/test', { job_type: 'images', prompt: 'x' }, pageOrigin);
 		assert.strictEqual(missingTestModel.statusCode, 400);
 		assert.match(missingTestModel.body.message, /specific provider model/i);
 
 		const relayTranscribe = await requestJson(port, 'POST', '/v1/relay/jobs/transcribe', { ...body, payload: { model: 'model-relay:local-asr:auto' } });
 		assert.strictEqual(relayTranscribe.statusCode, 200);
 		assert.strictEqual(calls[calls.length - 1].route, 'relay-transcribe');
-		const xaiTranscribeTest = await requestJson(port, 'POST', '/v1/relay/test', { job_type: 'transcribe', model: 'model-relay:xai:stt', audio_base64: Buffer.from('audio').toString('base64'), audio_format: 'mp3' });
+		const xaiTranscribeTest = await requestJson(port, 'POST', '/v1/relay/test', { job_type: 'transcribe', model: 'model-relay:xai:stt', audio_base64: Buffer.from('audio').toString('base64'), audio_format: 'mp3' }, pageOrigin);
 		assert.strictEqual(xaiTranscribeTest.statusCode, 200);
 		assert.strictEqual(calls[calls.length - 1].route, 'relay-transcribe');
 		assert.strictEqual(calls[calls.length - 1].payload.audio_format, 'mp3');
@@ -394,6 +413,21 @@ function createMockSecurity() {
 		assert.strictEqual(relayMedia.statusCode, 200);
 		assert.strictEqual(relayMedia.body.response.id, 'relay-media.analyze');
 		assert.strictEqual(calls[calls.length - 1].route, 'relay-media.analyze');
+
+		const pairOk = await requestJson(port, 'POST', '/v1/pair', { origin: 'https://wp.example', pairing_code: getPairingCode() }, { Origin: 'https://wp.example', 'X-Alorbach-Bridge-Token': '' });
+		assert.strictEqual(pairOk.statusCode, 200);
+		assert.strictEqual(pairOk.body.success, true);
+		assert.strictEqual(pairOk.headers['access-control-allow-origin'], 'https://wp.example');
+		const pairMismatch = await requestJson(port, 'POST', '/v1/pair', { origin: 'https://wp.example', pairing_code: '000000' }, { Origin: 'https://evil.example', 'X-Alorbach-Bridge-Token': '' });
+		assert.strictEqual(pairMismatch.statusCode, 403);
+		assert.ok(!pairMismatch.headers['access-control-allow-origin']);
+		for (let i = 0; i < 4; i++) {
+			const fail = await requestJson(port, 'POST', '/v1/pair', { origin: 'https://wp.example', pairing_code: '000000' }, { Origin: 'https://wp.example', 'X-Alorbach-Bridge-Token': '' });
+			assert.strictEqual(fail.statusCode, 403);
+		}
+		const limited = await requestJson(port, 'POST', '/v1/pair', { origin: 'https://wp.example', pairing_code: '000000' }, { Origin: 'https://wp.example', 'X-Alorbach-Bridge-Token': '' });
+		assert.strictEqual(limited.statusCode, 429);
+		assert.strictEqual(limited.body.code, 'pairing_rate_limited');
 	} finally {
 		await new Promise((resolve) => server.close(resolve));
 	}
