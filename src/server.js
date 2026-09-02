@@ -782,7 +782,7 @@ async function route(req, res, context) {
 			sendErrorJson(req, res, 500, { success: false, message: 'Local upscale setup is unavailable.' }, origin);
 			return;
 		}
-		const result = await withSetupLock('upscale', () => context.localUpscale.setup({ engine: body.engine || 'swinir' }));
+		const result = await withSetupLock('upscale', () => context.localUpscale.setup({ model: body.model || '', engine: body.engine || 'swinir', accept_restricted: body.accept_restricted === true }));
 		const driver = context.backends && context.backends.getDriverById ? context.backends.getDriverById('local-upscale') : null;
 		if (driver && driver.refresh) await driver.refresh();
 		context.statusCache.sync();

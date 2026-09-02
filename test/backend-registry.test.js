@@ -169,6 +169,11 @@ function captureCliSpawn(calls) {
 	assert.strictEqual(candidateCountOnly.error, undefined);
 	assert.strictEqual(candidateCountOnly.payload.candidate_count, 3);
 	assert.strictEqual(candidateCountOnly.payload.n, 3, 'candidate_count must be normalized to xAI n');
+	const unknownImageFields = normalizeImagePayloadForModel({ model: antigravityImageModel.id, prompt: 'x', provider_options: { image_size: '2K' }, output_format: 'image/png', requested_size: '1536x1024', unexpected: 'drop-me' }, antigravityImageModel);
+	assert.strictEqual(unknownImageFields.error, undefined);
+	assert.strictEqual(unknownImageFields.payload.requested_size, undefined, 'internal requested size must not reach the image driver');
+	assert.strictEqual(unknownImageFields.payload.unexpected, undefined, 'unknown image fields must not reach the image driver');
+	assert.strictEqual(unknownImageFields.payload.image_size, '2K', 'declared provider-native fields remain available to the driver');
 	const conflictingCandidateCount = normalizeImagePayloadForModel({ model: xaiImageModel.id, prompt: 'x', candidate_count: 3, n: 1, cloud_upload_confirmed: true }, xaiImageModel);
 	assert.strictEqual(conflictingCandidateCount.error, undefined);
 	assert.strictEqual(conflictingCandidateCount.payload.n, 3, 'candidate_count must take precedence over a conflicting n');

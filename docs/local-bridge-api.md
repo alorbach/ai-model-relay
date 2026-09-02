@@ -676,6 +676,14 @@ The job's `artifacts` metadata in `/v1/status` and status events provides the sa
 
 Returns the paired binary PNG result for a completed local CUDA upscale. This route requires pairing and is the URL returned in `artifact_url` after `POST /v1/relay/jobs/upscale`. Status-page `<img>` / `<video>` previews continue to use the unpaired `/v1/status/jobs/{jobId}/artifacts/{index}` helper.
 
+## Local Upscale capability contract
+
+`GET /v1/relay/models` includes `upscale_capabilities` version `1` on each `model-relay:local-upscale:*` model. The same per-model records are also exposed under the `local-upscale` backend in `GET /v1/relay/capabilities`. The public contract includes the model's `native_scale`, required `output_policy`, accepted input and PNG output formats, CUDA/tile/precision characteristics, explicit-install state, model class, experimental flag, license and usage restrictions, and readiness state. It intentionally excludes checkout paths, model paths, SHA-256 values, and other local installation data.
+
+The native contract is strict: a ×2 model accepts only `scale: 2` and `retain_native_x2`; a ×4 model accepts only `scale: 4` and `retain_native_x4`. The output width and height must be exactly the approved crop dimensions multiplied by the native scale. The runner records `downsampler: "none"`, and Relay rejects output that reports another value. Native ×4 PNG artifacts have a separate 256 MiB ceiling.
+
+`POST /v1/upscale/setup` accepts `{ "model": "model-relay:local-upscale:..." }`; this is an explicit operator action. APISR additionally requires `{ "accept_restricted": true }` because it is experimental, GPL-3.0-only, and academic-only. DRCT ×2 has a pinned runtime/check-out profile but requires an operator-provided, independently verified ×2 checkpoint because an official ×2 release is not available.
+
 ## `POST /v1/transcribe`
 
 Runs a local ASR transcription or reference-text alignment request through the private local ASR runtimes. This route requires pairing and the signed WordPress job envelope.

@@ -123,6 +123,29 @@ function normalizeImagePayloadForModel(payload, modelEntry) {
 	const references = [requested.input_reference_data_url, requested.input_reference, ...(Array.isArray(requested.reference_images) ? requested.reference_images : []), ...(Array.isArray(requested.frames) ? requested.frames : [])].filter(Boolean);
 	if (references.length > Number(capabilities.reference_images_max || 0)) return { error: imageOptionsError(model, 'The selected Relay image model does not support this number of reference images.') };
 	if (capabilities.cloud_upload && requested.cloud_upload_confirmed !== true && !(requested.cloud_consent && requested.cloud_consent.confirmed === true)) return { error: imageOptionsError(model, 'Cloud-backed image generation requires explicit cloud upload consent.') };
+	const allowedKeys = new Set([
+		'model',
+		'prompt',
+		'size',
+		'quality',
+		'aspect_ratio',
+		'output_format',
+		'n',
+		'candidate_count',
+		'provider_options',
+		'input_reference_data_url',
+		'input_reference',
+		'reference_images',
+		'frames',
+		'referenced_image_paths',
+		'cloud_upload_confirmed',
+		'cloud_consent',
+		'metadata',
+		...providerKeys,
+	]);
+	for (const key of Object.keys(requested)) {
+		if (!allowedKeys.has(key)) delete requested[key];
+	}
 	return { payload: requested };
 }
 

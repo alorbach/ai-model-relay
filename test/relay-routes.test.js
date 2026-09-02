@@ -124,7 +124,7 @@ function createMockSecurity() {
 			{ id: 'model-relay:antigravity-cli:image', type: 'image', backend: 'antigravity-cli', image_capabilities: { contract_version: 1, provider_options: { image_size: { type: 'enum', values: ['1K', '2K', '4K'] } } } },
 			{ id: 'model-relay:xai:imagine-video', type: 'video', backend: 'xai-api' },
 			{ id: 'model-relay:music-analysis:core', type: 'audio', backend: 'music-analysis' },
-			{ id: 'model-relay:local-upscale:swinir-classical-x2', type: 'image', backend: 'local-upscale', job_types: ['upscale'] },
+			{ id: 'model-relay:local-upscale:swinir-classical-x2', type: 'image', backend: 'local-upscale', job_types: ['upscale'], upscale_capabilities: { contract_version: 1, native_scale: 2, output_policy: 'retain_native_x2', input_formats: ['image/png'], output_formats: ['image/png'], cuda_only: true, explicit_install: true } },
 		],
 		getDriver: (type, payload = {}) => String(payload.model || '').startsWith('model-relay:local-upscale:') ? ({ id: 'local-upscale', job_types: ['upscale'], capabilities: () => ({ ready: true, models: [{ id: 'model-relay:local-upscale:swinir-classical-x2', manifest_valid: true }] }) }) : ({ id: 'codex-cli', job_types: ['chat', 'images', 'videos', 'transcribe', 'media.analyze', 'music.analyze'], checkStatus: () => ({ success: true, message: 'ready', details: {} }), capabilities: () => ({ ready: true }) }),
 		getDriverById: (id) => String(id) === 'local-upscale' ? ({ id: 'local-upscale', refresh: async () => { localUpscaleRefreshes += 1; } }) : null,
@@ -209,6 +209,9 @@ function createMockSecurity() {
 		assert.strictEqual(models.body.image_capability_minimum_relay_version, '1.0.10');
 		const relayAntigravityImage = models.body.backends.find((model) => model.id === 'model-relay:antigravity-cli:image');
 		assert.deepStrictEqual(Object.keys(relayAntigravityImage.image_capabilities.provider_options), ['image_size']);
+		const relayUpscale = models.body.backends.find((model) => model.id === 'model-relay:local-upscale:swinir-classical-x2');
+		assert.strictEqual(relayUpscale.upscale_capabilities.native_scale, 2);
+		assert.strictEqual(relayUpscale.upscale_capabilities.output_policy, 'retain_native_x2');
 
 		const relaySettings = await requestJson(port, 'GET', '/v1/relay/settings');
 		assert.strictEqual(relaySettings.statusCode, 200);

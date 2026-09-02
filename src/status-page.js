@@ -1089,15 +1089,14 @@ function statusPageHtml() {
 					</div>
 					<div class="settings-section" id="settings-section-upscale" data-settings-panel="upscale" hidden>
 						<div class="label">Local CUDA Upscale Settings</div>
-						<p class="muted">Installs an official SwinIR or Real-ESRGAN checkout and the pinned ×2 weight on this computer. Setup never runs during a BuchWerk job and never falls back to CPU.</p>
+						<p class="muted">Installs a selected, pinned local Upscale model on this computer. Native ×2 and ×4 outputs are never downsampled; setup never runs during a job and never falls back to CPU.</p>
 						<form class="settings-editor" id="upscaleSettingsForm">
 							<div class="settings-grid" id="upscaleSettings"></div>
 							<div class="muted" id="upscaleModelStates">Models: not checked</div>
+							<div class="settings-grid" id="upscaleInstallActions"></div>
 							<div class="settings-actions">
 								<span class="muted" id="upscaleSettingsMessage">Loading settings</span>
 								<button type="button" id="reloadUpscaleSettings">Reload</button>
-								<button type="button" id="setupSwinir">Install SwinIR ×2</button>
-								<button type="button" id="setupRealesrgan">Install Real-ESRGAN ×2</button>
 								<button type="button" class="btn-primary" id="saveUpscaleSettings" disabled>Save settings</button>
 							</div>
 							<pre class="setup-log" id="upscaleSetupLog" hidden></pre>
@@ -1275,8 +1274,7 @@ function statusPageHtml() {
 			upscaleModelStates: document.getElementById('upscaleModelStates'),
 			upscaleSettingsMessage: document.getElementById('upscaleSettingsMessage'),
 			reloadUpscaleSettings: document.getElementById('reloadUpscaleSettings'),
-			setupSwinir: document.getElementById('setupSwinir'),
-			setupRealesrgan: document.getElementById('setupRealesrgan'),
+			upscaleInstallActions: document.getElementById('upscaleInstallActions'),
 			saveUpscaleSettings: document.getElementById('saveUpscaleSettings'),
 			upscaleSetupLog: document.getElementById('upscaleSetupLog'),
 			asrDetails: document.getElementById('asrDetails'),
@@ -2194,7 +2192,7 @@ function statusPageHtml() {
 				const features = Object.keys(backend.features || {}).filter((key) => backend.features[key]).join(', ') || (backend.job_types || []).join(', ') || 'No supported jobs';
 				const detail = backend.version || backend.command || features;
 				const diagnostic = backend.diagnostic && backend.diagnostic !== 'Ready.' && backend.diagnostic !== 'Authentication not checked yet.' ? '<br><small class="muted">' + escapeHtml(backend.diagnostic) + '</small>' : '';
-				const installation = backend.id === 'local-upscale' ? '<br><small class="muted">Use Settings → Local CUDA Upscale to install SwinIR or Real-ESRGAN. Jobs never download a model or fall back to CPU.</small><br><small class="muted">Models: ' + (Array.isArray(backend.models) ? backend.models.map((model) => escapeHtml(String(model.label || model.id || 'model') + ' — ' + String(model.state || 'not checked'))).join(' · ') : 'not checked') + '</small>' : '';
+				const installation = backend.id === 'local-upscale' ? '<br><small class="muted">Use Settings → Local CUDA Upscale to install an available pinned model. Jobs never download a model, downsample native output, or fall back to CPU.</small><br><small class="muted">Models: ' + (Array.isArray(backend.models) ? backend.models.map((model) => escapeHtml(String(model.label || model.id || 'model') + ' — ' + String(model.state || 'not checked'))).join(' · ') : 'not checked') + '</small>' : '';
 				return '<div class="feature-pill ' + (backend.ready ? 'enabled' : 'disabled') + '"><span class="name"><strong>' + escapeHtml(backend.label || backend.id) + '</strong><br><small class="muted">' + escapeHtml(detail) + '</small>' + diagnostic + installation + '</span><span class="state">' + escapeHtml(status) + '</span></div>';
 			}).join('') || '<div class="muted">No provider metadata reported</div>';
 			const cliPathFields = [
@@ -2604,6 +2602,13 @@ function statusPageHtml() {
 				'<label class="field"><span>Virtual environment path</span><input id="upscaleVenvPath" value="' + escapeHtml(currentUpscaleSettings.venv_path || '') + '"></label>',
 			].join('');
 			fields.upscaleModelStates.textContent = 'Models: ' + (Array.isArray(models) && models.length ? models.map((model) => String(model.label || model.id || 'model') + ' — ' + String(model.state || 'not checked')).join(' · ') : 'not checked');
+			fields.upscaleInstallActions.innerHTML = (Array.isArray(models) ? models : []).map((model) => {
+				const caps = model.upscale_capabilities || {};
+				const restriction = caps.academic_only ? '<small class="muted">Experimental · GPL-3.0-only · academic-only</small>' : '<small class="muted">' + escapeHtml(String(caps.model_class || 'local')) + ' · native ×' + escapeHtml(String(caps.native_scale || '?')) + '</small>';
+				const acknowledgement = caps.installation_acknowledgement_required ? '<label class="field"><span><input type="checkbox" data-upscale-restricted="' + escapeHtml(String(model.id)) + '"> I acknowledge the APISR academic-only and GPL-3.0 restriction</span></label>' : '';
+				const policy = caps.output_policy ? '<small class="muted">Output: ' + escapeHtml(String(caps.output_policy)) + ' · tile ' + escapeHtml(String(caps.tile && caps.tile.recommended || '?')) + ' · ' + escapeHtml(String((caps.precision || []).join('/')) || 'fp16') + '</small>' : '';
+				return '<div class="field"><strong>' + escapeHtml(String(model.label || model.id)) + '</strong><br>' + restriction + '<br>' + policy + acknowledgement + '<button type="button" data-upscale-install="' + escapeHtml(String(model.id)) + '"' + (model.state === 'installed' ? ' disabled' : '') + '>Install ' + escapeHtml(String(model.label || 'model')) + '</button></div>';
+			}).join('') || '<span class="muted">No local upscale models were reported.</span>';
 		}
 
 		function serializeUpscaleSettings() {
@@ -2668,32 +2673,30 @@ function statusPageHtml() {
 			return lines.join(String.fromCharCode(10));
 		}
 
-		async function setupUpscale(engine, button) {
+		async function setupUpscale(modelId, button, acceptRestricted) {
 			const original = button.textContent;
 			try {
-				fields.setupSwinir.disabled = true;
-				fields.setupRealesrgan.disabled = true;
+				Array.from(fields.upscaleInstallActions.querySelectorAll('[data-upscale-install]')).forEach((control) => { control.disabled = true; });
 				button.textContent = 'Installing...';
 				showSetupLog(fields.upscaleSetupLog, '');
 				const settings = serializeUpscaleSettings();
 				await fetch(upscaleSettingsUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ settings }) });
-				fields.upscaleSettingsMessage.textContent = engine === 'swinir' ? 'Installing SwinIR ×2 (venv, CUDA torch, checkout, weight)...' : 'Installing Real-ESRGAN ×2 (venv, CUDA torch, checkout, weight)...';
-				const response = await fetch(upscaleSetupUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ engine }) });
+				fields.upscaleSettingsMessage.textContent = 'Installing selected model (venv, CUDA torch, pinned checkout, verified weight)...';
+				const response = await fetch(upscaleSetupUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: modelId, accept_restricted: !!acceptRestricted }) });
 				const payload = await response.json();
 				if (!response.ok || payload.success === false) {
 					const error = new Error(payload.message || 'Local upscale setup failed');
 					error.payload = payload;
 					throw error;
 				}
-				fields.upscaleSettingsMessage.textContent = (payload.model && payload.model.label || engine) + ' is installed';
+				fields.upscaleSettingsMessage.textContent = (payload.model && payload.model.label || modelId) + ' is installed';
 				showSetupLog(fields.upscaleSetupLog, payload.details && payload.details.log || '');
 				await Promise.all([loadUpscaleSettings(), refresh().catch(() => {}), loadRelaySettings().catch(() => {})]);
 			} catch (error) {
 				fields.upscaleSettingsMessage.textContent = error.message || 'Local upscale setup failed';
 				showSetupLog(fields.upscaleSetupLog, setupFailureText(error.payload || {}, error.message || 'Local upscale setup failed'));
 			} finally {
-				fields.setupSwinir.disabled = false;
-				fields.setupRealesrgan.disabled = false;
+				Array.from(fields.upscaleInstallActions.querySelectorAll('[data-upscale-install]')).forEach((control) => { control.disabled = false; });
 				button.textContent = original;
 			}
 		}
@@ -3354,8 +3357,17 @@ function statusPageHtml() {
 		fields.upscaleSettingsForm.addEventListener('submit', (event) => { event.preventDefault(); saveUpscaleSettings(); });
 		fields.reloadUpscaleSettings.addEventListener('click', loadUpscaleSettings);
 		fields.saveUpscaleSettings.addEventListener('click', saveUpscaleSettings);
-		fields.setupSwinir.addEventListener('click', () => setupUpscale('swinir', fields.setupSwinir));
-		fields.setupRealesrgan.addEventListener('click', () => setupUpscale('realesrgan', fields.setupRealesrgan));
+		fields.upscaleInstallActions.addEventListener('click', (event) => {
+			const button = event.target.closest('[data-upscale-install]');
+			if (!button) return;
+			const modelId = button.getAttribute('data-upscale-install');
+			const restricted = fields.upscaleInstallActions.querySelector('[data-upscale-restricted="' + CSS.escape(modelId) + '"]');
+			if (restricted && !restricted.checked) {
+				fields.upscaleSettingsMessage.textContent = 'Confirm the APISR academic-only and GPL-3.0 restriction before installation.';
+				return;
+			}
+			setupUpscale(modelId, button, !!(restricted && restricted.checked));
+		});
 		fields.relaySettingsForm.addEventListener('submit', (event) => { event.preventDefault(); saveRelaySettings(); });
 		fields.saveRelaySettings.addEventListener('click', saveRelaySettings);
 		fields.refreshRelayProviders.addEventListener('click', refreshProviderDetection);

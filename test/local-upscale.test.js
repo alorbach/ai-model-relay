@@ -5,7 +5,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { CHECKOUT_MARKER, INSTALL, MODELS, createLocalUpscaleDriver, modelConfig, runnerPath } = require('../src/local-upscale');
+const { CHECKOUT_MARKER, INSTALL, MODELS, createLocalUpscaleDriver, modelConfig, nativeContractValid, runnerPath } = require('../src/local-upscale');
 
 (async () => {
 	const sourceRunner = runnerPath('upscale-runner.py', path.join('D:', 'relay', 'src'));
@@ -67,7 +67,20 @@ const { CHECKOUT_MARKER, INSTALL, MODELS, createLocalUpscaleDriver, modelConfig,
 		assert.strictEqual(valid.manifest_valid, true);
 		assert.strictEqual(valid.state, 'installed');
 		assert.strictEqual(invalid.state, 'not_installed');
-		assert.strictEqual(Object.keys(MODELS).length, 2);
+		assert.strictEqual(Object.keys(MODELS).length, 7);
+		const x4 = MODELS['model-relay:local-upscale:drct-classical-x4'];
+		const apisr = MODELS['model-relay:local-upscale:apisr-anime-x2'];
+		assert.strictEqual(x4.native_scale, 4);
+		assert.strictEqual(x4.output_policy, 'retain_native_x4');
+		assert.strictEqual(x4.max_output_bytes, 256 * 1024 * 1024);
+		assert.strictEqual(apisr.experimental, true);
+		assert.strictEqual(apisr.academic_only, true);
+		assert.strictEqual(apisr.license.spdx, 'GPL-3.0-only');
+		const native4x = { scale: 4, output_policy: 'retain_native_x4', crop_pixels: { width: 320, height: 180 }, target_print: { width: 1000, height: 700 }, output_print: { width: 1280, height: 720 } };
+		assert.strictEqual(nativeContractValid(x4, native4x), true, 'native x4 must retain exactly four times the approved crop');
+		assert.strictEqual(nativeContractValid(x4, { ...native4x, scale: 2 }), false, 'x4 must reject a declared x2 scale');
+		assert.strictEqual(nativeContractValid(x4, { ...native4x, output_policy: 'retain_native_x2' }), false, 'x4 must reject x2 policy/downsample requests');
+		assert.strictEqual(nativeContractValid(x4, { ...native4x, output_print: { width: 640, height: 360 } }), false, 'x4 must reject non-native output dimensions');
 
 		const driver = createLocalUpscaleDriver({ env, manifests: testSwinirManifest, runnerPath: __filename });
 		const capability = driver.capabilities();
@@ -78,6 +91,11 @@ const { CHECKOUT_MARKER, INSTALL, MODELS, createLocalUpscaleDriver, modelConfig,
 		assert.strictEqual(capability.features.cancellation, true);
 		assert.strictEqual(capability.features.max_gpu_jobs, 1);
 		assert.ok(capability.models.some((model) => model.id === valid.id && model.manifest_valid));
+		const publicX4 = capability.models.find((model) => model.id === x4.id);
+		assert.strictEqual(publicX4.upscale_capabilities.contract_version, 1);
+		assert.strictEqual(publicX4.upscale_capabilities.native_scale, 4);
+		assert.strictEqual(publicX4.upscale_capabilities.output_policy, 'retain_native_x4');
+		assert.ok(!JSON.stringify(publicX4).includes('weight_sha256'));
 		assert.ok(!JSON.stringify(capability).includes(weight));
 		const runner = fs.readFileSync(path.join(__dirname, '..', 'src', 'upscale-runner.py'), 'utf8');
 		assert.ok(runner.includes('"--model_path", str(model["model_path"])'), 'both official runners must receive the checksum-pinned weight path');
@@ -85,8 +103,9 @@ const { CHECKOUT_MARKER, INSTALL, MODELS, createLocalUpscaleDriver, modelConfig,
 		assert.ok(runner.includes('"cuda_runtime_invalid"'), 'an incomplete PyTorch import must report a safe CUDA-runtime diagnostic instead of raising an unhandled attribute error');
 		assert.ok(runner.includes('"--gpu-id", str(int(job.get("cuda_device", 0)))'), 'Real-ESRGAN must receive the selected CUDA device');
 		assert.ok(runner.includes('int(job.get("timeout_seconds", 1800))'), 'the CUDA subprocess must use the Node-configured timeout');
-		assert.ok(runner.includes('"output_policy", "")) != "retain_native_x2"'), 'the runner must require the retained native x2 output contract');
-		assert.ok(runner.includes('image.width != width or image.height != height'), 'the runner must reject an engine result that is not native x2 dimensions');
+		assert.ok(runner.includes('native_policy = "retain_native_x" + str(native_scale)'), 'the runner must require the retained native output contract for its declared scale');
+		assert.ok(runner.includes('width != (right - left) * native_scale'), 'the runner must reject an engine result that is not its native dimensions');
+		assert.ok(runner.includes('("hat-s", "drct", "apisr")'), 'the runner must expose verified adapters for HAT-S, DRCT, and APISR');
 		assert.ok(runner.includes('"downsampler": "none"'), 'the runner must record that no post-upscale downsampling occurred');
 		const driverSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'local-upscale.js'), 'utf8');
 		const cudaTorchSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'cuda-torch-venv.js'), 'utf8');
@@ -98,7 +117,8 @@ const { CHECKOUT_MARKER, INSTALL, MODELS, createLocalUpscaleDriver, modelConfig,
 		assert.ok(!driverSource.includes('--extra-index-url'), 'CUDA torch setup must not add PyPI as an extra index');
 		assert.ok(driverSource.includes("'--constraint'"), 'follow-on pip installs must pin CUDA torch instead of skipping package dependencies');
 		assert.ok(driverSource.includes("'--no-deps', '-e'"), 'the Real-ESRGAN editable checkout must stay --no-deps so its setup.py cannot replace CUDA torch');
-		assert.ok(driverSource.includes("payload.output_policy !== 'retain_native_x2'"), 'the relay must reject a local-upscale request that does not retain native x2 output');
+		assert.ok(driverSource.includes('nativeContractValid(model, payload)'), 'the relay must reject a local-upscale request that does not retain the selected native output policy and scale');
+		assert.ok(driverSource.includes('model.max_output_bytes || MAX_BYTES'), 'the relay must use the separate bounded output ceiling for native x4 models');
 		assert.ok(driverSource.includes("metadata.provenance.downsampler !== 'none'"), 'the relay must reject a result whose provenance reports post-upscale downsampling');
 		assert.ok(INSTALL.swinir.commit.length === 40 && INSTALL.realesrgan.commit.length === 40, 'official checkouts must be pinned to a git commit');
 		assert.ok(runner.includes('checkout_mismatch'), 'jobs must refuse an unpinned official checkout before the pickle compatibility loader runs');

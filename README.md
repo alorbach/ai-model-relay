@@ -51,7 +51,7 @@ Double-click the tray icon or use `Open status page` to open the local status pa
 - Alorbach AI Subscription Gateway with User-owned Local Codex enabled for production WordPress usage.
 - Optional Local ASR transcription/alignment: Python 3.10 for faster-whisper, Python 3.12 for Qwen3 ASR and Qwen3 ForcedAligner, ffmpeg/ffprobe on PATH, and cached Hugging Face models or explicit permission to download models.
 - Optional local music analysis: Python 3.10+, ffmpeg/ffprobe on PATH, and a dedicated virtual environment with `numpy`, `scipy`, `soundfile`, `librosa`, and `pyloudnorm`. The status page's explicit setup action creates and installs this environment; it is never downloaded automatically.
-- Optional BuchWerk KDP local upscale: NVIDIA CUDA, plus the status page **Install SwinIR ×2** / **Install Real-ESRGAN ×2** actions. Setup clones the official checkout and pins the ×2 weight; jobs never download a model, send pixels to a cloud provider, or fall back to CPU.
+- Optional local CUDA upscale: NVIDIA CUDA, plus dynamic status-page cards for SwinIR ×2, Real-ESRGAN ×2plus, DRCT ×2/×4, HAT-S ×2/×4, and APISR ×2. Setup clones the pinned official checkout and verifies the exact weight before a job can run; jobs never download a model, send pixels to a cloud provider, or fall back to CPU.
 
 Before pairing, log in to Codex in the same Windows account:
 
@@ -79,12 +79,12 @@ For local album metrics, use the separate `Local Music Analysis Settings` panel.
 This optional workflow accepts only a signed binary image from a paired BuchWerk browser. It creates a new candidate asset after the browser has reviewed a KDP crop; it never modifies the original asset.
 
 1. Open the Relay status page **Settings** tab and use **Local CUDA Upscale Settings**.
-2. Click **Install SwinIR ×2** for print geometry (`model-relay:local-upscale:swinir-classical-x2`). **Install Real-ESRGAN ×2** is an explicit restoration comparison, not an automatic fallback.
-3. Setup clones the official GitHub checkout, downloads the ×2 weight, installs CUDA PyTorch into a private `upscale-venv` under the Relay state directory, and pins the weight SHA-256. Jobs never download a model or fall back to CPU. If install fails, the Settings panel shows pip/Python stdout and stderr under the buttons.
+2. Choose a model card. SwinIR ×2, Real-ESRGAN ×2plus, HAT-S ×2/×4, and DRCT ×4 have pinned official checkouts and weights. DRCT ×2 pins its runtime but stays unavailable until an operator supplies a separately verified checkpoint because no official ×2 release is published. APISR ×2 needs an explicit GPL-3.0/academic-only acknowledgement.
+3. Setup clones the official GitHub checkout, downloads the pinned model weight where available, installs CUDA PyTorch into the BasicSR `upscale-venv` or isolated APISR runtime, and verifies the weight SHA-256. Jobs never download a model or fall back to CPU. If install fails, the Settings panel shows pip/Python stdout and stderr below the model cards.
 4. Wait until the model state shows `installed`. The first install can take a long time.
 5. In BuchWerk choose **KDP first + local CUDA ×2**, review the crop, explicitly approve it, and start one local job. The Relay permits only one CUDA upscale job per GPU and reports free VRAM before it starts.
 
-The Relay runs SwinIR or Real-ESRGAN at exactly ×2, then applies a fixed Lanczos downsample to BuchWerk's signed print target. A CUDA, VRAM, checksum, timeout, cancellation, or binary-validation failure leaves the source unchanged and returns no derived asset.
+The Relay retains the requested model's native output only: ×2 requires `scale: 2` / `retain_native_x2`, ×4 requires `scale: 4` / `retain_native_x4`, with exact crop-derived dimensions. It never silently downsamples or synthesizes ×2 from ×4; provenance reports `downsampler: none`. Native ×4 PNG output is capped at 256 MiB. BuchWerk continues to use its existing ×2 flow until it consumes the public model contract.
 
 ## Documentation
 
@@ -161,7 +161,7 @@ Routes:
 - `GET /v1/asr/settings`, `POST /v1/asr/settings`, `POST /v1/asr/setup`: Local ASR settings and explicit status-page install for a Whisper or Qwen model. Add `?refresh=1` on GET to run a full Python/GPU/ffmpeg probe. Setup downloads even when job-time model downloads are disabled.
 - `GET /v1/music-analysis/settings`: local music-analysis settings and cached runtime metadata. Add `?refresh=1` to run its Python/ffmpeg probe.
 - `POST /v1/music-analysis/settings`, `/v1/music-analysis/setup`: save local music settings or deliberately create/install its private Python environment.
-- `GET /v1/upscale/settings`, `POST /v1/upscale/settings`, `POST /v1/upscale/setup`: status-page install for local CUDA SwinIR / Real-ESRGAN. Setup is explicit; jobs never download weights.
+- `GET /v1/upscale/settings`, `POST /v1/upscale/settings`, `POST /v1/upscale/setup`: dynamic, explicit installation for local CUDA upscale model profiles. `POST /v1/upscale/setup` accepts `model` and requires `accept_restricted: true` for APISR. Jobs never download weights.
 - `POST /v1/pair`: exchange tray pairing code for an origin token.
 - `POST /v1/unpair`: remove the pairing for the request origin.
 - `GET /v1/models`: list paired local model IDs.
@@ -173,7 +173,7 @@ Routes:
 - `POST /v1/media/analyze`: analyze bounded media frames, an HTTPS media URL, or a bounded MP4/MOV/WebM/AVI data URL.
 - `POST /v1/music/analyze`: analyze a local audio payload with the separate local music-analysis pipeline.
 - `POST /v1/relay/jobs/chat`, `/images`, `/transcribe`, `/videos`, `/media/analyze`, and `/music/analyze`: provider-neutral job aliases using the same signed envelope and response shapes.
-- `POST /v1/relay/jobs/upscale`: paired signed binary PNG/JPEG/WebP input for a local CUDA ×2 job. The request metadata remains bounded JSON in `X-Alorbach-Upscale-Payload`; image bytes are never base64 JSON.
+- `POST /v1/relay/jobs/upscale`: paired signed binary PNG/JPEG/WebP input for a local CUDA native ×2 or ×4 job. The request metadata remains bounded JSON in `X-Alorbach-Upscale-Payload`; image bytes are never base64 JSON. Every local model in `GET /v1/relay/models` and the `local-upscale` backend in `GET /v1/relay/capabilities` publishes `upscale_capabilities` version 1 without local paths, checksums, or checkout revisions.
 - `GET /v1/relay/jobs/:requestId/artifact`: paired temporary binary PNG result for BuchWerk's protected multipart completion.
 - `POST /v1/relay/jobs/upscale/cancel`: paired cancellation for an active or queued local CUDA job.
 
@@ -300,6 +300,8 @@ for await (const chunk of response.body.pipeThrough(new TextDecoderStream())) {
 - `AI_MODEL_RELAY_UPSCALE_TORCH_INDEX_URL`: CUDA wheel index for `torch`/`torchvision`. Default: `https://download.pytorch.org/whl/cu128`. Setup uses only this index so pip cannot pick a CPU wheel from PyPI.
 - `AI_MODEL_RELAY_SWINIR_ROOT`, `AI_MODEL_RELAY_SWINIR_MODEL_PATH`, `AI_MODEL_RELAY_SWINIR_WEIGHT_SHA256`: official SwinIR checkout, local ×2 weight path, and pinned lowercase SHA-256.
 - `AI_MODEL_RELAY_REALESRGAN_ROOT`, `AI_MODEL_RELAY_REALESRGAN_MODEL_PATH`, `AI_MODEL_RELAY_REALESRGAN_WEIGHT_SHA256`: official Real-ESRGAN checkout, local ×2plus weight path, and pinned lowercase SHA-256.
+- `AI_MODEL_RELAY_UPSCALE_<INSTALL_KEY>_ROOT`, `AI_MODEL_RELAY_UPSCALE_<INSTALL_KEY>_MODEL_PATH`, `AI_MODEL_RELAY_UPSCALE_<INSTALL_KEY>_WEIGHT_SHA256`: optional explicit model-record overrides for DRCT/HAT-S/APISR (for example `AI_MODEL_RELAY_UPSCALE_HAT_S_X4_MODEL_PATH`). DRCT ×2 deliberately requires an operator-verified path plus SHA-256.
+- `AI_MODEL_RELAY_APISR_VENV`: isolated APISR runtime. APISR is experimental, GPL-3.0-only, and academic-only; it is not a commercial-default recommendation.
 - `AI_MODEL_RELAY_UPSCALE_TILE`: CUDA tile edge for the local ×2 run. Default: `512`.
 - `AI_MODEL_RELAY_UPSCALE_PRECISION`: `fp16` (default) or `fp32`; this remains CUDA-only.
 - `AI_MODEL_RELAY_UPSCALE_TIMEOUT_MS`: bounded local upscale timeout. Default: `1800000` (30 minutes).

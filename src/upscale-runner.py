@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CUDA-only adapter for explicitly installed official SwinIR/Real-ESRGAN.
+"""CUDA-only adapter for explicitly installed official local upscalers.
 
 This file neither downloads models nor falls back to CPU. The desktop Relay
 validates the model checksum before this runner starts. The supplied model
@@ -35,6 +35,63 @@ def find_png(root, modified_after):
     if not candidates:
         return None
     return max(candidates, key=lambda candidate: candidate.stat().st_mtime)
+
+
+def load_verified_state(torch, model_path):
+    try:
+        checkpoint = torch.load(str(model_path), map_location="cpu", weights_only=True)
+    except TypeError:
+        checkpoint = torch.load(str(model_path), map_location="cpu")
+    if isinstance(checkpoint, dict):
+        checkpoint = checkpoint.get("params_ema") or checkpoint.get("params") or checkpoint.get("state_dict") or checkpoint
+    if not isinstance(checkpoint, dict):
+        fail("weight_invalid", "The verified model checkpoint does not contain a state dictionary.")
+    return {str(key).replace("module.", "", 1): value for key, value in checkpoint.items()}
+
+
+def run_tiled_tensor_model(torch, image, model, root, crop_source, output_path, scale, tile, precision):
+    """Direct, checksum-gated adapters for HAT-S, DRCT and APISR.
+
+    They use only the Relay-passed pinned checkout and weight. Tiling is done
+    before inference and outputs are stitched at native scale; no resize path
+    exists in this adapter.
+    """
+    from PIL import Image
+    sys.path.insert(0, str(root))
+    if model.get("engine") == "hat-s":
+        from hat.archs.hat_arch import HAT
+        network = HAT(upscale=scale, in_chans=3, img_size=64, window_size=16, compress_ratio=24, squeeze_factor=24, conv_scale=0.01, overlap_ratio=0.5, img_range=1., depths=[6, 6, 6, 6, 6, 6], embed_dim=144, num_heads=[6, 6, 6, 6, 6, 6], mlp_ratio=2, upsampler="pixelshuffle", resi_connection="1conv")
+    elif model.get("engine") == "drct":
+        from drct.archs.drct_arch import DRCT
+        network = DRCT(upscale=scale, in_chans=3, img_size=64, window_size=16, compress_ratio=3, squeeze_factor=30, conv_scale=0.01, overlap_ratio=0.5, img_range=1., depths=[6, 6, 6, 6, 6, 6], embed_dim=180, num_heads=[6, 6, 6, 6, 6, 6], mlp_ratio=2, upsampler="pixelshuffle", resi_connection="1conv")
+    elif model.get("engine") == "apisr":
+        from test_code.test_utils import load_rrdb
+        network = load_rrdb(str(model["model_path"]), scale).eval()
+    else:
+        fail("model_invalid", "The configured local upscale engine is unsupported.")
+    if model.get("engine") != "apisr":
+        network.load_state_dict(load_verified_state(torch, model["model_path"]), strict=True)
+    device = torch.device("cuda:" + str(int(model.get("cuda_device", 0))))
+    network = network.to(device).eval()
+    array = __import__("numpy").asarray(image.convert("RGB")).copy()
+    tensor = torch.from_numpy(array).permute(2, 0, 1).unsqueeze(0).float().div(255.).to(device)
+    height, width = tensor.shape[-2:]
+    tile = max(16, int(tile))
+    output = torch.zeros((1, 3, height * scale, width * scale), device=device)
+    weights = torch.zeros_like(output)
+    autocast = torch.autocast(device_type="cuda", dtype=torch.float16, enabled=str(precision) == "fp16")
+    with torch.inference_mode(), autocast:
+        for top in range(0, height, tile):
+            for left in range(0, width, tile):
+                bottom = min(top + tile, height); right = min(left + tile, width)
+                patch = tensor[:, :, top:bottom, left:right]
+                generated = network(patch).clamp_(0, 1)
+                if generated.shape[-2:] != ((bottom - top) * scale, (right - left) * scale):
+                    fail("engine_output_invalid", "The CUDA model adapter did not produce its declared native scale.")
+                output[:, :, top * scale:bottom * scale, left * scale:right * scale] += generated
+                weights[:, :, top * scale:bottom * scale, left * scale:right * scale] += 1
+    output = (output / weights).clamp_(0, 1).squeeze(0).permute(1, 2, 0).mul(255).byte().cpu().numpy()
+    Image.fromarray(output, "RGB").save(output_path, "PNG", optimize=True)
 
 
 def main():
@@ -80,8 +137,10 @@ def main():
         fail("checkout_mismatch", "The official model checkout is not the pinned git commit.")
     minimum_width = int(target.get("width", 0)); minimum_height = int(target.get("height", 0))
     width = int(output_print.get("width", 0)); height = int(output_print.get("height", 0))
-    if minimum_width < 1 or minimum_height < 1 or width < minimum_width or height < minimum_height or int(job.get("scale", 0)) != 2 or str(job.get("output_policy", "")) != "retain_native_x2":
-        fail("target_invalid", "Local upscale requires a profile target and an approved native x2 output contract.")
+    native_scale = int(model.get("native_scale", 0))
+    native_policy = "retain_native_x" + str(native_scale)
+    if native_scale not in (2, 4) or minimum_width < 1 or minimum_height < 1 or width < minimum_width or height < minimum_height or int(job.get("scale", 0)) != native_scale or str(job.get("output_policy", "")) != native_policy:
+        fail("target_invalid", "Local upscale requires a profile target and its approved native scale output contract.")
     started = datetime.now(timezone.utc).isoformat()
     with tempfile.TemporaryDirectory(prefix="ai-model-relay-crop-") as temp:
         crop_source = Path(temp) / "crop.png"
@@ -91,8 +150,8 @@ def main():
             right = int(crop_pixels.get("right", -1)); bottom = int(crop_pixels.get("bottom", -1))
             if left < 0 or top < 0 or right <= left or bottom <= top or right > image.width or bottom > image.height:
                 fail("crop_invalid", "The approved crop is outside the source image.")
-            if int(crop_pixels.get("width", 0)) != right - left or int(crop_pixels.get("height", 0)) != bottom - top or width != (right - left) * 2 or height != (bottom - top) * 2:
-                fail("output_contract_invalid", "The approved native x2 output does not match the approved crop.")
+            if int(crop_pixels.get("width", 0)) != right - left or int(crop_pixels.get("height", 0)) != bottom - top or width != (right - left) * native_scale or height != (bottom - top) * native_scale:
+                fail("output_contract_invalid", "The approved native output does not match the approved crop.")
             image.crop((left, top, right, bottom)).convert("RGB").save(crop_source, "PNG")
         root = Path(model.get("root", ""))
         if model.get("engine") == "swinir":
@@ -114,7 +173,7 @@ def main():
                 "sys.argv = sys.argv[1:]\n"
                 "runpy.run_path(sys.argv[0], run_name='__main__')\n"
             )
-            command = [sys.executable, "-c", swinir_launcher, str(script), "--task", "classical_sr", "--scale", "2", "--training_patch_size", "64", "--model_path", str(model["model_path"]), "--folder_lq", str(crop_source.parent), "--tile", str(int(job.get("tile", 512))), "--tile_overlap", "32"]
+            command = [sys.executable, "-c", swinir_launcher, str(script), "--task", "classical_sr", "--scale", str(native_scale), "--training_patch_size", "64", "--model_path", str(model["model_path"]), "--folder_lq", str(crop_source.parent), "--tile", str(int(job.get("tile", 512))), "--tile_overlap", "32"]
         elif model.get("engine") == "realesrgan":
             script = root / "inference_realesrgan.py"
             # The official CLI otherwise resolves a default weight and may
@@ -130,20 +189,26 @@ def main():
                 "sys.argv = sys.argv[1:]\n"
                 "runpy.run_path(sys.argv[0], run_name='__main__')\n"
             )
-            command = [sys.executable, "-c", realesrgan_launcher, str(script), "-n", "RealESRGAN_x2plus", "--model_path", str(model["model_path"]), "-i", str(crop_source), "-o", str(result_root), "--outscale", "2", "--tile", str(int(job.get("tile", 512))), "--gpu-id", str(int(job.get("cuda_device", 0))), "--ext", "png"]
+            command = [sys.executable, "-c", realesrgan_launcher, str(script), "-n", "RealESRGAN_x2plus", "--model_path", str(model["model_path"]), "-i", str(crop_source), "-o", str(result_root), "--outscale", str(native_scale), "--tile", str(int(job.get("tile", 512))), "--gpu-id", str(int(job.get("cuda_device", 0))), "--ext", "png"]
             if str(job.get("precision", "fp16")) != "fp16":
                 command.append("--fp32")
+        elif model.get("engine") in ("hat-s", "drct", "apisr"):
+            run_tiled_tensor_model(torch, Image.open(crop_source), model, root, crop_source, output, native_scale, int(job.get("tile", 256)), str(job.get("precision", "fp16")))
+            generated = output
+            engine_started_at = datetime.now(timezone.utc).timestamp()
         else:
             fail("model_invalid", "The configured local upscale engine is unsupported.")
         if not script.is_file():
             fail("runner_checkout_missing", "Install the configured official model checkout before local upscaling.")
         engine_started_at = datetime.now(timezone.utc).timestamp()
         timeout_seconds = max(1, int(job.get("timeout_seconds", 1800)))
-        try:
-            completed = subprocess.run(command, cwd=str(root), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=timeout_seconds, check=False)
-        except subprocess.TimeoutExpired:
-            fail("engine_timeout", "The CUDA model runner timed out; source bytes were preserved.")
-        if completed.returncode != 0:
+        completed = None
+        if model.get("engine") not in ("hat-s", "drct", "apisr"):
+            try:
+                completed = subprocess.run(command, cwd=str(root), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=timeout_seconds, check=False)
+            except subprocess.TimeoutExpired:
+                fail("engine_timeout", "The CUDA model runner timed out; source bytes were preserved.")
+        if completed is not None and completed.returncode != 0:
             # Preserve the Relay's opaque, safe failure response while making
             # the bounded official-runner diagnostics available in the local
             # status UI.  Without this, an engine exit only reports
@@ -154,16 +219,18 @@ def main():
             if completed.stderr:
                 sys.stderr.write(completed.stderr[-8000:])
             fail("engine_failed", "The CUDA model runner failed; source bytes were preserved.")
-        generated = find_png(result_root, engine_started_at) or find_png(root / "results", engine_started_at)
+        generated = generated if model.get("engine") in ("hat-s", "drct", "apisr") else (find_png(result_root, engine_started_at) or find_png(root / "results", engine_started_at))
         if generated is None:
             fail("engine_output_missing", "The CUDA model runner did not write a PNG result.")
         with Image.open(generated) as image:
             if image.width != width or image.height != height:
-                fail("engine_output_invalid", "The CUDA model runner did not retain the required native x2 dimensions.")
+                fail("engine_output_invalid", "The CUDA model runner did not retain the required native dimensions.")
             image.convert("RGB").save(output, "PNG", optimize=True)
+        if output.stat().st_size > int(job.get("output_max_bytes", 64 * 1024 * 1024)):
+            fail("engine_output_too_large", "The CUDA model output exceeded the native profile byte limit.")
     finished = datetime.now(timezone.utc).isoformat()
     device = torch.cuda.get_device_name(int(job.get("cuda_device", 0)))
-    print(json.dumps({"success": True, "output": {"width": width, "height": height}, "provenance": {"model_id": model["id"], "model_version": "operator-installed-official", "weight_checksum": expected, "cuda_device": device, "precision": str(job.get("precision", "fp16")), "tile": int(job.get("tile", 512)), "downsampler": "none", "processing_started_at": started, "processing_finished_at": finished}}))
+    print(json.dumps({"success": True, "output": {"width": width, "height": height}, "provenance": {"model_id": model["id"], "model_version": "operator-installed-official", "weight_checksum": expected, "native_scale": native_scale, "model_class": model.get("model_class", "unknown"), "cuda_device": device, "precision": str(job.get("precision", "fp16")), "tile": int(job.get("tile", 512)), "downsampler": "none", "processing_started_at": started, "processing_finished_at": finished}}))
 
 
 if __name__ == "__main__":
