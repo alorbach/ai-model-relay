@@ -1,0 +1,44 @@
+docs/local-bridge-api.md
+  s_7beb51de38a6ca::t_86bab9ec646e15 535
+src/image-capabilities.js
+  s_7beb51de38a6ca::t_feda3f0988a327 24-28,35-36,38-40,57,59,66-70,82-99
+  s_7beb51de38a6ca::t_d619e81651731b 209
+  s_e3995dfbc6af5b::t_e03e99bfb43a5a 100
+test/grok-media.test.js
+  s_7beb51de38a6ca::t_218f4b2e6743eb 76-79
+  s_7beb51de38a6ca::t_a2bf3dd193e64b 80
+  s_7beb51de38a6ca::t_618f2e96ebd929 8
+  s_7beb51de38a6ca::t_08391c9f406738 87
+src/backend-registry.js
+  s_7beb51de38a6ca::t_17770eded9ddf7 786
+  s_7beb51de38a6ca::t_bcfee072a51c29 1863
+test/backend-registry.test.js
+  s_7beb51de38a6ca::t_ca77d365d298bb 21
+  s_7beb51de38a6ca::t_bebe41dc103fe0 156-158,161
+  s_7beb51de38a6ca::t_99c2d26f76d08a 172-175
+  s_7beb51de38a6ca::t_c91d9cc07e191f 166-168
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "1151cd52ad2aaf5a672ce93d632c5ed97ecc4649",
+  "prompts": {},
+  "sessions": {
+    "s_7beb51de38a6ca": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "4af63418-5b74-4bc1-91a9-568c3e25342b",
+        "model": "grok-4.6"
+      },
+      "human_author": null
+    },
+    "s_e3995dfbc6af5b": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "e03d7889-b271-4d13-b0d0-3d54f7867341",
+        "model": "claude-fable-5-1-thinking-high"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
