@@ -14,7 +14,7 @@ const { statusPageHtml } = require('./status-page');
 const { resetTempDebugLogs } = require('./temp-debug-logs');
 const video = require('./video');
 const { PRODUCT_NAME, SHORT_NAME, LEGACY_PRODUCT_NAME } = require('./brand');
-const { createBackendRegistry } = require('./backend-registry');
+const { createBackendRegistry, IMAGE_CAPABILITY_CONTRACT_VERSION } = require('./backend-registry');
 const { expandWindowsEnvironmentVariables } = require('./local-cli');
 const relaySettings = require('./relay-settings');
 const { createStatusCache } = require('./status-cache');
@@ -355,6 +355,9 @@ function modelsPayload(context) {
 	const backendModels = context.backends.models();
 	modelPayload.models.relay = backendModels.map((model) => model.id);
 	modelPayload.backends = backendModels;
+	modelPayload.image_capability_contract_version = IMAGE_CAPABILITY_CONTRACT_VERSION;
+	modelPayload.image_capability_minimum_relay_version = '1.0.10';
+	modelPayload.bridge = { ...(modelPayload.bridge || {}), version: packageInfo.version };
 	return modelPayload;
 }
 
@@ -374,7 +377,7 @@ function relayPayloadFor(context, jobType, payload = {}) {
 		const code = explicit ? resolved.error.code : 'relay_default_unavailable';
 		return { error: { ...resolved.error, code, message: explicit ? resolved.error.message : `Configured default for ${jobType} is unavailable: ${model}. ${resolved.error.message}` } };
 	}
-	return { payload: resolvedPayload, resolved };
+	return { payload: resolved.payload || resolvedPayload, resolved };
 }
 
 function validLocalTestRequestId(value) {
@@ -836,12 +839,12 @@ async function route(req, res, context) {
 		if (body.input_reference_data_url) {
 			requestedPayload.input_reference_data_url = String(body.input_reference_data_url);
 		}
-		for (const key of ['audio_base64', 'audio_format', 'language', 'locale', 'xai_options', 'media_data_url', 'media_url', 'frames', 'size', 'quality', 'image_size', 'seconds', 'aspect_ratio', 'resolution', 'n', 'generate_audio']) {
+		for (const key of ['audio_base64', 'audio_format', 'language', 'locale', 'xai_options', 'media_data_url', 'media_url', 'frames', 'size', 'quality', 'image_size', 'seconds', 'aspect_ratio', 'resolution', 'n', 'candidate_count', 'provider_options', 'output_format', 'cloud_upload_confirmed', 'cloud_consent', 'generate_audio']) {
 			if (body[key] !== undefined) requestedPayload[key] = body[key];
 		}
 		const resolved = relayPayloadFor(context, jobType, requestedPayload);
 		if (resolved.error) {
-			sendErrorJson(req, res, 503, resolved.error, origin, { route: url.pathname });
+			sendErrorJson(req, res, errorStatusForResult(resolved.error), resolved.error, origin, { route: url.pathname });
 			return;
 		}
 		const display = jobDisplayMeta(context, jobType, resolved.payload, '', '', resolved.resolved);
@@ -891,7 +894,7 @@ async function route(req, res, context) {
 	if (url.pathname === '/v1/images' || url.pathname === '/v1/relay/jobs/images') {
 		const isRelayRoute = url.pathname === '/v1/relay/jobs/images';
 		const resolved = isRelayRoute ? relayPayloadFor(context, 'images', body.payload || {}) : { payload: body.payload || {} };
-		if (resolved.error) { sendErrorJson(req, res, 503, resolved.error, pairedOrigin, { requestId: body.request_id, route: url.pathname }); return; }
+		if (resolved.error) { sendErrorJson(req, res, errorStatusForResult(resolved.error), resolved.error, pairedOrigin, { requestId: body.request_id, route: url.pathname }); return; }
 		const display = isRelayRoute ? jobDisplayMeta(context, 'images', resolved.payload, '', '', resolved.resolved) : { provider: 'codex-cli', providerLabel: 'Codex CLI', workflow: workflowForJob('images', 'codex-cli') };
 		const result = await jobManager.run({
 			requestId: body.request_id,

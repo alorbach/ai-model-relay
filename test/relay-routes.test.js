@@ -121,6 +121,7 @@ function createMockSecurity() {
 			{ id: 'model-relay:xai:grok-4.6', type: 'text', backend: 'xai-api' },
 			{ id: 'model-relay:xai:stt', type: 'audio', backend: 'xai-api' },
 			{ id: 'model-relay:xai:imagine-image', type: 'image', backend: 'xai-api' },
+			{ id: 'model-relay:antigravity-cli:image', type: 'image', backend: 'antigravity-cli', image_capabilities: { contract_version: 1, provider_options: { image_size: { type: 'enum', values: ['1K', '2K', '4K'] } } } },
 			{ id: 'model-relay:xai:imagine-video', type: 'video', backend: 'xai-api' },
 			{ id: 'model-relay:music-analysis:core', type: 'audio', backend: 'music-analysis' },
 			{ id: 'model-relay:local-upscale:swinir-classical-x2', type: 'image', backend: 'local-upscale', job_types: ['upscale'] },
@@ -204,6 +205,10 @@ function createMockSecurity() {
 		assert.ok(models.body.models.relay.includes('model-relay:music-analysis:core'));
 		assert.ok(models.body.models.relay.includes('model-relay:local-upscale:swinir-classical-x2'));
 		assert.ok(models.body.backends.some((model) => model.backend === 'xai-api'));
+		assert.strictEqual(models.body.image_capability_contract_version, 1);
+		assert.strictEqual(models.body.image_capability_minimum_relay_version, '1.0.10');
+		const relayAntigravityImage = models.body.backends.find((model) => model.id === 'model-relay:antigravity-cli:image');
+		assert.deepStrictEqual(Object.keys(relayAntigravityImage.image_capabilities.provider_options), ['image_size']);
 
 		const relaySettings = await requestJson(port, 'GET', '/v1/relay/settings');
 		assert.strictEqual(relaySettings.statusCode, 200);

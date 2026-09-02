@@ -16,6 +16,11 @@ const {
 	createCursorCliDriver,
 	createGrokCliDriver,
 	createXaiApiDriver,
+	ANTIGRAVITY_IMAGE_CAPABILITIES,
+	GROK_IMAGE_CAPABILITIES,
+	antigravityImageToolGuidance,
+	grokImageToolGuidance,
+	normalizeImagePayloadForModel,
 	providerFromPayload,
 } = require('../src/backend-registry');
 const mediaAnalysis = require('../src/media-analysis');
@@ -136,6 +141,9 @@ function captureCliSpawn(calls) {
 	assert.ok(models.some((model) => model.id === 'model-relay:openai-videos:sora-2'));
 	const codexImageModel = models.find((model) => model.id === 'model-relay:codex:image');
 	assert.deepStrictEqual(codexImageModel.test_options.map((option) => option.key), ['size', 'quality']);
+	assert.strictEqual(codexImageModel.image_capabilities.contract_version, 1);
+	assert.deepStrictEqual(codexImageModel.image_capabilities.supported_sizes, ['1024x1024', '1536x1024', '1024x1536', '2048x2048', '2560x1440', '1440x2560', '3840x2160', '2160x3840']);
+	assert.deepStrictEqual(Object.keys(codexImageModel.image_capabilities.provider_options), ['size']);
 	assert.deepStrictEqual(codexImageModel.test_options[0].choices.map((choice) => choice.value), ['auto', '1024x1024', '1536x1024', '1024x1536', '2048x2048', '2560x1440', '1440x2560', '3840x2160', '2160x3840']);
 	assert.deepStrictEqual(codexImageModel.test_options[1].choices.map((choice) => choice.value), ['auto', 'low', 'medium', 'high']);
 	assert.ok(codexImageModel.test_options.every((option) => option.delivery === 'guidance'));
@@ -143,6 +151,38 @@ function captureCliSpawn(calls) {
 	assert.deepStrictEqual(openAiVideoModel.test_options.map((option) => option.key), ['size', 'seconds', 'model']);
 	assert.ok(openAiVideoModel.test_options.every((option) => option.delivery === 'direct'));
 	assert.ok(!models.some((model) => model.backend === 'cursor-cli' && model.type === 'image'));
+	const grokImageModel = { id: 'model-relay:grok-cli:image', image_capabilities: GROK_IMAGE_CAPABILITIES };
+	assert.deepStrictEqual(Object.keys(grokImageModel.image_capabilities.provider_options), ['resolution']);
+	assert.strictEqual(grokImageModel.image_capabilities.resolution_mode, 'guidance');
+	assert.strictEqual(grokImageModel.image_capabilities.aspect_ratio_delivery, 'native');
+	const antigravityImageModel = { id: 'model-relay:antigravity-cli:image', image_capabilities: ANTIGRAVITY_IMAGE_CAPABILITIES };
+	assert.deepStrictEqual(antigravityImageModel.image_capabilities.supported_sizes, ['2K', '4K', '1K']);
+	assert.deepStrictEqual(Object.keys(antigravityImageModel.image_capabilities.provider_options), ['image_size']);
+	assert.deepStrictEqual(models.find((model) => model.id === 'model-relay:xai:imagine-image').image_capabilities.supported_qualities, ['medium', 'low']);
+	const normalizedAntigravity = normalizeImagePayloadForModel({ model: antigravityImageModel.id, prompt: 'x', size: '1536x1024', provider_options: { image_size: '2K' }, aspect_ratio: '16:9' }, antigravityImageModel);
+	assert.strictEqual(normalizedAntigravity.error, undefined);
+	assert.strictEqual(normalizedAntigravity.payload.size, undefined, 'generic pixel size must not leak to Antigravity');
+	assert.strictEqual(normalizedAntigravity.payload.image_size, '2K');
+	assert.match(normalizeImagePayloadForModel({ model: antigravityImageModel.id, prompt: 'x', quality: 'high' }, antigravityImageModel).error.message, /quality/i);
+	assert.match(normalizeImagePayloadForModel({ model: codexImageModel.id, prompt: 'x', size: '1536x1024', provider_options: { size: '1024x1024' } }, codexImageModel).error.message, /conflicting/i);
+	const candidateCountOnly = normalizeImagePayloadForModel({ model: xaiImageModel.id, prompt: 'x', candidate_count: 3, cloud_upload_confirmed: true }, xaiImageModel);
+	assert.strictEqual(candidateCountOnly.error, undefined);
+	assert.strictEqual(candidateCountOnly.payload.candidate_count, 3);
+	assert.strictEqual(candidateCountOnly.payload.n, 3, 'candidate_count must be normalized to xAI n');
+	const conflictingCandidateCount = normalizeImagePayloadForModel({ model: xaiImageModel.id, prompt: 'x', candidate_count: 3, n: 1, cloud_upload_confirmed: true }, xaiImageModel);
+	assert.strictEqual(conflictingCandidateCount.error, undefined);
+	assert.strictEqual(conflictingCandidateCount.payload.n, 3, 'candidate_count must take precedence over a conflicting n');
+	assert.match(grokImageToolGuidance({ output_format: 'image/webp' }, 'image_gen'), /output_format "image\/webp"/);
+	assert.match(antigravityImageToolGuidance({ output_format: 'image/jpeg' }), /output_format "image\/jpeg"/);
+	const providerOnlyImage = registry.resolve('images', { provider: 'xai-api', prompt: 'x', output_format: 'jpeg', candidate_count: 3, cloud_upload_confirmed: true });
+	assert.strictEqual(providerOnlyImage.error, undefined);
+	assert.strictEqual(providerOnlyImage.payload.output_format, 'image/jpeg');
+	assert.strictEqual(providerOnlyImage.payload.n, 3);
+	const providerOnlyUnsupportedOption = await registry.run('images', { provider: 'xai-api', prompt: 'x', output_format: 'image/tiff', cloud_upload_confirmed: true });
+	assert.strictEqual(providerOnlyUnsupportedOption.category, 'validation');
+	assert.strictEqual(providerOnlyUnsupportedOption.code, 'relay_image_options_unsupported');
+	const unknownImageModel = await registry.run('images', { provider: 'xai-api', model: 'model-relay:xai:unknown-image', prompt: 'x', cloud_upload_confirmed: true });
+	assert.strictEqual(unknownImageModel.code, 'backend_model_unknown');
 
 	const codexResult = await registry.run('chat', { model: 'model-relay:codex:gpt-5', messages: [{ role: 'user', content: 'hi' }] });
 	assert.strictEqual(codexResult.response.model, 'codex-local:gpt-5');
@@ -324,6 +364,8 @@ function captureCliSpawn(calls) {
 		aspect_ratio: '21:9',
 		resolution: '2k',
 		quality: 'low',
+		candidate_count: 2,
+		output_format: 'image/jpeg',
 	});
 	assert.strictEqual(imagineImage.success, true);
 	assert.strictEqual(imagineImage.response.data[0].mime_type, 'image/png');
@@ -334,6 +376,8 @@ function captureCliSpawn(calls) {
 	assert.strictEqual(generateCall.body.aspect_ratio, '21:9');
 	assert.strictEqual(generateCall.body.resolution, '2k');
 	assert.strictEqual(generateCall.body.quality, 'low');
+	assert.strictEqual(generateCall.body.n, 2);
+	assert.strictEqual(generateCall.body.output_format, 'image/jpeg');
 	assert.strictEqual(generateCall.body.image, undefined);
 	const imagineEdit = await xaiImagine.images({
 		model: 'model-relay:xai:imagine-image',
@@ -588,9 +632,11 @@ function captureCliSpawn(calls) {
 			const name = /ImageName\s+("[^"]+")/.exec(prompt);
 			if (name) {
 				const imageName = JSON.parse(name[1]);
+				const outputFormat = /output_format\s+"(image\/(?:png|jpeg|webp))"/i.exec(prompt)?.[1] || 'image/png';
+				const extension = outputFormat === 'image/webp' ? 'webp' : outputFormat === 'image/jpeg' ? 'jpg' : 'png';
 				const artifactDir = runOptions.cwd ? runOptions.cwd : path.join(antigravityRoot, 'brain', 'test-artifacts');
 				fs.mkdirSync(artifactDir, { recursive: true });
-				const artifactPath = runOptions.cwd ? path.join(artifactDir, 'generated-image.png') : path.join(artifactDir, `${imageName.replace(/-/g, '_')}_${Date.now()}.png`);
+				const artifactPath = runOptions.cwd ? path.join(artifactDir, `generated-image.${extension}`) : path.join(artifactDir, `${imageName.replace(/-/g, '_')}_${Date.now()}.${extension}`);
 				fs.writeFileSync(artifactPath, Buffer.from('generated image'));
 				return { success: true, text: JSON.stringify({ text: runOptions.cwd ? `image created\nIMAGE_PATH: ${artifactPath}` : 'image created' }) };
 			}
@@ -626,15 +672,17 @@ function captureCliSpawn(calls) {
                         prompt: 'make a relay icon',
                         aspect_ratio: '16:9',
                         image_size: '2K',
+                        output_format: 'image/webp',
                         reference_images: [{ b64_json: Buffer.from('reference image').toString('base64'), mime_type: 'image/png' }],
                 });
 		assert.strictEqual(antigravityImage.success, true);
-		assert.strictEqual(antigravityImage.response.data[0].mime_type, 'image/png');
+		assert.strictEqual(antigravityImage.response.data[0].mime_type, 'image/webp');
                                 assert.strictEqual(antigravityImage.response.provider_details.tool, 'generate_image');
                                 assert.ok(antigravityPrompts.some((prompt) => prompt.includes('ImagePaths')));
                                 assert.ok(antigravityPrompts.some((prompt) => prompt.includes('IMAGE_PATH: <absolute path to the saved image>')));
                                 assert.ok(antigravityPrompts.some((prompt) => prompt.includes('aspectRatio "16:9"')));
                                 assert.ok(antigravityPrompts.some((prompt) => prompt.includes('imageSize "2K"')));
+				assert.ok(antigravityPrompts.some((prompt) => prompt.includes('output_format "image/webp"')));
 				assert.ok(antigravityCommands.some((args) => args[0] === '-p' && !args.includes('-o') && !args.includes('--output-format')));
 		if (process.platform === 'win32') {
 			const caseVariantPath = path.join(antigravityRoot, 'brain', 'case-variant.png');

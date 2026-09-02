@@ -9,6 +9,7 @@ const { createBoundedCollector } = require('./diagnostics');
 const { detectCli, detectCliAsync, materializeChatImages, messagesToPromptJson, messagesToText, runTextCommand, writePromptFile } = require('./local-cli');
 const { createLocalUpscaleDriver } = require('./local-upscale');
 const { resolveMaxTokens } = require('./token-policy');
+const { IMAGE_CAPABILITY_CONTRACT_VERSION, imageCapabilityContract, normalizeImageOutputFormat, normalizeImagePayloadForModel } = require('./image-capabilities');
 
 const RELAY_MODEL_PREFIX = 'model-relay';
 const GROK_MEDIA_TIMEOUT_MS = 450000;
@@ -323,9 +324,11 @@ function grokImageToolGuidance(payload = {}, toolName) {
 	const parts = [];
 	const aspectRatio = safeValue(payload.aspect_ratio);
 	const resolution = safeValue(payload.resolution).toLowerCase();
+	const outputFormat = normalizeImageOutputFormat(payload.output_format);
 	if (aspectRatio && aspectRatio !== 'auto') {
 		parts.push(`Pass aspect_ratio ${JSON.stringify(aspectRatio)} as the ${toolName} tool argument.`);
 	}
+	parts.push(`Pass output_format ${JSON.stringify(outputFormat)} as the ${toolName} tool argument.`);
 	if (resolution === '2k') {
 		parts.push('In the tool prompt string, request 2K output with the long edge around 2048 pixels.');
 	} else if (resolution === '1k') {
@@ -340,12 +343,14 @@ function antigravityImageToolGuidance(payload = {}) {
 	const parts = [];
 	const aspectRatio = safeValue(payload.aspect_ratio);
 	const imageSize = safeValue(payload.image_size || payload.imageSize).toUpperCase();
+	const outputFormat = normalizeImageOutputFormat(payload.output_format);
 	if (aspectRatio && aspectRatio !== 'auto') {
 		parts.push(`Call generate_image with aspectRatio ${JSON.stringify(aspectRatio)}.`);
 	}
 	if (imageSize === '1K' || imageSize === '2K' || imageSize === '4K') {
 		parts.push(`Call generate_image with imageSize ${JSON.stringify(imageSize)}.`);
 	}
+	parts.push(`Call generate_image with output_format ${JSON.stringify(outputFormat)}.`);
 	return parts.join(' ');
 }
 
@@ -462,6 +467,11 @@ const XAI_IMAGE_TEST_OPTIONS = [
 	]),
 ];
 
+const CODEX_IMAGE_CAPABILITIES = imageCapabilityContract(CODEX_IMAGE_TEST_OPTIONS, { resolutionKey: 'size', referenceImagesMax: 4 });
+const GROK_IMAGE_CAPABILITIES = imageCapabilityContract(GROK_IMAGE_TEST_OPTIONS, { resolutionKey: 'resolution', referenceImagesMax: 4 });
+const ANTIGRAVITY_IMAGE_CAPABILITIES = imageCapabilityContract(ANTIGRAVITY_IMAGE_TEST_OPTIONS, { resolutionKey: 'image_size', referenceImagesMax: 4 });
+const XAI_IMAGE_CAPABILITIES = imageCapabilityContract(XAI_IMAGE_TEST_OPTIONS, { resolutionKey: 'resolution', referenceImagesMax: XAI_IMAGE_REFERENCE_LIMIT, candidateCountMax: 3, cloudUpload: true });
+
 const XAI_VIDEO_TEST_OPTIONS = [
 	testOption('aspect_ratio', 'Aspect ratio', 'direct', [
 		{ value: '16:9', label: 'Landscape · 16:9' },
@@ -516,7 +526,7 @@ function createCodexCliDriver(codex, mediaAnalysis) {
 			const models = payload.models || {};
 			return [
 				...(models.text || []).map((id) => ({ id: relayModel('codex', id), legacy_id: id, type: 'text', backend: 'codex-cli', job_types: ['chat', ...(jobTypes.includes('media.analyze') ? ['media.analyze'] : [])] })),
-				...(models.image || []).map((id) => ({ id: relayModel('codex', id.replace(/^codex-local:/, '')), legacy_id: id, type: 'image', backend: 'codex-cli', job_types: ['images'], test_options: CODEX_IMAGE_TEST_OPTIONS })),
+				...(models.image || []).map((id) => ({ id: relayModel('codex', id.replace(/^codex-local:/, '')), legacy_id: id, type: 'image', backend: 'codex-cli', job_types: ['images'], test_options: CODEX_IMAGE_TEST_OPTIONS, image_capabilities: CODEX_IMAGE_CAPABILITIES })),
 			];
 		},
 		chat: (payload, session) => codex.chat({ ...payload, model: codexModelFromRelay(payload.model) }, session),
@@ -773,7 +783,7 @@ function createGrokCliDriver(options = {}) {
 		const base = baseModels();
 		const state = baseCapabilities();
 		if (!state.ready || !imagine.images) return base;
-		return [...base, { id: 'model-relay:grok-cli:image', type: 'image', backend: 'grok-cli', ready: true, test_options: GROK_IMAGE_TEST_OPTIONS }, ...(imagine.videos ? [{ id: 'model-relay:grok-cli:video', type: 'video', backend: 'grok-cli', ready: true, experimental: true, verified: imagine.video_verified, test_options: GROK_VIDEO_TEST_OPTIONS }] : [])];
+		return [...base, { id: 'model-relay:grok-cli:image', type: 'image', backend: 'grok-cli', ready: true, test_options: GROK_IMAGE_TEST_OPTIONS, image_capabilities: GROK_IMAGE_CAPABILITIES }, ...(imagine.videos ? [{ id: 'model-relay:grok-cli:video', type: 'video', backend: 'grok-cli', ready: true, experimental: true, verified: imagine.video_verified, test_options: GROK_VIDEO_TEST_OPTIONS }] : [])];
 	};
 	driver.refresh = async (refreshOptions = {}) => {
 		const state = await baseRefresh();
@@ -1062,7 +1072,7 @@ function createAntigravityCliDriver(mediaAnalysis, options = {}) {
 		}),
 		models: () => snapshot.ready ? [
 			{ id: 'model-relay:antigravity-cli:auto', type: 'text', backend: definition.id, ready: true, job_types: ['chat'] },
-			{ id: 'model-relay:antigravity-cli:image', type: 'image', backend: definition.id, ready: true, job_types: ['images'], test_options: ANTIGRAVITY_IMAGE_TEST_OPTIONS },
+			{ id: 'model-relay:antigravity-cli:image', type: 'image', backend: definition.id, ready: true, job_types: ['images'], test_options: ANTIGRAVITY_IMAGE_TEST_OPTIONS, image_capabilities: ANTIGRAVITY_IMAGE_CAPABILITIES },
 			{ id: 'model-relay:antigravity-cli:media', type: 'text', backend: definition.id, ready: true, job_types: ['media.analyze'] },
 		] : [],
 		async refresh() {
@@ -1337,7 +1347,7 @@ function createXaiApiDriver(options = {}) {
 		models: () => [
 			...defaultModels.map((id) => ({ id: relayModel('xai', id), type: 'text', backend: 'xai-api', job_types: ['chat'] })),
 			{ id: 'model-relay:xai:stt', type: 'audio', backend: 'xai-api', job_types: ['transcribe'] },
-			{ id: 'model-relay:xai:imagine-image', type: 'image', backend: 'xai-api', job_types: ['images'], ready: !!apiKey, test_options: XAI_IMAGE_TEST_OPTIONS },
+			{ id: 'model-relay:xai:imagine-image', type: 'image', backend: 'xai-api', job_types: ['images'], ready: !!apiKey, test_options: XAI_IMAGE_TEST_OPTIONS, image_capabilities: XAI_IMAGE_CAPABILITIES },
 			{ id: 'model-relay:xai:imagine-video', type: 'video', backend: 'xai-api', job_types: ['videos'], ready: !!apiKey, test_options: XAI_VIDEO_TEST_OPTIONS },
 		],
 		async chat(payload = {}) {
@@ -1450,8 +1460,9 @@ function createXaiApiDriver(options = {}) {
 				return { success: false, category: 'validation', code: 'xai_image_reference_invalid', message: references.error };
 			}
 			const model = xaiImagineImageModel(payload.model);
-			const n = Math.min(10, Math.max(1, Number(payload.n) || 1));
-			const body = { model, prompt, n, response_format: 'b64_json' };
+			const requestedCount = payload.candidate_count !== undefined ? payload.candidate_count : payload.n;
+			const n = Math.min(10, Math.max(1, Number(requestedCount) || 1));
+			const body = { model, prompt, n, response_format: 'b64_json', output_format: normalizeImageOutputFormat(payload.output_format) };
 			const aspectRatio = String(payload.aspect_ratio || '').trim();
 			if (aspectRatio && XAI_IMAGE_ASPECT_RATIOS.has(aspectRatio)) body.aspect_ratio = aspectRatio;
 			const resolution = String(payload.resolution || '').trim().toLowerCase();
@@ -1798,11 +1809,22 @@ function createBackendRegistry(options = {}) {
 		const supported = driver.supports ? driver.supports(jobType) : (capabilities.job_types || []).includes(jobType);
 		if (!supported || typeof driver[jobType] !== 'function') return { error: { success: false, category: 'configuration', code: 'backend_unsupported', message: `Selected provider does not support ${jobType}: ${selection.model || selection.provider}.`, details: { job_type: jobType, provider: driver.id, model: selection.model } } };
 		if (!capabilities.ready) return { error: { success: false, category: 'configuration', code: 'backend_unavailable', message: `Selected provider is unavailable: ${selection.model || selection.provider}. ${capabilities.diagnostic || 'Refresh provider detection or select another provider.'}`, details: { job_type: jobType, provider: driver.id, model: selection.model } } };
-		if (selection.model) {
-			const model = (driver.models ? driver.models() : []).find((entry) => entry.id === selection.model || entry.legacy_id === selection.model);
-			const expected = expectedModelType(jobType);
-			if (model && expected && model.type !== expected) return { error: { success: false, category: 'configuration', code: 'backend_model_incompatible', message: `Selected model is incompatible with ${jobType}: ${selection.model}.`, details: { job_type: jobType, provider: driver.id, model: selection.model } } };
-			if (model && Array.isArray(model.job_types) && model.job_types.length && !model.job_types.includes(jobType)) return { error: { success: false, category: 'configuration', code: 'backend_model_incompatible', message: `Selected model does not support ${jobType}: ${selection.model}.`, details: { job_type: jobType, provider: driver.id, model: selection.model } } };
+		const modelEntries = (selection.model || jobType === 'images') && driver.models ? driver.models() : [];
+		const model = selection.model && Array.isArray(modelEntries)
+			? modelEntries.find((entry) => entry.id === selection.model || entry.legacy_id === selection.model)
+			: null;
+		const expected = expectedModelType(jobType);
+		if (selection.model && !model && jobType === 'images') {
+			return { error: { success: false, category: 'configuration', code: 'backend_model_unknown', message: `Selected image model is unavailable for ${driver.id}: ${selection.model}.`, details: { job_type: jobType, provider: driver.id, model: selection.model } } };
+		}
+		if (model && expected && model.type !== expected) return { error: { success: false, category: 'configuration', code: 'backend_model_incompatible', message: `Selected model is incompatible with ${jobType}: ${selection.model}.`, details: { job_type: jobType, provider: driver.id, model: selection.model } } };
+		if (model && Array.isArray(model.job_types) && model.job_types.length && !model.job_types.includes(jobType)) return { error: { success: false, category: 'configuration', code: 'backend_model_incompatible', message: `Selected model does not support ${jobType}: ${selection.model}.`, details: { job_type: jobType, provider: driver.id, model: selection.model } } };
+		if (jobType === 'images') {
+			const imageModel = model || (Array.isArray(modelEntries) ? modelEntries.find((entry) => entry && entry.type === 'image' && (!Array.isArray(entry.job_types) || !entry.job_types.length || entry.job_types.includes('images')) && entry.image_capabilities) : null);
+			if (!imageModel) return { error: { success: false, category: 'configuration', code: 'backend_image_capability_missing', message: `Selected provider does not publish an image capability contract: ${driver.id}.`, details: { job_type: jobType, provider: driver.id, model: selection.model } } };
+			const normalized = normalizeImagePayloadForModel(payload, imageModel);
+			if (normalized.error) return { error: normalized.error };
+			return { driver, capabilities, provider: driver.id, payload: normalized.payload };
 		}
 		return { driver, capabilities, provider: driver.id };
 	}
@@ -1827,12 +1849,15 @@ function createBackendRegistry(options = {}) {
 		run(jobType, payload, session) {
 			const resolved = resolve(jobType, payload || {});
 			if (resolved.error) return Promise.resolve(resolved.error);
-			return Promise.resolve(resolved.driver[jobType](payload || {}, session || {}));
+			return Promise.resolve(resolved.driver[jobType](resolved.payload || payload || {}, session || {}));
 		},
 	};
 }
 
 module.exports = {
+	ANTIGRAVITY_IMAGE_CAPABILITIES,
+	GROK_IMAGE_CAPABILITIES,
+	IMAGE_CAPABILITY_CONTRACT_VERSION,
 	createApiKeyChatDriver,
 	createAntigravityCliDriver,
 	createBackendRegistry,
@@ -1850,4 +1875,5 @@ module.exports = {
 	antigravityImageToolGuidance,
 	grokImageToolGuidance,
 	generationPreferences,
+	normalizeImagePayloadForModel,
 };
