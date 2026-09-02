@@ -218,7 +218,7 @@ xAI Imagine HTTP image and video jobs (`model-relay:xai:imagine-image`, `model-r
 
 ### Image resolution expectations on status-page tests
 
-Codex CLI and Grok CLI image tests send size or resolution choices as **generation guidance** only. Codex built-in `image_gen` does not accept explicit `size`/`quality` tool parameters, and Grok Imagine `image_gen` accepts `aspect_ratio` but not `resolution`. The Live tab shows the measured artifact width × height so you can compare a requested size against what the provider actually returned. xAI Imagine HTTP (`model-relay:xai:imagine-image`) is the only built-in image test path that sends `resolution` directly to the provider API.
+Codex CLI and Grok CLI image tests send size or resolution choices as **generation guidance** only. Codex built-in `image_gen` does not accept explicit `size`/`quality` tool parameters, and Grok Imagine `image_gen` accepts `aspect_ratio` but not `resolution`. A Grok `image_edit` with one reference keeps that source canvas; when the requested ratio differs, Relay duplicates the reference so Imagine applies `aspect_ratio` as a multi-image edit. The Live tab shows the measured artifact width × height so you can compare a requested size against what the provider actually returned. xAI Imagine HTTP (`model-relay:xai:imagine-image`) is the only built-in image test path that sends `resolution` directly to the provider API.
 
 ### Cursor Agent is unavailable
 

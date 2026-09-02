@@ -5,7 +5,7 @@ const { EventEmitter } = require('events');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { createGrokCliDriver, GROK_MEDIA_TIMEOUT_MS, isCompleteImageCapabilityContract } = require('../src/backend-registry');
+const { createGrokCliDriver, GROK_MEDIA_TIMEOUT_MS, grokImageEditNeedsAspectExpansion, grokImageToolGuidance, isCompleteImageCapabilityContract } = require('../src/backend-registry');
 
 function toolForArgs(args) {
 	const prompt = args[args.indexOf('--single') + 1] || '';
@@ -16,6 +16,21 @@ function toolForArgs(args) {
 function assertExactToolAllowlist(args, tool) {
 	assert.strictEqual(args.filter((arg) => arg === '--tools').length, 1);
 	assert.strictEqual(args[args.indexOf('--tools') + 1], tool);
+}
+
+function buildJpeg(width, height) {
+	const buffer = Buffer.alloc(16);
+	buffer[0] = 0xff;
+	buffer[1] = 0xd8;
+	buffer[2] = 0xff;
+	buffer[3] = 0xc0;
+	buffer.writeUInt16BE(17, 4);
+	buffer[6] = 8;
+	buffer.writeUInt16BE(height, 7);
+	buffer.writeUInt16BE(width, 9);
+	buffer[11] = 0xff;
+	buffer[12] = 0xd9;
+	return buffer;
 }
 
 function createFakeGrok(options = {}) {
@@ -93,10 +108,47 @@ function createFakeGrok(options = {}) {
 		assert.strictEqual(image.success, true);
 		assert.strictEqual(Buffer.from(image.response.data[0].b64_json, 'base64').toString(), 'generated image');
 		assert.ok(fixture.calls.some((args) => toolForArgs(args) === 'image_edit'));
-		assert.ok(fixture.calls.some((args) => toolForArgs(args) === 'image_edit' && args[args.indexOf('--single') + 1].includes('Pass aspect_ratio "16:9" as the image_edit tool argument.')));
-		assert.ok(fixture.calls.some((args) => toolForArgs(args) === 'image_edit' && args[args.indexOf('--single') + 1].includes('request 2K output with the long edge around 2048 pixels.')));
-		assert.ok(fixture.calls.some((args) => toolForArgs(args) === 'image_edit' && args[args.indexOf('--single') + 1].includes('Do not pass a resolution or output_format tool parameter')));
+		const imageEditPrompt = fixture.calls.find((args) => toolForArgs(args) === 'image_edit')[fixture.calls.find((args) => toolForArgs(args) === 'image_edit').indexOf('--single') + 1];
+		assert.ok(imageEditPrompt.includes('Pass aspect_ratio "16:9" as the image_edit tool argument.'));
+		assert.ok(imageEditPrompt.includes('request 2K output with the long edge around 2048 pixels.'));
+		assert.ok(imageEditPrompt.includes('Do not pass a resolution or output_format tool parameter'));
+		assert.ok(imageEditPrompt.includes('reference-aspect'));
+		assert.ok(imageEditPrompt.includes('multi-image edit'));
+		assert.ok(imageEditPrompt.includes('not as the output canvas'));
 		assertExactToolAllowlist(fixture.calls.find((args) => toolForArgs(args) === 'image_edit'), 'image_edit');
+
+		const matchingLandscape = await fixture.driver.images({
+			prompt: 'keep canvas',
+			aspect_ratio: '16:9',
+			reference_images: [{ b64_json: buildJpeg(1600, 900).toString('base64'), mime_type: 'image/jpeg' }],
+		});
+		assert.strictEqual(matchingLandscape.success, true);
+		const matchingPrompt = fixture.calls.filter((args) => toolForArgs(args) === 'image_edit').pop()[fixture.calls.filter((args) => toolForArgs(args) === 'image_edit').pop().indexOf('--single') + 1];
+		assert.ok(matchingPrompt.includes('Pass aspect_ratio "16:9" as the image_edit tool argument.'));
+		assert.ok(!matchingPrompt.includes('reference-aspect'));
+		assert.ok(!matchingPrompt.includes('multi-image edit'));
+
+		const portraitToWide = await fixture.driver.images({
+			prompt: 'storyboard begin frame',
+			aspect_ratio: '16:9',
+			resolution: '2k',
+			reference_images: [{ b64_json: buildJpeg(683, 1024).toString('base64'), mime_type: 'image/jpeg' }],
+		});
+		assert.strictEqual(portraitToWide.success, true);
+		const portraitPromptArgs = fixture.calls.filter((args) => toolForArgs(args) === 'image_edit').pop();
+		const portraitPrompt = portraitPromptArgs[portraitPromptArgs.indexOf('--single') + 1];
+		assert.ok(portraitPrompt.includes('using '));
+		assert.ok(portraitPrompt.includes('reference-1.jpg, ') && portraitPrompt.includes('reference-aspect.jpg'));
+		assert.ok(portraitPrompt.includes('Pass every listed reference path in the image array so this is a multi-image edit'));
+		assert.ok(portraitPrompt.includes('Compose a new scene at aspect_ratio "16:9"'));
+		assert.ok(grokImageEditNeedsAspectExpansion(path.join(os.tmpdir(), 'missing.jpg'), { aspect_ratio: '16:9' }));
+		assert.ok(!grokImageEditNeedsAspectExpansion('', { aspect_ratio: '16:9' }));
+		const matchingFile = path.join(fixture.root, 'wide.jpg');
+		fs.writeFileSync(matchingFile, buildJpeg(1920, 1080));
+		assert.ok(!grokImageEditNeedsAspectExpansion(matchingFile, { aspect_ratio: '16:9' }));
+		assert.ok(grokImageEditNeedsAspectExpansion(matchingFile, { aspect_ratio: '9:16' }));
+		assert.match(grokImageToolGuidance({ aspect_ratio: '16:9' }, 'image_edit', { referenceCount: 2 }), /multi-image edit/);
+		assert.doesNotMatch(grokImageToolGuidance({ aspect_ratio: '16:9' }, 'image_edit', { referenceCount: 1 }), /multi-image edit/);
 
 		const noReference = await fixture.driver.videos({ prompt: 'animate' });
 		assert.strictEqual(noReference.success, true);

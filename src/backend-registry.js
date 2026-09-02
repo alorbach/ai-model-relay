@@ -10,6 +10,7 @@ const { detectCli, detectCliAsync, materializeChatImages, messagesToPromptJson, 
 const { createLocalUpscaleDriver } = require('./local-upscale');
 const { resolveMaxTokens } = require('./token-policy');
 const { IMAGE_CAPABILITY_CONTRACT_VERSION, imageCapabilityContract, isCompleteImageCapabilityContract, normalizeImageOutputFormat, normalizeImagePayloadForModel, relayCatalogEntrySupportsImages } = require('./image-capabilities');
+const { readImageDimensions } = require('./image-dimensions');
 
 const RELAY_MODEL_PREFIX = 'model-relay';
 const GROK_MEDIA_TIMEOUT_MS = 450000;
@@ -319,7 +320,45 @@ function generationPreferences(payload = {}, kind) {
 	return preferences.join(' ');
 }
 
-function grokImageToolGuidance(payload = {}, toolName) {
+function parseAspectRatio(value) {
+	const match = String(value || '').trim().match(/^(\d+(?:\.\d+)?)\s*:\s*(\d+(?:\.\d+)?)$/);
+	if (!match) return 0;
+	const width = Number(match[1]);
+	const height = Number(match[2]);
+	return width > 0 && height > 0 ? width / height : 0;
+}
+
+function aspectRatioFromBytes(bytes) {
+	const dimensions = readImageDimensions(bytes);
+	return dimensions && dimensions.width > 0 && dimensions.height > 0 ? dimensions.width / dimensions.height : 0;
+}
+
+function aspectRatiosMatch(left, right, tolerance = 0.04) {
+	return !!(left && right && Math.abs(left - right) / right <= tolerance);
+}
+
+function requestedGrokAspectRatio(payload = {}) {
+	const value = String(payload && payload.aspect_ratio || '').trim();
+	return value && !/^auto$/i.test(value) ? value : '';
+}
+
+/* Grok Imagine image_edit keeps a single source canvas and ignores aspect_ratio.
+ * Multi-image edits honor aspect_ratio, so a mismatched single reference is
+ * duplicated into a second path before the tool call. */
+function grokImageEditNeedsAspectExpansion(referencePath, payload = {}) {
+	const aspect = requestedGrokAspectRatio(payload);
+	if (!aspect || !referencePath) return false;
+	const requested = parseAspectRatio(aspect);
+	if (!requested) return false;
+	try {
+		const actual = aspectRatioFromBytes(fs.readFileSync(referencePath));
+		return !actual || !aspectRatiosMatch(actual, requested);
+	} catch (error) {
+		return true;
+	}
+}
+
+function grokImageToolGuidance(payload = {}, toolName, options = {}) {
 	const safeValue = (value, maxLength = 64) => String(value || '').trim().replace(/[\r\n]+/g, ' ').slice(0, maxLength);
 	const parts = [];
 	const aspectRatio = safeValue(payload.aspect_ratio);
@@ -327,6 +366,10 @@ function grokImageToolGuidance(payload = {}, toolName) {
 	const outputFormat = normalizeImageOutputFormat(payload.output_format);
 	if (aspectRatio && aspectRatio !== 'auto') {
 		parts.push(`Pass aspect_ratio ${JSON.stringify(aspectRatio)} as the ${toolName} tool argument.`);
+	}
+	if (toolName === 'image_edit' && aspectRatio && aspectRatio !== 'auto' && Number(options.referenceCount || 0) > 1) {
+		parts.push(`Pass every listed reference path in the image array so this is a multi-image edit; a single-image ${toolName} call ignores aspect_ratio and keeps the source canvas.`);
+		parts.push(`Compose a new scene at aspect_ratio ${JSON.stringify(aspectRatio)}; use the references only for identity, costume, and likeness, not as the output canvas.`);
 	}
 	if (resolution === '2k') {
 		parts.push('In the tool prompt string, request 2K output with the long edge around 2048 pixels.');
@@ -804,9 +847,15 @@ function createGrokCliDriver(options = {}) {
 			fs.mkdirSync(inputDir); fs.mkdirSync(outputDir);
 			const references = materializeReferences(payload, inputDir);
 			if (references.error) return { success: false, category: 'validation', code: 'grok_reference_invalid', message: references.error };
+			if (kind === 'images' && references.paths.length === 1 && grokImageEditNeedsAspectExpansion(references.paths[0], payload)) {
+				const source = references.paths[0];
+				const duplicate = path.join(inputDir, `reference-aspect${path.extname(source)}`);
+				fs.copyFileSync(source, duplicate);
+				references.paths.push(duplicate);
+			}
 			const runImagineTool = async (toolName, targetDir, sourcePaths = [], outputLabel = kind === 'images' ? 'image' : 'video') => {
 				const instruction = `Call the ${toolName} tool exactly once to create the requested ${outputLabel}${sourcePaths.length ? ` using ${sourcePaths.join(', ')}` : ''}.`;
-				const preferences = kind === 'images' ? grokImageToolGuidance(payload, toolName) : generationPreferences(payload, kind);
+				const preferences = kind === 'images' ? grokImageToolGuidance(payload, toolName, { referenceCount: sourcePaths.length }) : generationPreferences(payload, kind);
 				const prompt = `${instruction} The tool saves the generated file in its managed Grok session directory; do not search for, copy, or move it. Do not call any other tool.${preferences ? ` ${preferences}` : ''} User request: ${String(payload.prompt || '').trim()}`;
 				if (session.appendSessionInput) {
 					session.appendSessionInput('grok cli request', `Tool: ${toolName}\nWorkspace: ${workspace}\n\nPrompt (passed with --single; stdin is empty):\n${prompt}`);
@@ -1878,6 +1927,7 @@ module.exports = {
 	providerFromPayload,
 	antigravityImageToolGuidance,
 	grokImageToolGuidance,
+	grokImageEditNeedsAspectExpansion,
 	generationPreferences,
 	normalizeImagePayloadForModel,
 };

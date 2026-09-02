@@ -197,6 +197,8 @@ function captureCliSpawn(calls) {
 	const grokGuidance = grokImageToolGuidance({ output_format: 'image/webp' }, 'image_gen');
 	assert.match(grokGuidance, /In the tool prompt string, request output_format "image\/webp"/);
 	assert.doesNotMatch(grokGuidance, /Pass output_format .* as the image_gen tool argument/);
+	assert.match(grokImageToolGuidance({ aspect_ratio: '16:9' }, 'image_edit', { referenceCount: 2 }), /not as the output canvas/);
+	assert.doesNotMatch(grokImageToolGuidance({ aspect_ratio: '16:9' }, 'image_gen', { referenceCount: 2 }), /multi-image edit/);
 	assert.match(antigravityImageToolGuidance({ output_format: 'image/jpeg' }), /output_format "image\/jpeg"/);
 	const providerOnlyImage = registry.resolve('images', { provider: 'xai-api', prompt: 'x', output_format: 'png', candidate_count: 3, cloud_upload_confirmed: true });
 	assert.strictEqual(providerOnlyImage.error, undefined);
