@@ -18,6 +18,8 @@ const {
 	createXaiApiDriver,
 	ANTIGRAVITY_IMAGE_CAPABILITIES,
 	GROK_IMAGE_CAPABILITIES,
+	isCompleteImageCapabilityContract,
+	relayCatalogEntrySupportsImages,
 	antigravityImageToolGuidance,
 	grokImageToolGuidance,
 	normalizeImagePayloadForModel,
@@ -151,20 +153,35 @@ function captureCliSpawn(calls) {
 	assert.deepStrictEqual(openAiVideoModel.test_options.map((option) => option.key), ['size', 'seconds', 'model']);
 	assert.ok(openAiVideoModel.test_options.every((option) => option.delivery === 'direct'));
 	assert.ok(!models.some((model) => model.backend === 'cursor-cli' && model.type === 'image'));
-	const grokImageModel = { id: 'model-relay:grok-cli:image', image_capabilities: GROK_IMAGE_CAPABILITIES };
-	assert.deepStrictEqual(Object.keys(grokImageModel.image_capabilities.provider_options), ['resolution']);
+	const grokImageModel = { id: 'model-relay:grok-cli:image', type: 'image', backend: 'grok-cli', ready: true, job_types: ['images'], image_capabilities: GROK_IMAGE_CAPABILITIES };
+	assert.deepStrictEqual(Object.keys(grokImageModel.image_capabilities.provider_options).sort(), ['aspect_ratio', 'resolution']);
+	assert.strictEqual(grokImageModel.image_capabilities.provider_options.aspect_ratio.delivery, 'native');
 	assert.strictEqual(grokImageModel.image_capabilities.resolution_mode, 'guidance');
 	assert.strictEqual(grokImageModel.image_capabilities.aspect_ratio_delivery, 'native');
-	const antigravityImageModel = { id: 'model-relay:antigravity-cli:image', image_capabilities: ANTIGRAVITY_IMAGE_CAPABILITIES };
+	assert.ok(isCompleteImageCapabilityContract(grokImageModel));
+	assert.ok(!relayCatalogEntrySupportsImages({ backends: [grokImageModel] }, grokImageModel), 'Persona-style clients fail when /v1/relay/models omits the grok-cli driver record');
+	assert.ok(relayCatalogEntrySupportsImages({ backends: [{ id: 'grok-cli', ready: true, job_types: ['chat', 'images'] }, grokImageModel] }, grokImageModel));
+	assert.ok(!relayCatalogEntrySupportsImages({ backends: models }, xaiImageModel), 'model-only catalogs are not enough for image clients');
+	assert.ok(relayCatalogEntrySupportsImages({ backends: [...capabilities, ...models] }, xaiImageModel));
+	assert.ok(!isCompleteImageCapabilityContract({ ...grokImageModel, job_types: ['chat', 'images', 'videos'] }), 'mixed chat/image job_types is not a complete image contract');
+	assert.ok(!isCompleteImageCapabilityContract({ ...grokImageModel, image_capabilities: { ...GROK_IMAGE_CAPABILITIES, provider_options: { resolution: GROK_IMAGE_CAPABILITIES.provider_options.resolution } } }), 'native aspect_ratio must appear in provider_options');
+	const antigravityImageModel = { id: 'model-relay:antigravity-cli:image', type: 'image', backend: 'antigravity-cli', ready: true, job_types: ['images'], image_capabilities: ANTIGRAVITY_IMAGE_CAPABILITIES };
 	assert.deepStrictEqual(antigravityImageModel.image_capabilities.supported_sizes, ['2K', '4K', '1K']);
 	assert.deepStrictEqual(Object.keys(antigravityImageModel.image_capabilities.provider_options), ['image_size']);
 	assert.deepStrictEqual(models.find((model) => model.id === 'model-relay:xai:imagine-image').image_capabilities.supported_qualities, ['medium', 'low']);
+	assert.deepStrictEqual(Object.keys(xaiImageModel.image_capabilities.provider_options).sort(), ['aspect_ratio', 'quality', 'resolution']);
+	assert.ok(isCompleteImageCapabilityContract(codexImageModel));
+	assert.ok(isCompleteImageCapabilityContract(antigravityImageModel));
+	assert.ok(isCompleteImageCapabilityContract(xaiImageModel));
 	const normalizedAntigravity = normalizeImagePayloadForModel({ model: antigravityImageModel.id, prompt: 'x', size: '1536x1024', provider_options: { image_size: '2K' }, aspect_ratio: '16:9' }, antigravityImageModel);
 	assert.strictEqual(normalizedAntigravity.error, undefined);
 	assert.strictEqual(normalizedAntigravity.payload.size, undefined, 'generic pixel size must not leak to Antigravity');
 	assert.strictEqual(normalizedAntigravity.payload.image_size, '2K');
 	assert.match(normalizeImagePayloadForModel({ model: antigravityImageModel.id, prompt: 'x', quality: 'high' }, antigravityImageModel).error.message, /quality/i);
 	assert.match(normalizeImagePayloadForModel({ model: codexImageModel.id, prompt: 'x', size: '1536x1024', provider_options: { size: '1024x1024' } }, codexImageModel).error.message, /conflicting/i);
+	const nestedAutoKeepsSize = normalizeImagePayloadForModel({ model: codexImageModel.id, prompt: 'x', size: '1536x1024', provider_options: { size: 'auto' }, output_format: 'image/png' }, codexImageModel);
+	assert.strictEqual(nestedAutoKeepsSize.error, undefined);
+	assert.strictEqual(nestedAutoKeepsSize.payload.size, '1536x1024');
 	const candidateCountOnly = normalizeImagePayloadForModel({ model: xaiImageModel.id, prompt: 'x', candidate_count: 3, cloud_upload_confirmed: true }, xaiImageModel);
 	assert.strictEqual(candidateCountOnly.error, undefined);
 	assert.strictEqual(candidateCountOnly.payload.candidate_count, 3);
@@ -177,12 +194,24 @@ function captureCliSpawn(calls) {
 	const conflictingCandidateCount = normalizeImagePayloadForModel({ model: xaiImageModel.id, prompt: 'x', candidate_count: 3, n: 1, cloud_upload_confirmed: true }, xaiImageModel);
 	assert.strictEqual(conflictingCandidateCount.error, undefined);
 	assert.strictEqual(conflictingCandidateCount.payload.n, 3, 'candidate_count must take precedence over a conflicting n');
-	assert.match(grokImageToolGuidance({ output_format: 'image/webp' }, 'image_gen'), /output_format "image\/webp"/);
+	const grokGuidance = grokImageToolGuidance({ output_format: 'image/webp' }, 'image_gen');
+	assert.match(grokGuidance, /In the tool prompt string, request output_format "image\/webp"/);
+	assert.doesNotMatch(grokGuidance, /Pass output_format .* as the image_gen tool argument/);
 	assert.match(antigravityImageToolGuidance({ output_format: 'image/jpeg' }), /output_format "image\/jpeg"/);
-	const providerOnlyImage = registry.resolve('images', { provider: 'xai-api', prompt: 'x', output_format: 'jpeg', candidate_count: 3, cloud_upload_confirmed: true });
+	const providerOnlyImage = registry.resolve('images', { provider: 'xai-api', prompt: 'x', output_format: 'png', candidate_count: 3, cloud_upload_confirmed: true });
 	assert.strictEqual(providerOnlyImage.error, undefined);
-	assert.strictEqual(providerOnlyImage.payload.output_format, 'image/jpeg');
+	assert.strictEqual(providerOnlyImage.payload.model, 'model-relay:xai:imagine-image');
+	assert.strictEqual(providerOnlyImage.payload.output_format, 'image/png');
 	assert.strictEqual(providerOnlyImage.payload.n, 3);
+	assert.deepStrictEqual(xaiImageModel.image_capabilities.supported_output_formats, ['image/png']);
+	const xaiJpegUnsupported = await registry.run('images', { provider: 'xai-api', prompt: 'x', output_format: 'image/jpeg', cloud_upload_confirmed: true });
+	assert.strictEqual(xaiJpegUnsupported.code, 'relay_image_options_unsupported');
+	const foldedAntigravitySize = normalizeImagePayloadForModel({ model: antigravityImageModel.id, prompt: 'x', image_size: '2k', output_format: 'image/png' }, antigravityImageModel);
+	assert.strictEqual(foldedAntigravitySize.error, undefined);
+	assert.strictEqual(foldedAntigravitySize.payload.image_size, '2K');
+	const foldedXaiResolution = normalizeImagePayloadForModel({ model: xaiImageModel.id, prompt: 'x', resolution: '2K', cloud_upload_confirmed: true, output_format: 'image/png' }, xaiImageModel);
+	assert.strictEqual(foldedXaiResolution.error, undefined);
+	assert.strictEqual(foldedXaiResolution.payload.resolution, '2k');
 	const providerOnlyUnsupportedOption = await registry.run('images', { provider: 'xai-api', prompt: 'x', output_format: 'image/tiff', cloud_upload_confirmed: true });
 	assert.strictEqual(providerOnlyUnsupportedOption.category, 'validation');
 	assert.strictEqual(providerOnlyUnsupportedOption.code, 'relay_image_options_unsupported');
@@ -370,7 +399,7 @@ function captureCliSpawn(calls) {
 		resolution: '2k',
 		quality: 'low',
 		candidate_count: 2,
-		output_format: 'image/jpeg',
+		output_format: 'image/png',
 	});
 	assert.strictEqual(imagineImage.success, true);
 	assert.strictEqual(imagineImage.response.data[0].mime_type, 'image/png');
@@ -382,7 +411,8 @@ function captureCliSpawn(calls) {
 	assert.strictEqual(generateCall.body.resolution, '2k');
 	assert.strictEqual(generateCall.body.quality, 'low');
 	assert.strictEqual(generateCall.body.n, 2);
-	assert.strictEqual(generateCall.body.output_format, 'image/jpeg');
+	assert.strictEqual(generateCall.body.response_format, 'b64_json');
+	assert.strictEqual(generateCall.body.output_format, undefined);
 	assert.strictEqual(generateCall.body.image, undefined);
 	const imagineEdit = await xaiImagine.images({
 		model: 'model-relay:xai:imagine-image',

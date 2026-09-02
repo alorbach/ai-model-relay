@@ -502,6 +502,20 @@ Response:
   },
   "backends": [
     {
+      "id": "grok-cli",
+      "label": "Grok CLI",
+      "kind": "local-cli",
+      "ready": true,
+      "job_types": ["chat", "images"]
+    },
+    {
+      "id": "model-relay:grok-cli:image",
+      "type": "image",
+      "backend": "grok-cli",
+      "ready": true,
+      "job_types": ["images"]
+    },
+    {
       "id": "model-relay:xai:grok-4.6",
       "type": "text",
       "backend": "xai-api"
@@ -516,9 +530,9 @@ Provider-neutral IDs use the `model-relay:<backend>:<model>` form. Existing fron
 
 ### Versioned image capability contract
 
-Relay image clients must use the model-scoped `image_capabilities` returned on each image entry in `backends`. The response also includes `image_capability_contract_version` and `image_capability_minimum_relay_version`; clients that rely on provider-specific controls must require contract version `1` and a Relay version of at least `1.0.10`. The contract is the authoritative allowlist for `supported_sizes`, `supported_qualities`, `supported_aspect_ratios`, `supported_output_formats`, `candidate_count_max`, reference limits, and `provider_options`.
+Relay image clients must use the model-scoped `image_capabilities` returned on each image entry in `backends`. The same `backends` array also includes driver readiness records whose `id` is the backend name (`grok-cli`, `codex-cli`, `antigravity-cli`, `xai-api`). Clients that verify a ready image model must find both the model entry and the matching driver (`entry.backend`) with `job_types` including `images`. The response also includes `image_capability_contract_version` and `image_capability_minimum_relay_version`; clients that rely on provider-specific controls must require contract version `1` and a Relay version of at least `1.0.10`. The contract is the authoritative allowlist for `supported_sizes`, `supported_qualities`, `supported_aspect_ratios`, `supported_output_formats`, `candidate_count_max`, reference limits, and `provider_options`.
 
-Provider-native resolution controls are sent inside `provider_options` using the advertised key: Codex uses `size` with pixel presets, Grok and xAI use `resolution` with `1k`/`2k`, and Antigravity uses `image_size` with `1K`/`2K`/`4K`. A generic pixel `size` must not be sent to a model whose contract advertises a native resolution key. The `/v1/relay/jobs/images` and `/v1/relay/test` routes validate and normalize these fields before invoking a provider; unsupported quality, aspect, format, candidate, or reference selections fail with a validation error instead of reaching the provider.
+Provider-native resolution controls are sent inside `provider_options` using the advertised key: Codex uses `size` with pixel presets, Grok and xAI use `resolution` with `1k`/`2k`, and Antigravity uses `image_size` with `1K`/`2K`/`4K`. Native aspect-ratio and quality controls are also listed in `provider_options`. A generic pixel `size` must not be sent to a model whose contract advertises a native resolution key. Image catalog entries publish `job_types: ["images"]` only; clients should treat mixed chat/image `job_types` as an incomplete image contract. The `/v1/relay/jobs/images` and `/v1/relay/test` routes validate and normalize these fields before invoking a provider; unsupported quality, aspect, format, candidate, or reference selections fail with a validation error instead of reaching the provider.
 
 ## `/v1/relay/jobs/*`
 

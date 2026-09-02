@@ -1031,7 +1031,7 @@ function detectNewImage(before, after, options = {}) {
 function imagePrompt(payload, attachments = []) {
 	const prompt = String(payload.prompt || '').trim();
 	const size = String(payload.size || '1024x1024').trim();
-	const quality = String(payload.quality || 'high').trim();
+	const quality = String(payload.quality || 'auto').trim();
 	const outputFormat = String(payload.output_format || 'image/png').trim();
 	const formatName = /png/i.test(outputFormat) ? 'PNG' : (/webp/i.test(outputFormat) ? 'WebP' : 'JPEG');
 	const sizePart = size === 'auto' ? '' : ` at ${size}`;

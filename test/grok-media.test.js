@@ -5,7 +5,7 @@ const { EventEmitter } = require('events');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { createGrokCliDriver, GROK_MEDIA_TIMEOUT_MS } = require('../src/backend-registry');
+const { createGrokCliDriver, GROK_MEDIA_TIMEOUT_MS, isCompleteImageCapabilityContract } = require('../src/backend-registry');
 
 function toolForArgs(args) {
 	const prompt = args[args.indexOf('--single') + 1] || '';
@@ -73,12 +73,18 @@ function createFakeGrok(options = {}) {
 		await fixture.driver.refresh();
 		const grokImageModel = fixture.driver.models().find((model) => model.id === 'model-relay:grok-cli:image');
 		assert.ok(grokImageModel);
+		assert.deepStrictEqual(grokImageModel.job_types, ['images']);
+		assert.ok(grokImageModel.image_capabilities);
+		assert.deepStrictEqual(Object.keys(grokImageModel.image_capabilities.provider_options).sort(), ['aspect_ratio', 'resolution']);
+		assert.strictEqual(grokImageModel.image_capabilities.provider_options.aspect_ratio.delivery, 'native');
+		assert.ok(isCompleteImageCapabilityContract(grokImageModel));
 		assert.deepStrictEqual(grokImageModel.test_options.map((option) => option.key), ['aspect_ratio', 'resolution']);
 		assert.ok(grokImageModel.test_options.every((option) => option.key === 'aspect_ratio' ? option.delivery === 'tool-arg' : option.delivery === 'guidance'));
 		assert.ok(grokImageModel.test_options[0].choices.some((choice) => choice.value === '21:9'));
 		assert.ok(grokImageModel.test_options[0].choices.some((choice) => choice.value === '5:2'));
 		const grokVideoModel = fixture.driver.models().find((model) => model.id === 'model-relay:grok-cli:video');
 		assert.ok(grokVideoModel);
+		assert.deepStrictEqual(grokVideoModel.job_types, ['videos']);
 		assert.deepStrictEqual(grokVideoModel.test_options.map((option) => option.key), ['aspect_ratio', 'resolution', 'seconds', 'generate_audio']);
 		assert.ok(grokVideoModel.test_options.every((option) => option.delivery === 'guidance'));
 		assert.ok(grokVideoModel.test_options.find((option) => option.key === 'resolution').choices.some((choice) => choice.value === '1080p'));
@@ -89,7 +95,7 @@ function createFakeGrok(options = {}) {
 		assert.ok(fixture.calls.some((args) => toolForArgs(args) === 'image_edit'));
 		assert.ok(fixture.calls.some((args) => toolForArgs(args) === 'image_edit' && args[args.indexOf('--single') + 1].includes('Pass aspect_ratio "16:9" as the image_edit tool argument.')));
 		assert.ok(fixture.calls.some((args) => toolForArgs(args) === 'image_edit' && args[args.indexOf('--single') + 1].includes('request 2K output with the long edge around 2048 pixels.')));
-		assert.ok(fixture.calls.some((args) => toolForArgs(args) === 'image_edit' && args[args.indexOf('--single') + 1].includes('Do not pass a resolution tool parameter')));
+		assert.ok(fixture.calls.some((args) => toolForArgs(args) === 'image_edit' && args[args.indexOf('--single') + 1].includes('Do not pass a resolution or output_format tool parameter')));
 		assertExactToolAllowlist(fixture.calls.find((args) => toolForArgs(args) === 'image_edit'), 'image_edit');
 
 		const noReference = await fixture.driver.videos({ prompt: 'animate' });

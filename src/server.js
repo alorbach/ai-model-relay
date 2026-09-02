@@ -353,8 +353,11 @@ function modelsPayload(context) {
 	}
 	modelPayload.models = modelPayload.models || {};
 	const backendModels = context.backends.models();
+	const backendDrivers = context.backends.capabilities ? context.backends.capabilities() : [];
 	modelPayload.models.relay = backendModels.map((model) => model.id);
-	modelPayload.backends = backendModels;
+	/* Image clients look up both the model id and the driver id (entry.backend,
+	 * e.g. grok-cli) inside this same backends array. */
+	modelPayload.backends = [...backendDrivers, ...backendModels];
 	modelPayload.image_capability_contract_version = IMAGE_CAPABILITY_CONTRACT_VERSION;
 	modelPayload.image_capability_minimum_relay_version = '1.0.10';
 	modelPayload.bridge = { ...(modelPayload.bridge || {}), version: packageInfo.version };
@@ -374,8 +377,9 @@ function relayPayloadFor(context, jobType, payload = {}) {
 			return driver && capabilities && capabilities.ready && (driver.job_types || []).includes(jobType) ? { driver, capabilities } : { error: { success: false, category: 'configuration', code: 'backend_unavailable', message: `Selected provider is unavailable: ${model || requested.provider || requested.backend}.` } };
 		})();
 	if (resolved.error) {
-		const code = explicit ? resolved.error.code : 'relay_default_unavailable';
-		return { error: { ...resolved.error, code, message: explicit ? resolved.error.message : `Configured default for ${jobType} is unavailable: ${model}. ${resolved.error.message}` } };
+		const rewriteDefault = !explicit && resolved.error.category !== 'validation';
+		const code = rewriteDefault ? 'relay_default_unavailable' : resolved.error.code;
+		return { error: { ...resolved.error, code, message: rewriteDefault ? `Configured default for ${jobType} is unavailable: ${model}. ${resolved.error.message}` : resolved.error.message } };
 	}
 	return { payload: resolved.payload || resolvedPayload, resolved };
 }
@@ -841,6 +845,10 @@ async function route(req, res, context) {
 		}
 		for (const key of ['audio_base64', 'audio_format', 'language', 'locale', 'xai_options', 'media_data_url', 'media_url', 'frames', 'size', 'quality', 'image_size', 'seconds', 'aspect_ratio', 'resolution', 'n', 'candidate_count', 'provider_options', 'output_format', 'cloud_upload_confirmed', 'cloud_consent', 'generate_audio']) {
 			if (body[key] !== undefined) requestedPayload[key] = body[key];
+		}
+		if (jobType === 'images') {
+			const imageModel = (context.backends.models() || []).find((entry) => entry && (entry.id === model || entry.legacy_id === model));
+			if (imageModel && imageModel.image_capabilities && imageModel.image_capabilities.cloud_upload) requestedPayload.cloud_upload_confirmed = true;
 		}
 		const resolved = relayPayloadFor(context, jobType, requestedPayload);
 		if (resolved.error) {

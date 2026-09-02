@@ -3,6 +3,7 @@
 const assert = require('assert');
 const http = require('http');
 const { createServer } = require('../src/server');
+const { GROK_IMAGE_CAPABILITIES, isCompleteImageCapabilityContract, relayCatalogEntrySupportsImages } = require('../src/backend-registry');
 
 function requestJson(port, method, pathname, body, headers = {}) {
 	return new Promise((resolve, reject) => {
@@ -111,8 +112,9 @@ function createMockSecurity() {
 	const backends = {
 		refresh: async () => { backendRefreshes += 1; },
 		capabilities: () => [
-			{ id: 'codex-cli', label: 'Codex CLI', ready: true },
-			{ id: 'xai-api', label: 'Grok / xAI API', configured: true, ready: true },
+			{ id: 'codex-cli', label: 'Codex CLI', ready: true, job_types: ['chat', 'images'] },
+			{ id: 'grok-cli', label: 'Grok CLI', ready: true, job_types: ['chat', 'images'] },
+			{ id: 'xai-api', label: 'Grok / xAI API', configured: true, ready: true, job_types: ['chat', 'images'] },
 			{ id: 'local-upscale', label: 'Local CUDA Upscale', ready: true, diagnostic: 'ready', models: [{ id: 'model-relay:local-upscale:swinir-classical-x2', manifest_valid: true }] },
 		],
 		models: () => [
@@ -120,13 +122,23 @@ function createMockSecurity() {
 			{ id: 'model-relay:xai:grok-4.3', type: 'text', backend: 'xai-api' },
 			{ id: 'model-relay:xai:grok-4.6', type: 'text', backend: 'xai-api' },
 			{ id: 'model-relay:xai:stt', type: 'audio', backend: 'xai-api' },
-			{ id: 'model-relay:xai:imagine-image', type: 'image', backend: 'xai-api' },
+			{ id: 'model-relay:xai:imagine-image', type: 'image', backend: 'xai-api', image_capabilities: { contract_version: 1, cloud_upload: true } },
 			{ id: 'model-relay:antigravity-cli:image', type: 'image', backend: 'antigravity-cli', image_capabilities: { contract_version: 1, provider_options: { image_size: { type: 'enum', values: ['1K', '2K', '4K'] } } } },
+			{ id: 'model-relay:grok-cli:image', type: 'image', backend: 'grok-cli', ready: true, job_types: ['images'], image_capabilities: GROK_IMAGE_CAPABILITIES },
 			{ id: 'model-relay:xai:imagine-video', type: 'video', backend: 'xai-api' },
 			{ id: 'model-relay:music-analysis:core', type: 'audio', backend: 'music-analysis' },
 			{ id: 'model-relay:local-upscale:swinir-classical-x2', type: 'image', backend: 'local-upscale', job_types: ['upscale'], upscale_capabilities: { contract_version: 1, native_scale: 2, output_policy: 'retain_native_x2', input_formats: ['image/png'], output_formats: ['image/png'], cuda_only: true, explicit_install: true } },
 		],
 		getDriver: (type, payload = {}) => String(payload.model || '').startsWith('model-relay:local-upscale:') ? ({ id: 'local-upscale', job_types: ['upscale'], capabilities: () => ({ ready: true, models: [{ id: 'model-relay:local-upscale:swinir-classical-x2', manifest_valid: true }] }) }) : ({ id: 'codex-cli', job_types: ['chat', 'images', 'videos', 'transcribe', 'media.analyze', 'music.analyze'], checkStatus: () => ({ success: true, message: 'ready', details: {} }), capabilities: () => ({ ready: true }) }),
+		resolve(jobType, payload = {}) {
+			if (jobType === 'images' && String(payload.aspect_ratio || '') === 'not-a-ratio') {
+				return { error: { success: false, category: 'validation', code: 'relay_image_options_unsupported', message: 'The requested aspect ratio is not supported by the selected Relay image model.' } };
+			}
+			const driver = this.getDriver(jobType, payload);
+			const capabilities = driver && driver.capabilities ? driver.capabilities() : { ready: true };
+			if (!driver || !capabilities.ready) return { error: { success: false, category: 'configuration', code: 'backend_unavailable', message: 'Selected provider is unavailable.' } };
+			return { driver, capabilities, provider: driver.id, payload };
+		},
 		getDriverById: (id) => String(id) === 'local-upscale' ? ({ id: 'local-upscale', refresh: async () => { localUpscaleRefreshes += 1; } }) : null,
 		run: (type, payload, session = {}) => {
 			calls.push({ route: `relay-${type}`, payload });
@@ -205,10 +217,15 @@ function createMockSecurity() {
 		assert.ok(models.body.models.relay.includes('model-relay:music-analysis:core'));
 		assert.ok(models.body.models.relay.includes('model-relay:local-upscale:swinir-classical-x2'));
 		assert.ok(models.body.backends.some((model) => model.backend === 'xai-api'));
+		assert.ok(models.body.backends.some((item) => item.id === 'grok-cli' && item.ready === true && item.job_types.includes('images')));
 		assert.strictEqual(models.body.image_capability_contract_version, 1);
 		assert.strictEqual(models.body.image_capability_minimum_relay_version, '1.0.10');
 		const relayAntigravityImage = models.body.backends.find((model) => model.id === 'model-relay:antigravity-cli:image');
 		assert.deepStrictEqual(Object.keys(relayAntigravityImage.image_capabilities.provider_options), ['image_size']);
+		const relayGrokImage = models.body.backends.find((model) => model.id === 'model-relay:grok-cli:image');
+		assert.ok(isCompleteImageCapabilityContract(relayGrokImage));
+		assert.ok(relayCatalogEntrySupportsImages(models.body, relayGrokImage));
+		assert.ok(!relayCatalogEntrySupportsImages({ backends: models.body.backends.filter((item) => item.id !== 'grok-cli') }, relayGrokImage), 'clients require a grok-cli driver record in the same backends array');
 		const relayUpscale = models.body.backends.find((model) => model.id === 'model-relay:local-upscale:swinir-classical-x2');
 		assert.strictEqual(relayUpscale.upscale_capabilities.native_scale, 2);
 		assert.strictEqual(relayUpscale.upscale_capabilities.output_policy, 'retain_native_x2');
@@ -276,6 +293,9 @@ function createMockSecurity() {
 		const relayImages = await requestJson(port, 'POST', '/v1/relay/jobs/images', { ...body, payload: { model: 'model-relay:codex:image', prompt: 'x' } });
 		assert.strictEqual(relayImages.statusCode, 200);
 		assert.strictEqual(calls[calls.length - 1].route, 'relay-images');
+		const defaultImageOptions = await requestJson(port, 'POST', '/v1/relay/jobs/images', { ...body, payload: { prompt: 'x', aspect_ratio: 'not-a-ratio' } });
+		assert.strictEqual(defaultImageOptions.statusCode, 400);
+		assert.strictEqual(defaultImageOptions.body.code, 'relay_image_options_unsupported');
 
 		const upscalePayload = { model: 'model-relay:local-upscale:swinir-classical-x2', source_asset_uuid: 'source-uuid', source_checksum: 'c'.repeat(64), crop: { x: 0, y: 0, width: 1, height: 1 }, target_print: { width: 2550, height: 3300, dpi: 300 }, scale: 2, output_format: 'png' };
 		const binaryUpscale = await requestBinary(port, 'POST', '/v1/relay/jobs/upscale', Buffer.from('protected-source-png'), { 'X-Alorbach-Request-Id': 'upscale-request', 'X-Alorbach-Job-Token': 'job-token', 'X-Alorbach-Request-Hash': 'hash', 'X-Alorbach-Upscale-Payload': Buffer.from(JSON.stringify(upscalePayload)).toString('base64url') });
@@ -334,6 +354,10 @@ function createMockSecurity() {
 		assert.strictEqual(calls[calls.length - 1].payload.resolution, '1080p');
 		assert.strictEqual(calls[calls.length - 1].payload.aspect_ratio, '9:16');
 		assert.strictEqual(calls[calls.length - 1].payload.generate_audio, 'false');
+		const localXaiImageTest = await requestJson(port, 'POST', '/v1/relay/test', { job_type: 'images', model: 'model-relay:xai:imagine-image', prompt: 'test imagine image', aspect_ratio: '16:9', resolution: '2k' });
+		assert.strictEqual(localXaiImageTest.statusCode, 200);
+		assert.strictEqual(calls[calls.length - 1].payload.model, 'model-relay:xai:imagine-image');
+		assert.strictEqual(calls[calls.length - 1].payload.cloud_upload_confirmed, true);
 		const localGrokOptionsTest = await requestJson(port, 'POST', '/v1/relay/test', { job_type: 'images', model: 'model-relay:codex:image', prompt: 'test image guidance', aspect_ratio: '16:9', resolution: '2k' });
 		assert.strictEqual(localGrokOptionsTest.statusCode, 200);
 		assert.strictEqual(calls[calls.length - 1].payload.aspect_ratio, '16:9');

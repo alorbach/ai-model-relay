@@ -9,7 +9,7 @@ const { createBoundedCollector } = require('./diagnostics');
 const { detectCli, detectCliAsync, materializeChatImages, messagesToPromptJson, messagesToText, runTextCommand, writePromptFile } = require('./local-cli');
 const { createLocalUpscaleDriver } = require('./local-upscale');
 const { resolveMaxTokens } = require('./token-policy');
-const { IMAGE_CAPABILITY_CONTRACT_VERSION, imageCapabilityContract, normalizeImageOutputFormat, normalizeImagePayloadForModel } = require('./image-capabilities');
+const { IMAGE_CAPABILITY_CONTRACT_VERSION, imageCapabilityContract, isCompleteImageCapabilityContract, normalizeImageOutputFormat, normalizeImagePayloadForModel, relayCatalogEntrySupportsImages } = require('./image-capabilities');
 
 const RELAY_MODEL_PREFIX = 'model-relay';
 const GROK_MEDIA_TIMEOUT_MS = 450000;
@@ -328,13 +328,13 @@ function grokImageToolGuidance(payload = {}, toolName) {
 	if (aspectRatio && aspectRatio !== 'auto') {
 		parts.push(`Pass aspect_ratio ${JSON.stringify(aspectRatio)} as the ${toolName} tool argument.`);
 	}
-	parts.push(`Pass output_format ${JSON.stringify(outputFormat)} as the ${toolName} tool argument.`);
 	if (resolution === '2k') {
 		parts.push('In the tool prompt string, request 2K output with the long edge around 2048 pixels.');
 	} else if (resolution === '1k') {
 		parts.push('In the tool prompt string, request 1K output with the long edge around 1024 pixels.');
 	}
-	parts.push('Do not pass a resolution tool parameter; Grok Imagine image tools only accept prompt and aspect_ratio.');
+	parts.push(`In the tool prompt string, request output_format ${JSON.stringify(outputFormat)}.`);
+	parts.push('Do not pass a resolution or output_format tool parameter; Grok Imagine image tools only accept prompt and aspect_ratio.');
 	return parts.join(' ');
 }
 
@@ -470,7 +470,7 @@ const XAI_IMAGE_TEST_OPTIONS = [
 const CODEX_IMAGE_CAPABILITIES = imageCapabilityContract(CODEX_IMAGE_TEST_OPTIONS, { resolutionKey: 'size', referenceImagesMax: 4 });
 const GROK_IMAGE_CAPABILITIES = imageCapabilityContract(GROK_IMAGE_TEST_OPTIONS, { resolutionKey: 'resolution', referenceImagesMax: 4 });
 const ANTIGRAVITY_IMAGE_CAPABILITIES = imageCapabilityContract(ANTIGRAVITY_IMAGE_TEST_OPTIONS, { resolutionKey: 'image_size', referenceImagesMax: 4 });
-const XAI_IMAGE_CAPABILITIES = imageCapabilityContract(XAI_IMAGE_TEST_OPTIONS, { resolutionKey: 'resolution', referenceImagesMax: XAI_IMAGE_REFERENCE_LIMIT, candidateCountMax: 3, cloudUpload: true });
+const XAI_IMAGE_CAPABILITIES = imageCapabilityContract(XAI_IMAGE_TEST_OPTIONS, { resolutionKey: 'resolution', referenceImagesMax: XAI_IMAGE_REFERENCE_LIMIT, candidateCountMax: 3, cloudUpload: true, outputFormats: ['image/png'] });
 
 const XAI_VIDEO_TEST_OPTIONS = [
 	testOption('aspect_ratio', 'Aspect ratio', 'direct', [
@@ -783,7 +783,7 @@ function createGrokCliDriver(options = {}) {
 		const base = baseModels();
 		const state = baseCapabilities();
 		if (!state.ready || !imagine.images) return base;
-		return [...base, { id: 'model-relay:grok-cli:image', type: 'image', backend: 'grok-cli', ready: true, test_options: GROK_IMAGE_TEST_OPTIONS, image_capabilities: GROK_IMAGE_CAPABILITIES }, ...(imagine.videos ? [{ id: 'model-relay:grok-cli:video', type: 'video', backend: 'grok-cli', ready: true, experimental: true, verified: imagine.video_verified, test_options: GROK_VIDEO_TEST_OPTIONS }] : [])];
+		return [...base, { id: 'model-relay:grok-cli:image', type: 'image', backend: 'grok-cli', ready: true, job_types: ['images'], test_options: GROK_IMAGE_TEST_OPTIONS, image_capabilities: GROK_IMAGE_CAPABILITIES }, ...(imagine.videos ? [{ id: 'model-relay:grok-cli:video', type: 'video', backend: 'grok-cli', ready: true, job_types: ['videos'], experimental: true, verified: imagine.video_verified, test_options: GROK_VIDEO_TEST_OPTIONS }] : [])];
 	};
 	driver.refresh = async (refreshOptions = {}) => {
 		const state = await baseRefresh();
@@ -1462,7 +1462,7 @@ function createXaiApiDriver(options = {}) {
 			const model = xaiImagineImageModel(payload.model);
 			const requestedCount = payload.candidate_count !== undefined ? payload.candidate_count : payload.n;
 			const n = Math.min(10, Math.max(1, Number(requestedCount) || 1));
-			const body = { model, prompt, n, response_format: 'b64_json', output_format: normalizeImageOutputFormat(payload.output_format) };
+			const body = { model, prompt, n, response_format: 'b64_json' };
 			const aspectRatio = String(payload.aspect_ratio || '').trim();
 			if (aspectRatio && XAI_IMAGE_ASPECT_RATIOS.has(aspectRatio)) body.aspect_ratio = aspectRatio;
 			const resolution = String(payload.resolution || '').trim().toLowerCase();
@@ -1824,7 +1824,9 @@ function createBackendRegistry(options = {}) {
 			if (!imageModel) return { error: { success: false, category: 'configuration', code: 'backend_image_capability_missing', message: `Selected provider does not publish an image capability contract: ${driver.id}.`, details: { job_type: jobType, provider: driver.id, model: selection.model } } };
 			const normalized = normalizeImagePayloadForModel(payload, imageModel);
 			if (normalized.error) return { error: normalized.error };
-			return { driver, capabilities, provider: driver.id, payload: normalized.payload };
+			const stamped = { ...normalized.payload };
+			if (!String(stamped.model || '').trim()) stamped.model = imageModel.id;
+			return { driver, capabilities, provider: driver.id, payload: stamped };
 		}
 		return { driver, capabilities, provider: driver.id };
 	}
@@ -1858,6 +1860,8 @@ module.exports = {
 	ANTIGRAVITY_IMAGE_CAPABILITIES,
 	GROK_IMAGE_CAPABILITIES,
 	IMAGE_CAPABILITY_CONTRACT_VERSION,
+	isCompleteImageCapabilityContract,
+	relayCatalogEntrySupportsImages,
 	createApiKeyChatDriver,
 	createAntigravityCliDriver,
 	createBackendRegistry,

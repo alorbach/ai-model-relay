@@ -49,6 +49,11 @@ const tinyPng = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8
 
 	const prompt = imagePrompt({ prompt: 'TELE ad', size: '1536x1024', quality: 'high' }, fromRefs);
 	assert.ok(prompt.includes('Create one PNG image at 1536x1024, quality high. Scene: TELE ad'));
+	const autoQuality = imagePrompt({ prompt: 'TELE ad', size: '1536x1024', quality: 'auto' });
+	assert.ok(autoQuality.includes('Create one PNG image at 1536x1024. Scene: TELE ad'));
+	assert.ok(!/, quality /.test(autoQuality));
+	const omittedQuality = imagePrompt({ prompt: 'TELE ad', size: '1536x1024' });
+	assert.ok(omittedQuality.includes('Create one PNG image at 1536x1024. Scene: TELE ad'));
 	assert.ok(prompt.includes('Pass the following text verbatim as the image_gen prompt'));
 	assert.ok(prompt.includes('Image 1 (product)'));
 	assert.ok(prompt.includes('Image 2 (layout)'));
