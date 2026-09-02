@@ -116,6 +116,17 @@ assert.ok(html.includes('function captureFormSnapshots(keys)'));
 assert.ok(html.includes('class="app-shell"'));
 assert.ok(html.includes('id="healthGrid"'));
 assert.ok(html.includes('data-live-filter'));
+assert.ok(html.includes('data-live-filter="completed"'));
+assert.ok(html.includes('data-live-filter-count="all"'));
+assert.ok(html.includes('id="liveJobSearch"'));
+assert.ok(html.includes('function pendingLiveJob(requestId)'));
+assert.ok(html.includes('function liveJobMatchesSearch(job)'));
+assert.ok(html.includes('Waiting for this job to appear in live updates.'));
+assert.ok(html.includes("liveFilter === 'completed'"));
+assert.ok(html.includes('class="live-status-pill'));
+assert.ok(html.includes('id="liveDetailStatus"'));
+assert.ok(html.includes('class="live-artifact-download"'));
+assert.ok(html.includes('currentStatus.jobs = jobs'));
 assert.ok(html.includes('data-open-live-job'));
 assert.ok(html.includes('--accent:'));
 

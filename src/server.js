@@ -406,7 +406,8 @@ function statusPayload(context, options = {}) {
 	const includeDiagnostics = options.includeDiagnostics !== false;
 	const jobs = includeDiagnostics ? context.jobManager.snapshot() : publicJobsSnapshot(context.jobManager.snapshot());
 	if (context.statusCache) {
-		const cached = context.statusCache.status();
+		const cachedStatus = context.statusCache.status();
+		const cached = includeDiagnostics ? cachedStatus : publicStatusProjection(cachedStatus);
 		const bridge = {
 			...bridgeMetadata(),
 			...(cached.bridge || {}),
@@ -419,7 +420,8 @@ function statusPayload(context, options = {}) {
 		}
 		return { ...cached, bridge, jobs };
 	}
-	const status = context.codex.checkStatus();
+	const checkedStatus = context.codex.checkStatus();
+	const status = includeDiagnostics ? checkedStatus : publicStatusProjection(checkedStatus);
 	const bridge = bridgeMetadata();
 	if (includePairedOrigins) {
 		bridge.paired_origins = Object.keys(context.security.getPairings());
@@ -431,6 +433,14 @@ function statusPayload(context, options = {}) {
 		music_analysis: context.musicAnalysis.capabilities ? context.musicAnalysis.capabilities() : {},
 		jobs,
 	};
+}
+
+function publicStatusProjection(status) {
+	if (!status || typeof status !== 'object') {
+		return status;
+	}
+	const { details, ...publicStatus } = status;
+	return publicStatus;
 }
 
 function modelsPayload(context) {
@@ -572,6 +582,29 @@ function requireLocalPageOrigin(req, res, origin) {
 	if (isLocalPageOrigin(req, origin)) return true;
 	sendErrorJson(req, res, 403, { success: false, message: 'Status-page install and settings are only accepted from the local Relay page.' });
 	return false;
+}
+
+function pairingLimiterFor(context, req, requesterOrigin, targetOrigin) {
+	const address = String(req.socket && req.socket.remoteAddress || '').trim() || 'unknown';
+	const key = `${address}|${requesterOrigin || '-'}|${targetOrigin || '-'}`;
+	if (!context.pairingLimiters) {
+		context.pairingLimiters = new Map();
+	}
+	const existing = context.pairingLimiters.get(key);
+	if (existing) {
+		return existing;
+	}
+	while (context.pairingLimiters.size >= 256) {
+		const oldest = context.pairingLimiters.keys().next().value;
+		if (oldest === undefined) break;
+		context.pairingLimiters.delete(oldest);
+	}
+	const createLimiter = context.security && typeof context.security.createPairingLimiter === 'function'
+		? context.security.createPairingLimiter
+		: security.createPairingLimiter;
+	const limiter = createLimiter();
+	context.pairingLimiters.set(key, limiter);
+	return limiter;
 }
 
 function acquireSetupLock(key) {
@@ -807,7 +840,7 @@ async function route(req, res, context) {
 			sendErrorJson(req, res, 400, { success: false, message: 'A valid WordPress origin is required.' }, pairCors);
 			return;
 		}
-		const limiter = context.pairingLimiter;
+		const limiter = pairingLimiterFor(context, req, origin, safeOrigin);
 		if (limiter && !limiter.allow()) {
 			const retryAfterMs = limiter.retryAfterMs ? limiter.retryAfterMs() : 0;
 			sendErrorJson(req, res, 429, { success: false, category: 'rate_limit', code: 'pairing_rate_limited', message: 'Too many pairing attempts. Wait and retry.', retry_after_ms: retryAfterMs }, pairCors);
@@ -1021,6 +1054,7 @@ async function route(req, res, context) {
 			requestId: body.request_id,
 			type: 'chat',
 			model: modelFromPayload(resolved.payload, 'codex-local:auto'),
+			origin: pairedOrigin,
 			...display,
 		}, (session) => isRelayRoute ? context.backends.run('chat', resolved.payload, session) : codexAdapter.chat(resolved.payload, session));
 		if (!result.success) {
@@ -1039,6 +1073,7 @@ async function route(req, res, context) {
 			requestId: body.request_id,
 			type: 'images',
 			model: modelFromPayload(resolved.payload, 'codex-local:image'),
+			origin: pairedOrigin,
 			...display,
 		}, (session) => isRelayRoute ? context.backends.run('images', resolved.payload, session) : codexAdapter.images(resolved.payload, session));
 		if (!result.success) {
@@ -1057,6 +1092,7 @@ async function route(req, res, context) {
 			requestId: body.request_id,
 			type: 'transcribe',
 			model: modelFromPayload(resolved.payload, 'local-asr'),
+			origin: pairedOrigin,
 			...display,
 		}, (session) => isRelayRoute ? context.backends.run('transcribe', resolved.payload, session) : codexAdapter.transcribe(resolved.payload, session));
 		if (!result.success) {
@@ -1075,6 +1111,7 @@ async function route(req, res, context) {
 			requestId: body.request_id,
 			type: 'videos',
 			model: modelFromPayload(resolved.payload, 'sora-2'),
+			origin: pairedOrigin,
 			...display,
 		}, (session) => isRelayRoute ? context.backends.run('videos', resolved.payload, session) : context.video.run(resolved.payload, session));
 		if (!result.success) {
@@ -1093,6 +1130,7 @@ async function route(req, res, context) {
 			requestId: body.request_id,
 			type: 'media_analysis',
 			model: modelFromPayload(resolved.payload, 'codex-local:auto'),
+			origin: pairedOrigin,
 			...display,
 		}, (session) => isRelayRoute ? context.backends.run('media.analyze', resolved.payload, session) : context.mediaAnalysis.analyze(resolved.payload, codexAdapter, session));
 		if (!result.success) {
@@ -1111,6 +1149,7 @@ async function route(req, res, context) {
 			requestId: body.request_id,
 			type: 'music_analysis',
 			model: modelFromPayload(resolved.payload, 'model-relay:music-analysis:core'),
+			origin: pairedOrigin,
 			...display,
 		}, (session) => isRelayRoute ? context.backends.run('music.analyze', resolved.payload, session) : context.musicAnalysis.analyze(resolved.payload, session));
 		if (!result.success) {
@@ -1157,7 +1196,7 @@ function createServer(options = {}) {
 		jobManager: options.jobManager || createJobManager({ ...options, onJobState }),
 		statusEvents,
 		relaySettings: options.relaySettings || relaySettings,
-		pairingLimiter: options.pairingLimiter || security.createPairingLimiter(),
+		pairingLimiters: new Map(),
 	};
 	context.usesProvidedBackends = !!options.backends;
 	context.rebuildBackends = () => {
@@ -1244,5 +1283,6 @@ module.exports = {
 	createStatusEvents,
 	createJobManager,
 	getPairingCode: () => pairingCode,
+	publicStatusProjection,
 	startServer,
 };

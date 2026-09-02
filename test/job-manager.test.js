@@ -207,6 +207,12 @@ function deferredRunner(label, started, resolvers, result = { success: true }) {
 
 	{
 		const manager = new JobManager({ maxConcurrent: 1 });
+		await manager.run({ requestId: 'unowned-artifact', type: 'upscale', provider: 'local-upscale' }, () => Promise.resolve({ success: true, artifact: { mime_type: 'image/png', bytes: Buffer.from('unowned-png') } }));
+		assert.strictEqual(manager.artifactByRequestId('unowned-artifact', 'http://site-a'), null);
+	}
+
+	{
+		const manager = new JobManager({ maxConcurrent: 1 });
 		const running = manager.run({ requestId: 'owned-cancel', type: 'upscale', origin: 'http://site-a', provider: 'local-upscale' }, (session) => new Promise((resolve) => {
 			session.signal.addEventListener('abort', () => resolve({ success: false, category: 'cancelled' }), { once: true });
 		}));
@@ -250,6 +256,65 @@ function deferredRunner(label, started, resolvers, result = { success: true }) {
 		resolvers['image-antigravity']();
 		await Promise.all([codexImage, antigravityImage]);
 		assert.strictEqual(manager.snapshot().running_count, 0);
+	}
+
+	{
+		let now = 1_000_000;
+		const manager = new JobManager({
+			maxConcurrent: 1,
+			retentionMs: 15 * 60 * 1000,
+			maxRecent: 50,
+			now: () => now,
+		});
+		for (let index = 0; index < 12; index += 1) {
+			await manager.run({ requestId: 'keep-' + index, type: 'chat' }, () => ({ success: true }));
+		}
+		const snapshot = manager.snapshot();
+		assert.strictEqual(snapshot.recent.length, 12);
+		assert.strictEqual(snapshot.retention_ms, 15 * 60 * 1000);
+		assert.strictEqual(snapshot.recent[0].request_id, 'keep-11');
+		assert.strictEqual(snapshot.recent[11].request_id, 'keep-0');
+		now += 16 * 60 * 1000;
+		assert.strictEqual(manager.snapshot().recent.length, 0);
+	}
+
+	{
+		let now = 1_000_000;
+		const manager = new JobManager({
+			maxConcurrent: 1,
+			maxRecent: 3,
+			retentionMs: 60_000,
+			now: () => now,
+		});
+		for (let index = 0; index < 5; index += 1) {
+			await manager.run({ requestId: 'cap-' + index, type: 'chat' }, () => ({ success: true }));
+		}
+		assert.strictEqual(manager.snapshot().recent.length, 3);
+		assert.strictEqual(manager.snapshot().recent[0].request_id, 'cap-4');
+		assert.strictEqual(manager.snapshot().recent[2].request_id, 'cap-2');
+	}
+
+	{
+		const tinyPng = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=', 'base64');
+		let now = 1_000_000;
+		const manager = new JobManager({
+			maxConcurrent: 1,
+			maxRecent: 20,
+			retentionMs: 15 * 60 * 1000,
+			now: () => now,
+		});
+		for (let index = 0; index < 10; index += 1) {
+			await manager.run({ requestId: 'img-' + index, type: 'images' }, () => ({
+				success: true,
+				response: { data: [{ b64_json: tinyPng.toString('base64'), mime_type: 'image/png' }] },
+			}));
+		}
+		assert.ok(manager.artifactByRequestId('img-0'));
+		assert.ok(manager.artifactByRequestId('img-9'));
+		assert.strictEqual(manager.snapshot().recent.length, 10);
+		now += 16 * 60 * 1000;
+		assert.strictEqual(manager.snapshot().recent.length, 0);
+		assert.strictEqual(manager.artifactByRequestId('img-0'), null);
 	}
 
 	assert.ok(collectSessionOutput({ details: { stdout: 'out', stderr: 'err', response_text: 'last' } }).includes('STDOUT:\nout'));

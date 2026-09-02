@@ -2,7 +2,7 @@
 
 const assert = require('assert');
 const http = require('http');
-const { createServer, getPairingCode } = require('../src/server');
+const { createServer, getPairingCode, publicStatusProjection } = require('../src/server');
 const { GROK_IMAGE_CAPABILITIES, isCompleteImageCapabilityContract, relayCatalogEntrySupportsImages } = require('../src/backend-registry');
 
 function requestJson(port, method, pathname, body, headers = {}) {
@@ -85,6 +85,9 @@ function createMockSecurity() {
 }
 
 (async () => {
+	const publicStatus = publicStatusProjection({ success: true, details: { auth_path: 'C:\\private\\auth.json', generated_images_dir: 'C:\\private\\images' }, message: 'ready' });
+	assert.strictEqual(publicStatus.details, undefined);
+	assert.strictEqual(publicStatus.message, 'ready');
 	const calls = [];
 	let backendRefreshes = 0;
 	let localUpscaleRefreshes = 0;
@@ -423,10 +426,12 @@ function createMockSecurity() {
 		const pairMismatch = await requestJson(port, 'POST', '/v1/pair', { origin: 'https://wp.example', pairing_code: '000000' }, { Origin: 'https://evil.example', 'X-Alorbach-Bridge-Token': '' });
 		assert.strictEqual(pairMismatch.statusCode, 403);
 		assert.ok(!pairMismatch.headers['access-control-allow-origin']);
-		for (let i = 0; i < 4; i++) {
+		for (let i = 0; i < 5; i++) {
 			const fail = await requestJson(port, 'POST', '/v1/pair', { origin: 'https://wp.example', pairing_code: '000000' }, { Origin: 'https://wp.example', 'X-Alorbach-Bridge-Token': '' });
 			assert.strictEqual(fail.statusCode, 403);
 		}
+		const otherOriginFail = await requestJson(port, 'POST', '/v1/pair', { origin: 'https://other.example', pairing_code: '000000' }, { Origin: 'https://other.example', 'X-Alorbach-Bridge-Token': '' });
+		assert.strictEqual(otherOriginFail.statusCode, 403, 'pairing failures are scoped to the requesting origin');
 		const limited = await requestJson(port, 'POST', '/v1/pair', { origin: 'https://wp.example', pairing_code: '000000' }, { Origin: 'https://wp.example', 'X-Alorbach-Bridge-Token': '' });
 		assert.strictEqual(limited.statusCode, 429);
 		assert.strictEqual(limited.body.code, 'pairing_rate_limited');

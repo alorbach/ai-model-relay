@@ -263,7 +263,7 @@ function createMockSecurity() {
 		assert.ok(page.body.includes('white-space: pre-wrap'));
 		assert.ok(page.body.includes('overflow-x: hidden'));
 		assert.ok(page.body.includes('live-session-output'));
-		assert.ok(page.body.includes('<details class="session-output-block">'));
+		assert.ok(page.body.includes('<details class="session-output-block"'));
 		assert.ok(page.body.includes('Prompt'));
 		assert.ok(page.body.includes('AI Response'));
 		assert.ok(page.body.includes('debug_logs'));

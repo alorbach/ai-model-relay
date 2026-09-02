@@ -133,7 +133,8 @@ function statusPageHtml() {
 		.status-completed { color: var(--ok); }
 		.status-failed { color: var(--bad); }
 		.status-running { color: var(--info); }
-		.status-queued { color: var(--warn); }
+		.status-queued,
+		.status-pending { color: var(--warn); }
 		.table {
 			width: 100%;
 			border-collapse: collapse;
@@ -200,10 +201,10 @@ function statusPageHtml() {
 			margin-bottom: 10px;
 		}
 		.job-artifacts {
-			display: flex;
-			flex-wrap: wrap;
-			gap: 12px;
-			padding: 4px 0 12px;
+			display: grid;
+			grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+			gap: 14px;
+			padding: 4px 0 16px;
 		}
 		.job-artifact-preview {
 			display: grid;
@@ -583,33 +584,49 @@ function statusPageHtml() {
 			color: var(--muted);
 			font-size: 11px;
 		}
+		.panel.live-inspector {
+			padding: 0;
+			background: transparent;
+			border: 0;
+			box-shadow: none;
+			overflow: visible;
+		}
 		.live-inspector {
 			display: grid;
-			grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
+			grid-template-columns: minmax(280px, 400px) minmax(0, 1fr);
 			gap: 12px;
-			min-height: 520px;
+			min-height: calc(100vh - 148px);
+			align-items: stretch;
 		}
 		.live-list-panel,
 		.live-detail-panel {
+			display: flex;
+			flex-direction: column;
 			background: var(--panel);
 			border: 1px solid var(--line);
-			border-radius: 10px;
+			border-radius: 12px;
 			min-width: 0;
+			min-height: 0;
 			overflow: hidden;
 			box-shadow: var(--shadow);
 		}
 		.live-list-toolbar {
 			display: flex;
 			flex-wrap: wrap;
-			gap: 6px;
-			padding: 10px;
+			align-items: center;
+			gap: 8px;
+			padding: 12px;
 			border-bottom: 1px solid var(--line);
+			background: var(--panel-2);
 		}
 		.live-filter {
 			appearance: none;
+			display: inline-flex;
+			align-items: center;
+			gap: 6px;
 			border: 1px solid var(--line);
 			border-radius: 999px;
-			background: var(--panel-2);
+			background: var(--panel);
 			color: var(--muted);
 			cursor: pointer;
 			font: inherit;
@@ -622,17 +639,60 @@ function statusPageHtml() {
 			border-color: var(--accent);
 			background: rgba(56, 189, 248, 0.12);
 		}
+		.live-filter-count {
+			min-width: 1.25em;
+			border-radius: 999px;
+			background: rgba(255, 255, 255, 0.06);
+			color: inherit;
+			font-size: 10px;
+			font-weight: 700;
+			line-height: 1;
+			padding: 3px 6px;
+			text-align: center;
+		}
+		.live-search {
+			display: grid;
+			flex: 1 1 160px;
+			min-width: 140px;
+		}
+		.live-search input {
+			width: 100%;
+			background: #0e1520;
+			border: 1px solid var(--line);
+			border-radius: 8px;
+			color: var(--text);
+			font: inherit;
+			font-size: 12px;
+			padding: 7px 10px;
+		}
+		.live-search input:focus {
+			outline: none;
+			border-color: var(--accent);
+		}
+		.visually-hidden {
+			position: absolute;
+			width: 1px;
+			height: 1px;
+			padding: 0;
+			margin: -1px;
+			overflow: hidden;
+			clip: rect(0, 0, 0, 0);
+			white-space: nowrap;
+			border: 0;
+		}
 		.live-job-list {
 			display: grid;
+			align-content: start;
 			gap: 0;
-			max-height: min(72vh, 720px);
+			flex: 1 1 auto;
+			min-height: 0;
 			overflow: auto;
 		}
 		.live-job-card {
 			display: grid;
-			gap: 4px;
+			gap: 6px;
 			width: 100%;
-			padding: 10px 12px;
+			padding: 12px 14px;
 			border: 0;
 			border-bottom: 1px solid var(--line);
 			background: transparent;
@@ -656,47 +716,166 @@ function statusPageHtml() {
 			justify-content: space-between;
 			gap: 8px;
 		}
+		.live-job-card-title {
+			font-weight: 650;
+			overflow-wrap: anywhere;
+		}
 		.live-job-card-meta {
+			display: flex;
+			flex-wrap: wrap;
+			align-items: center;
+			gap: 6px 8px;
 			color: var(--muted);
 			font-size: 11px;
 			overflow-wrap: anywhere;
 		}
+		.live-job-tag {
+			display: inline-flex;
+			align-items: center;
+			border-radius: 999px;
+			background: rgba(255, 255, 255, 0.05);
+			border: 1px solid var(--line);
+			color: var(--text);
+			font-size: 10px;
+			font-weight: 700;
+			letter-spacing: 0.02em;
+			padding: 2px 7px;
+			text-transform: uppercase;
+		}
+		.live-status-pill {
+			display: inline-flex;
+			align-items: center;
+			gap: 6px;
+			border-radius: 999px;
+			border: 1px solid var(--line);
+			background: var(--panel);
+			font-size: 10px;
+			font-weight: 700;
+			letter-spacing: 0.02em;
+			padding: 3px 8px;
+			text-transform: uppercase;
+		}
+		.live-status-dot {
+			width: 7px;
+			height: 7px;
+			border-radius: 50%;
+			background: currentColor;
+		}
+		.live-status-pill.status-running {
+			color: var(--info);
+			background: rgba(96, 165, 250, 0.12);
+			border-color: rgba(96, 165, 250, 0.35);
+		}
+		.live-status-pill.status-queued,
+		.live-status-pill.status-pending {
+			color: var(--warn);
+			background: rgba(251, 191, 36, 0.12);
+			border-color: rgba(251, 191, 36, 0.35);
+		}
+		.live-status-pill.status-completed {
+			color: var(--ok);
+			background: rgba(52, 211, 153, 0.12);
+			border-color: rgba(52, 211, 153, 0.35);
+		}
+		.live-status-pill.status-failed,
+		.live-status-pill.status-cancelled {
+			color: var(--bad);
+			background: rgba(251, 113, 133, 0.12);
+			border-color: rgba(251, 113, 133, 0.35);
+		}
+		@keyframes live-pulse {
+			0%, 100% { opacity: 1; }
+			50% { opacity: 0.35; }
+		}
+		.live-status-pill.status-running .live-status-dot,
+		.live-status-pill.status-pending .live-status-dot {
+			animation: live-pulse 1.2s ease-in-out infinite;
+		}
 		.live-detail-empty {
 			display: grid;
 			place-items: center;
+			gap: 8px;
+			flex: 1 1 auto;
 			min-height: 320px;
-			padding: 24px;
+			padding: 32px 24px;
 			color: var(--muted);
 			text-align: center;
+		}
+		.live-detail-content {
+			display: flex;
+			flex-direction: column;
+			min-height: 0;
+			flex: 1 1 auto;
 		}
 		.live-detail-header {
 			display: flex;
 			flex-wrap: wrap;
 			align-items: flex-start;
 			justify-content: space-between;
-			gap: 10px;
-			padding: 14px;
+			gap: 12px;
+			padding: 16px;
 			border-bottom: 1px solid var(--line);
+			background: var(--panel-2);
+		}
+		.live-detail-heading {
+			display: grid;
+			gap: 8px;
+			min-width: 0;
+		}
+		.live-detail-title-row {
+			display: flex;
+			flex-wrap: wrap;
+			align-items: center;
+			gap: 8px;
+		}
+		.live-detail-actions {
+			display: flex;
+			flex-wrap: wrap;
+			gap: 8px;
 		}
 		.live-detail-body {
-			padding: 14px;
-			max-height: min(72vh, 720px);
+			padding: 16px;
+			flex: 1 1 auto;
+			min-height: 0;
 			overflow: auto;
 		}
 		.live-detail-meta {
 			display: grid;
-			grid-template-columns: repeat(2, minmax(0, 1fr));
-			gap: 8px 14px;
-			margin-bottom: 12px;
-			font-size: 12px;
+			grid-template-columns: repeat(3, minmax(0, 1fr));
+			gap: 10px;
+			margin: 0 0 16px;
 		}
-		.live-detail-meta dt {
+		.live-meta-card {
+			display: grid;
+			gap: 4px;
+			min-width: 0;
+			background: var(--panel-2);
+			border: 1px solid var(--line);
+			border-radius: 10px;
+			padding: 10px 12px;
+		}
+		.live-meta-card > span {
 			color: var(--muted);
-			margin: 0;
+			font-size: 11px;
+			font-weight: 650;
 		}
-		.live-detail-meta dd {
-			margin: 0;
-			overflow-wrap: anywhere;
+		.live-artifact-actions {
+			display: flex;
+			gap: 8px;
+			flex-wrap: wrap;
+		}
+		.live-artifact-download {
+			color: var(--accent);
+			font-size: 12px;
+			text-decoration: none;
+		}
+		.live-artifact-download:hover {
+			text-decoration: underline;
+		}
+		.live-artifact-card {
+			display: grid;
+			gap: 6px;
+			min-width: 0;
 		}
 		.settings-layout {
 			display: grid;
@@ -941,10 +1120,11 @@ function statusPageHtml() {
 			.settings-grid,
 			.model-settings-grid,
 			.provider-media-tests { grid-template-columns: 1fr; }
-			.live-inspector { grid-template-columns: 1fr; }
+			.live-inspector { grid-template-columns: 1fr; min-height: 0; }
 			.settings-layout { grid-template-columns: 1fr; }
 			.settings-nav { position: static; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-			.live-detail-meta { grid-template-columns: 1fr; }
+			.live-detail-meta { grid-template-columns: 1fr 1fr; }
+			.live-job-list { max-height: 42vh; }
 		}
 	</style>
 </head>
@@ -1022,22 +1202,33 @@ function statusPageHtml() {
 			<div class="panel span-12 live-inspector">
 				<div class="live-list-panel">
 					<div class="live-list-toolbar" role="toolbar" aria-label="Job filters">
-						<button type="button" class="live-filter" data-live-filter="all" aria-pressed="true">All</button>
-						<button type="button" class="live-filter" data-live-filter="running" aria-pressed="false">Running</button>
-						<button type="button" class="live-filter" data-live-filter="queued" aria-pressed="false">Queued</button>
-						<button type="button" class="live-filter" data-live-filter="failed" aria-pressed="false">Failed</button>
+						<button type="button" class="live-filter" data-live-filter="all" aria-pressed="true">All <span class="live-filter-count" data-live-filter-count="all">0</span></button>
+						<button type="button" class="live-filter" data-live-filter="running" aria-pressed="false">Running <span class="live-filter-count" data-live-filter-count="running">0</span></button>
+						<button type="button" class="live-filter" data-live-filter="queued" aria-pressed="false">Queued <span class="live-filter-count" data-live-filter-count="queued">0</span></button>
+						<button type="button" class="live-filter" data-live-filter="completed" aria-pressed="false">Completed <span class="live-filter-count" data-live-filter-count="completed">0</span></button>
+						<button type="button" class="live-filter" data-live-filter="failed" aria-pressed="false">Failed <span class="live-filter-count" data-live-filter-count="failed">0</span></button>
+						<label class="live-search">
+							<span class="visually-hidden">Search jobs</span>
+							<input type="search" id="liveJobSearch" placeholder="Search id, model, provider" autocomplete="off">
+						</label>
 					</div>
 					<div class="live-job-list" id="liveJobList" role="listbox" aria-label="Job activity"></div>
 				</div>
 				<div class="live-detail-panel">
 					<div class="live-detail-empty" id="liveDetailEmpty">Select a job to inspect live output, artifacts, and debug logs.</div>
-					<div id="liveDetailContent" hidden>
+					<div class="live-detail-content" id="liveDetailContent" hidden>
 						<div class="live-detail-header">
-							<div>
+							<div class="live-detail-heading">
 								<div class="label">Job inspector</div>
-								<div class="value" id="liveDetailTitle">-</div>
+								<div class="live-detail-title-row">
+									<div class="value" id="liveDetailTitle">-</div>
+									<span id="liveDetailStatus"></span>
+								</div>
+								<div class="muted" id="liveDetailSubtitle"></div>
 							</div>
-							<button type="button" class="copy-value" id="liveDetailCopyId">Copy request id</button>
+							<div class="live-detail-actions">
+								<button type="button" class="copy-value" id="liveDetailCopyId">Copy request id</button>
+							</div>
 						</div>
 						<div class="live-detail-body" id="liveDetailBody"></div>
 					</div>
@@ -1209,7 +1400,9 @@ function statusPageHtml() {
 		let providerRefreshPollTimer = null;
 		let jobEvents = null;
 		let liveFilter = 'all';
+		let liveSearchQuery = '';
 		let selectedLiveRequestId = '';
+		const seenLiveRequestIds = new Set();
 		let settingsSection = 'providers';
 		let suppressHashChange = false;
 		const knownSettingsSections = ['providers', 'tests', 'upscale', 'music', 'asr'];
@@ -1226,9 +1419,12 @@ function statusPageHtml() {
 			healthAsr: document.getElementById('healthAsr'),
 			overviewPairedCount: document.getElementById('overviewPairedCount'),
 			liveJobList: document.getElementById('liveJobList'),
+			liveJobSearch: document.getElementById('liveJobSearch'),
 			liveDetailEmpty: document.getElementById('liveDetailEmpty'),
 			liveDetailContent: document.getElementById('liveDetailContent'),
 			liveDetailTitle: document.getElementById('liveDetailTitle'),
+			liveDetailStatus: document.getElementById('liveDetailStatus'),
+			liveDetailSubtitle: document.getElementById('liveDetailSubtitle'),
 			liveDetailBody: document.getElementById('liveDetailBody'),
 			liveDetailCopyId: document.getElementById('liveDetailCopyId'),
 			settingsNavButtons: Array.from(document.querySelectorAll('#settings-nav [data-settings-section]')),
@@ -1679,23 +1875,17 @@ function statusPageHtml() {
 
 		function statusClass(status) {
 			const normalized = String(status || '').toLowerCase();
-			if (normalized === 'completed') {
-				return 'status-completed';
-			}
-			if (normalized === 'failed') {
-				return 'status-failed';
-			}
-			if (normalized === 'running') {
-				return 'status-running';
-			}
-			if (normalized === 'queued') {
-				return 'status-queued';
-			}
+			if (normalized === 'completed') return 'status-completed';
+			if (normalized === 'failed' || normalized === 'cancelled') return 'status-failed';
+			if (normalized === 'running') return 'status-running';
+			if (normalized === 'pending') return 'status-pending';
+			if (normalized === 'queued' || normalized === 'expired' || normalized === 'cancelling') return 'status-queued';
 			return '';
 		}
 
 		function statusText(status) {
-			return '<span class="status-text ' + statusClass(status) + '">' + escapeHtml(status) + '</span>';
+			const normalized = String(status || 'unknown');
+			return '<span class="live-status-pill ' + statusClass(normalized) + '"><span class="live-status-dot"></span>' + escapeHtml(normalized) + '</span>';
 		}
 
 		function elapsedSpan(job, live) {
@@ -1703,10 +1893,15 @@ function statusPageHtml() {
 			return '<span class="elapsed" data-live-elapsed="' + (live ? 'true' : 'false') + '" data-elapsed-base="' + base + '" data-elapsed-captured="' + Date.now() + '">' + elapsed(base) + '</span>';
 		}
 
+		function shortLiveRequestId(requestId) {
+			const value = String(requestId || '').trim();
+			return value.length > 18 ? value.slice(0, 8) + '...' + value.slice(-6) : value;
+		}
+
 		function sessionOutputBlock(label, options = {}) {
 			const live = !!options.live;
 			const key = text(options.key, '');
-			return '<details class="session-output-block">' +
+			return '<details class="session-output-block"' + (live ? ' open' : '') + '>' +
 				'<summary class="session-output-summary">' +
 					'<span class="label">' + escapeHtml(label) + '</span>' +
 					'<button type="button" class="copy-session-output">Copy</button>' +
@@ -1721,11 +1916,12 @@ function statusPageHtml() {
 				const url = text(artifact && artifact.url, '');
 				const mimeType = text(artifact && artifact.mime_type, '');
 				if (!/^\\/v1\\/status\\/jobs\\/\\d+\\/artifacts\\/\\d+$/.test(url)) return '';
-				if (/^video\\//.test(mimeType)) return '<button type="button" class="job-artifact-preview" data-media-preview="' + escapeHtml(url) + '" data-media-mime="' + escapeHtml(mimeType) + '" title="Open generated video ' + (index + 1) + '"><video src="' + escapeHtml(url) + '" muted preload="metadata" playsinline></video><span>Open generated video ' + (index + 1) + '</span></button>';
+				const download = '<div class="live-artifact-actions"><a class="live-artifact-download" href="' + escapeHtml(url) + '" download>Download</a></div>';
+				if (/^video\\//.test(mimeType)) return '<div class="live-artifact-card"><button type="button" class="job-artifact-preview" data-media-preview="' + escapeHtml(url) + '" data-media-mime="' + escapeHtml(mimeType) + '" title="Open generated video ' + (index + 1) + '"><video src="' + escapeHtml(url) + '" muted preload="metadata" playsinline></video><span>Open generated video ' + (index + 1) + '</span></button>' + download + '</div>';
 				if (!/^image\\//.test(mimeType)) return '';
 				const label = 'Open generated image ' + (index + 1);
 				const meta = artifactMetaLabel(artifact);
-				return '<button type="button" class="job-artifact-preview" data-media-preview="' + escapeHtml(url) + '" data-media-mime="' + escapeHtml(mimeType) + '" title="' + escapeHtml(label) + '"><img src="' + escapeHtml(url) + '" alt="Generated image preview ' + (index + 1) + '" loading="lazy"><span>' + escapeHtml(label) + (meta ? '<br><span class="job-artifact-meta">' + escapeHtml(meta) + '</span>' : '') + '</span></button>';
+				return '<div class="live-artifact-card"><button type="button" class="job-artifact-preview" data-media-preview="' + escapeHtml(url) + '" data-media-mime="' + escapeHtml(mimeType) + '" title="' + escapeHtml(label) + '"><img src="' + escapeHtml(url) + '" alt="Generated image preview ' + (index + 1) + '" loading="lazy"><span>' + escapeHtml(label) + (meta ? '<br><span class="job-artifact-meta">' + escapeHtml(meta) + '</span>' : '') + '</span></button>' + download + '</div>';
 			}).filter(Boolean);
 			return previews.length ? '<div class="job-artifacts">' + previews.join('') + '</div>' : '';
 		}
@@ -1791,20 +1987,85 @@ function statusPageHtml() {
 			const active = (Array.isArray(jobs.active) ? jobs.active : []).map((job) => ({ ...job, _bucket: 'active' }));
 			const queued = (Array.isArray(jobs.queued) ? jobs.queued : []).map((job) => ({ ...job, _bucket: 'queued' }));
 			const recent = (Array.isArray(jobs.recent) ? jobs.recent : []).map((job) => ({ ...job, _bucket: 'recent' }));
-			return [...active, ...queued, ...recent];
+			const unified = [...active, ...queued, ...recent];
+			unified.forEach((job) => {
+				const requestId = jobRequestId(job);
+				if (requestId) seenLiveRequestIds.add(requestId);
+			});
+			return unified;
+		}
+
+		function liveJobStatus(job) {
+			return String(job && (job.status || job._bucket) || '').toLowerCase();
 		}
 
 		function liveJobMatchesFilter(job) {
-			const status = String(job.status || '').toLowerCase();
+			const status = liveJobStatus(job);
 			if (liveFilter === 'all') return true;
 			if (liveFilter === 'running') return status === 'running';
-			if (liveFilter === 'queued') return status === 'queued';
-			if (liveFilter === 'failed') return status === 'failed';
+			if (liveFilter === 'queued') return status === 'queued' || status === 'pending';
+			if (liveFilter === 'completed') return status === 'completed';
+			if (liveFilter === 'failed') return status === 'failed' || status === 'cancelled';
 			return true;
 		}
 
+		function liveJobMatchesSearch(job) {
+			const query = String(liveSearchQuery || '').trim().toLowerCase();
+			if (!query) return true;
+			const haystack = [
+				job.request_id,
+				job.short_request_id,
+				job.type,
+				job.model,
+				job.provider,
+				job.provider_label,
+				job.workflow,
+				job.status,
+			].join(' ').toLowerCase();
+			return haystack.includes(query);
+		}
+
+		function pendingLiveJob(requestId) {
+			const id = String(requestId || '');
+			return {
+				request_id: id,
+				short_request_id: shortLiveRequestId(id),
+				type: 'job',
+				model: '',
+				provider: '',
+				status: seenLiveRequestIds.has(id) ? 'expired' : 'pending',
+				_pending: true,
+				_expired: seenLiveRequestIds.has(id),
+			};
+		}
+
+		function updateLiveFilterCounts(jobs) {
+			const unified = collectUnifiedJobs(jobs);
+			const counts = { all: unified.length, running: 0, queued: 0, completed: 0, failed: 0 };
+			unified.forEach((job) => {
+				const status = liveJobStatus(job);
+				if (status === 'running') counts.running += 1;
+				else if (status === 'queued' || status === 'pending') counts.queued += 1;
+				else if (status === 'completed') counts.completed += 1;
+				else if (status === 'failed' || status === 'cancelled') counts.failed += 1;
+			});
+			document.querySelectorAll('[data-live-filter-count]').forEach((badge) => {
+				const key = badge.getAttribute('data-live-filter-count');
+				badge.textContent = String(counts[key] || 0);
+			});
+		}
+
+		function liveMetaCard(label, value) {
+			return '<div class="live-meta-card"><span>' + escapeHtml(label) + '</span><div>' + value + '</div></div>';
+		}
+
 		function renderLiveJobList(jobs) {
-			const unified = collectUnifiedJobs(jobs).filter(liveJobMatchesFilter);
+			updateLiveFilterCounts(jobs);
+			const unified = collectUnifiedJobs(jobs).filter((job) => liveJobMatchesFilter(job) && liveJobMatchesSearch(job));
+			if (selectedLiveRequestId && !unified.some((job) => jobRequestId(job) === selectedLiveRequestId)) {
+				const selected = findJobByRequestId(selectedLiveRequestId, jobs) || pendingLiveJob(selectedLiveRequestId);
+				unified.unshift(selected);
+			}
 			if (!unified.length) {
 				fields.liveJobList.innerHTML = '<div class="muted" style="padding:12px;">No jobs match this filter.</div>';
 				return;
@@ -1828,12 +2089,14 @@ function statusPageHtml() {
 					card.setAttribute('role', 'option');
 					card.addEventListener('click', () => selectLiveJob(requestId));
 				}
-				const provider = text(job.provider || 'Unknown');
-				const status = String(job.status || '').toLowerCase();
+				const provider = text(job.provider_label || job.provider || 'Unknown');
+				const status = liveJobStatus(job);
+				const live = status === 'running' || status === 'queued' || status === 'pending';
 				card.setAttribute('aria-selected', requestId === selectedLiveRequestId ? 'true' : 'false');
-				card.innerHTML = '<div class="live-job-card-head"><strong>' + escapeHtml(text(job.short_request_id || requestId)) + '</strong>' + statusText(job.status || job._bucket) + '</div>' +
-					'<div class="live-job-card-meta">' + escapeHtml(job.type) + ' · ' + escapeHtml(job.model) + '</div>' +
-					'<div class="live-job-card-meta">' + escapeHtml(provider) + ' · ' + elapsedSpan(job, status === 'running' || status === 'queued') + '</div>';
+				card.innerHTML = '<div class="live-job-card-head"><span class="live-job-card-title">' + escapeHtml(text(job.short_request_id || shortLiveRequestId(requestId))) + '</span>' + statusText(status || 'pending') + '</div>' +
+					'<div class="live-job-card-meta">' + (job.type ? '<span class="live-job-tag">' + escapeHtml(job.type) + '</span>' : '') +
+					'<span>' + escapeHtml(text(job.model, 'Waiting for job')) + '</span></div>' +
+					'<div class="live-job-card-meta"><span>' + escapeHtml(provider) + '</span><span>' + elapsedSpan(job, live) + '</span></div>';
 				fields.liveJobList.appendChild(card);
 			}
 			Array.from(fields.liveJobList.querySelectorAll('[data-live-request-id]')).forEach((card) => {
@@ -1846,27 +2109,39 @@ function statusPageHtml() {
 				fields.liveDetailEmpty.hidden = false;
 				fields.liveDetailContent.hidden = true;
 				fields.liveDetailBody.innerHTML = '';
+				if (fields.liveDetailStatus) fields.liveDetailStatus.innerHTML = '';
+				if (fields.liveDetailSubtitle) fields.liveDetailSubtitle.textContent = '';
 				return;
 			}
 			const requestId = jobRequestId(job);
-			const status = String(job.status || '').toLowerCase();
-			const live = status === 'running' || status === 'queued';
+			const status = liveJobStatus(job);
+			const live = status === 'running' || status === 'queued' || status === 'pending';
 			const key = 'detail:' + requestId;
 			fields.liveDetailEmpty.hidden = true;
 			fields.liveDetailContent.hidden = false;
-			fields.liveDetailTitle.textContent = text(job.short_request_id || requestId);
+			fields.liveDetailTitle.textContent = text(job.short_request_id || shortLiveRequestId(requestId) || requestId);
+			if (fields.liveDetailStatus) fields.liveDetailStatus.innerHTML = statusText(status || 'pending');
+			if (fields.liveDetailSubtitle) {
+				fields.liveDetailSubtitle.textContent = [job.type, job.model, job.provider_label || job.provider].filter(Boolean).join(' · ');
+			}
 			fields.liveDetailCopyId.dataset.copyValue = requestId;
 			const skills = Array.isArray(job.skills) ? job.skills.filter(Boolean) : [];
-			let blocks = '<dl class="live-detail-meta">' +
-				'<dt>Request</dt><dd><code>' + escapeHtml(requestId) + '</code></dd>' +
-				'<dt>Type</dt><dd>' + escapeHtml(job.type) + '</dd>' +
-				'<dt>Model</dt><dd>' + escapeHtml(job.model) + '</dd>' +
-				'<dt>Provider</dt><dd><code>' + escapeHtml(text(job.provider || 'Unknown')) + '</code></dd>' +
-				'<dt>Status</dt><dd>' + statusText(job.status) + (job.error_message ? '<div class="muted">' + escapeHtml(job.error_message) + '</div>' : '') + '</dd>' +
-				'<dt>Workflow</dt><dd>' + escapeHtml(text(job.workflow || 'Pending')) + (skills.length ? '<div class="muted">Skill: ' + escapeHtml(skills.join(', ')) + '</div>' : '') + '</dd>' +
-				'<dt>Elapsed</dt><dd>' + elapsedSpan(job, live) + '</dd>' +
-				(job.finished_at ? '<dt>Finished</dt><dd>' + escapeHtml(new Date(job.finished_at).toLocaleTimeString()) + '</dd>' : '') +
-				'</dl>';
+			let blocks = '';
+			if (job._pending) {
+				blocks += '<div class="muted" style="margin-bottom:12px;">' + (job._expired
+					? 'This job is no longer in the 15-minute live retention window.'
+					: 'Waiting for this job to appear in live updates.') + '</div>';
+			}
+			blocks += '<div class="live-detail-meta">' +
+				liveMetaCard('Request', '<code>' + escapeHtml(requestId) + '</code>') +
+				liveMetaCard('Type', escapeHtml(text(job.type, '-'))) +
+				liveMetaCard('Model', escapeHtml(text(job.model, '-'))) +
+				liveMetaCard('Provider', '<code>' + escapeHtml(text(job.provider || 'Unknown')) + '</code>') +
+				liveMetaCard('Status', statusText(status) + (job.error_message ? '<div class="muted">' + escapeHtml(job.error_message) + '</div>' : '')) +
+				liveMetaCard('Workflow', escapeHtml(text(job.workflow || (live ? 'Pending' : '-'))) + (skills.length ? '<div class="muted">Skill: ' + escapeHtml(skills.join(', ')) + '</div>' : '')) +
+				liveMetaCard('Elapsed', elapsedSpan(job, live)) +
+				(job.finished_at ? liveMetaCard('Finished', escapeHtml(new Date(job.finished_at).toLocaleTimeString())) : '') +
+				'</div>';
 			blocks += artifactPreviewBlock(job);
 			if (job.session_input) {
 				blocks += sessionOutputBlock(providerSessionLabel(job, live ? 'Live stdin' : 'stdin', 'input'), { live, key: key + ':input' });
@@ -1882,6 +2157,8 @@ function statusPageHtml() {
 				finished_at: job.finished_at,
 				workflow: job.workflow,
 				skills: job.skills,
+				pending: !!job._pending,
+				expired: !!job._expired,
 				artifacts: (Array.isArray(job.artifacts) ? job.artifacts : []).map((artifact) => [artifact && artifact.url, artifact && artifact.mime_type]),
 				input: !!job.session_input,
 				output: !!job.session_output,
@@ -1902,9 +2179,9 @@ function statusPageHtml() {
 			updateDebugLogBlocks(fields.liveDetailBody, job, key);
 		}
 
-		function findJobByRequestId(requestId) {
-			const jobs = currentStatus && currentStatus.jobs || {};
-			return collectUnifiedJobs(jobs).find((job) => jobRequestId(job) === String(requestId || '')) || null;
+		function findJobByRequestId(requestId, jobs) {
+			const source = jobs || (currentStatus && currentStatus.jobs) || {};
+			return collectUnifiedJobs(source).find((job) => jobRequestId(job) === String(requestId || '')) || null;
 		}
 
 		function selectLiveJob(requestId, options = {}) {
@@ -1914,28 +2191,25 @@ function statusPageHtml() {
 			}
 			const jobs = currentStatus && currentStatus.jobs || {};
 			renderLiveJobList(jobs);
-			renderLiveDetail(findJobByRequestId(selectedLiveRequestId));
+			renderLiveDetail(findJobByRequestId(selectedLiveRequestId, jobs) || (selectedLiveRequestId ? pendingLiveJob(selectedLiveRequestId) : null));
 		}
 
 		function autoSelectLiveJob(jobs) {
 			if (selectedLiveRequestId) {
-				const selected = findJobByRequestId(selectedLiveRequestId);
-				if (selected && liveJobMatchesFilter(selected)) {
-					renderLiveDetail(selected);
-					return;
-				}
+				const selected = findJobByRequestId(selectedLiveRequestId, jobs);
+				renderLiveDetail(selected || pendingLiveJob(selectedLiveRequestId));
+				return;
 			}
 			const active = Array.isArray(jobs.active) ? jobs.active : [];
 			if (active.length) {
 				selectLiveJob(jobRequestId(active[0]), { skipHash: parseHash().tab !== 'live' });
 				return;
 			}
-			const unified = collectUnifiedJobs(jobs).filter(liveJobMatchesFilter);
+			const unified = collectUnifiedJobs(jobs).filter((job) => liveJobMatchesFilter(job) && liveJobMatchesSearch(job));
 			if (unified.length) {
 				selectLiveJob(jobRequestId(unified[0]), { skipHash: parseHash().tab !== 'live' });
 				return;
 			}
-			selectedLiveRequestId = '';
 			renderLiveDetail(null);
 		}
 
@@ -1948,9 +2222,20 @@ function statusPageHtml() {
 					});
 					const jobs = currentStatus && currentStatus.jobs || {};
 					renderLiveJobList(jobs);
-					autoSelectLiveJob(jobs);
+					if (selectedLiveRequestId) {
+						renderLiveDetail(findJobByRequestId(selectedLiveRequestId, jobs) || pendingLiveJob(selectedLiveRequestId));
+					} else {
+						autoSelectLiveJob(jobs);
+					}
 				});
 			});
+			if (fields.liveJobSearch) {
+				fields.liveJobSearch.addEventListener('input', () => {
+					liveSearchQuery = fields.liveJobSearch.value || '';
+					const jobs = currentStatus && currentStatus.jobs || {};
+					renderLiveJobList(jobs);
+				});
+			}
 		}
 
 		function updateTabBadges(jobs) {
@@ -3114,16 +3399,15 @@ function statusPageHtml() {
 
 		function renderJobs(jobs) {
 			const scrollStates = captureSessionOutputScrolls();
+			currentStatus.jobs = jobs;
 			fields.jobCounts.textContent = 'Running ' + Number(jobs.running_count || 0) + ' / Queued ' + Number(jobs.queued_count || 0);
 			fields.maxConcurrent.textContent = text(jobs.max_concurrent);
 			renderLiveJobList(jobs);
-			const selected = selectedLiveRequestId ? findJobByRequestId(selectedLiveRequestId) : null;
-			if (selected && liveJobMatchesFilter(selected)) {
-				renderLiveDetail(selected);
+			if (selectedLiveRequestId) {
+				renderLiveDetail(findJobByRequestId(selectedLiveRequestId, jobs) || pendingLiveJob(selectedLiveRequestId));
 			} else {
 				autoSelectLiveJob(jobs);
 			}
-			currentStatus.jobs = jobs;
 			updateProviderTestProgress();
 			updateTabBadges(jobs);
 			renderDebugFailures(jobs);
@@ -3143,9 +3427,11 @@ function statusPageHtml() {
 				const job = findJobByRequestId(selectedLiveRequestId);
 				if (job) {
 					const status = String(job.status || '').toLowerCase();
-					if (status === 'running' || status === 'queued') {
+					if (status === 'running' || status === 'queued' || status === 'pending') {
 						renderLiveDetail(job);
 					}
+				} else if (selectedLiveRequestId) {
+					renderLiveDetail(pendingLiveJob(selectedLiveRequestId));
 				}
 			}
 		}

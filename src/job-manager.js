@@ -8,6 +8,14 @@ function clampMaxConcurrent(value) {
 	return Number.isFinite(parsed) && parsed > 0 ? parsed : 2;
 }
 
+const DEFAULT_RECENT_RETENTION_MS = 15 * 60 * 1000;
+const DEFAULT_MAX_RECENT = 50;
+
+function clampPositiveInt(value, fallback) {
+	const parsed = Number.parseInt(String(value || ''), 10);
+	return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
 function shortRequestId(value) {
 	const text = String(value || '').trim();
 	return text.length > 18 ? `${text.slice(0, 8)}...${text.slice(-6)}` : text;
@@ -40,7 +48,7 @@ function jobMatchesOrigin(job, origin) {
 	const expected = String(origin || '').trim();
 	if (!expected) return true;
 	const owner = String(job && job.origin || '').trim();
-	return !owner || owner === expected;
+	return !!owner && owner === expected;
 }
 
 function extractRuntimeMetadata(text) {
@@ -180,6 +188,8 @@ function collectDebugLogs(result) {
 class JobManager {
 	constructor(options = {}) {
 		this.maxConcurrent = clampMaxConcurrent(options.maxConcurrent);
+		this.retentionMs = clampPositiveInt(options.retentionMs, DEFAULT_RECENT_RETENTION_MS);
+		this.maxRecent = clampPositiveInt(options.maxRecent, DEFAULT_MAX_RECENT);
 		this.now = typeof options.now === 'function' ? options.now : () => Date.now();
 		this.onChange = typeof options.onChange === 'function' ? options.onChange : () => {};
 		this.running = new Map();
@@ -392,24 +402,35 @@ class JobManager {
 			type: job.type,
 			model: job.model,
 			provider: job.provider,
-			provider_label: job.providerLabel,
+			providerLabel: job.providerLabel,
 			workflow: job.workflow,
 			skills: job.skills,
 			status: job.status,
+			createdAt: job.createdAt,
 			startedAt: job.startedAt,
 			finishedAt: job.finishedAt,
 			errorMessage: job.errorMessage,
 			sessionOutput: job.sessionOutput,
+			sessionInput: job.sessionInput,
 			debugLogs: collectDebugLogs(failure),
 			artifacts: job.artifacts || [],
 		});
-		this.recent = this.recent.slice(0, 8);
+		this.pruneRecent();
+		this.emitChange();
+		this.drain();
+	}
+
+	pruneRecent() {
+		const now = this.now();
+		this.recent = this.recent.filter((job) => {
+			const finishedAt = Number(job.finishedAt || 0);
+			if (!finishedAt) return true;
+			return now - finishedAt <= this.retentionMs;
+		}).slice(0, this.maxRecent);
 		const keepArtifacts = new Set(this.recent.map((recent) => String(recent.id)));
 		for (const id of this.artifacts.keys()) {
 			if (!keepArtifacts.has(id)) this.artifacts.delete(id);
 		}
-		this.emitChange();
-		this.drain();
 	}
 
 	compact(job) {
@@ -474,13 +495,15 @@ class JobManager {
 	}
 
 	snapshot() {
+		this.pruneRecent();
 		return {
 			running_count: this.running.size,
 			queued_count: this.queue.length,
 			max_concurrent: this.maxConcurrent,
+			retention_ms: this.retentionMs,
 			active: Array.from(this.running.values()).map((job) => this.compact(job)),
-			queued: this.queue.slice(0, 5).map((job) => this.compact(job)),
-			recent: this.recent.slice(0, 5).map((job) => this.compact(job)),
+			queued: this.queue.map((job) => this.compact(job)),
+			recent: this.recent.map((job) => this.compact(job)),
 		};
 	}
 
@@ -492,6 +515,8 @@ class JobManager {
 module.exports = {
 	JobManager,
 	clampMaxConcurrent,
+	DEFAULT_MAX_RECENT,
+	DEFAULT_RECENT_RETENTION_MS,
 	collectDebugLogs,
 	collectImageArtifacts: collectMediaArtifacts,
 	collectMediaArtifacts,
