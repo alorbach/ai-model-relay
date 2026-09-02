@@ -99,17 +99,11 @@ function runnerPath(filename, baseDir = __dirname) {
 }
 
 function readState() {
-	try {
-		const parsed = JSON.parse(fs.readFileSync(security.statePath, 'utf8'));
-		return parsed && typeof parsed === 'object' ? parsed : {};
-	} catch (error) {
-		return {};
-	}
+	return security.readState();
 }
 
 function writeState(state) {
-	fs.mkdirSync(security.stateDir, { recursive: true });
-	fs.writeFileSync(security.statePath, JSON.stringify(state, null, 2));
+	security.writeState(state);
 }
 
 function fullModelId(id) {

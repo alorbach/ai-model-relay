@@ -31,17 +31,11 @@ function runnerPath(filename, baseDir = __dirname) {
 }
 
 function readState() {
-	try {
-		const state = JSON.parse(fs.readFileSync(security.statePath, 'utf8'));
-		return state && typeof state === 'object' ? state : {};
-	} catch (error) {
-		return {};
-	}
+	return security.readState();
 }
 
 function writeState(state) {
-	fs.mkdirSync(security.stateDir, { recursive: true });
-	fs.writeFileSync(security.statePath, JSON.stringify(state, null, 2));
+	security.writeState(state);
 }
 
 function defaultSettings() {

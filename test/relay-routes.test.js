@@ -350,8 +350,10 @@ function createMockSecurity() {
 		assert.ok(backendRefreshes > refreshesBeforeImageTest, 'provider test should refresh detection before model preflight');
                 assert.strictEqual(calls[calls.length - 1].route, 'relay-images');
                 assert.strictEqual(calls[calls.length - 1].payload.prompt, 'test image');
-                assert.strictEqual(calls[calls.length - 1].payload.size, '1536x1024');
+		assert.strictEqual(calls[calls.length - 1].payload.size, '1536x1024');
 		assert.strictEqual(calls[calls.length - 1].payload.quality, 'high');
+		const foreignStatusTestArtifact = await requestPlain(port, `/v1/relay/jobs/${encodeURIComponent(localTestRequestId)}/artifact`, { Origin: 'http://127.0.0.1:8787', 'X-Alorbach-Bridge-Token': 'test-token' });
+		assert.strictEqual(foreignStatusTestArtifact.statusCode, 404, 'status-page test artifacts remain owned by the local status page origin');
 		const rateLimitedImageTest = await requestJson(port, 'POST', '/v1/relay/test', { job_type: 'images', model: 'model-relay:codex:image', prompt: 'rate limited' }, pageOrigin);
 		assert.strictEqual(rateLimitedImageTest.statusCode, 429);
 		assert.strictEqual(rateLimitedImageTest.body.category, 'rate_limit');

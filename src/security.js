@@ -7,6 +7,10 @@ const statePaths = require('./state-paths');
 const MAX_BODY_BYTES = 12 * 1024 * 1024;
 const stateDir = statePaths.stateDir;
 const statePath = statePaths.statePath;
+const stateBackupPath = `${statePath}.bak`;
+const stateLockPath = `${statePath}.lock`;
+const STATE_LOCK_TIMEOUT_MS = 5000;
+const STATE_LOCK_STALE_MS = 30000;
 
 function timingSafeEqual(left, right) {
 	const a = Buffer.from(String(left || ''), 'utf8');
@@ -36,27 +40,135 @@ function ensureStateDir() {
 	fs.mkdirSync(stateDir, { recursive: true });
 }
 
-function readState() {
+function readStateFile(filePath) {
 	try {
-		const raw = fs.readFileSync(statePath, 'utf8');
+		const raw = fs.readFileSync(filePath, 'utf8');
 		const state = JSON.parse(raw);
-		return state && typeof state === 'object' ? state : {};
+		return state && typeof state === 'object' ? state : null;
 	} catch (error) {
-		return {};
+		return null;
+	}
+}
+
+function readState() {
+	for (const filePath of [statePath, stateBackupPath]) {
+		const state = readStateFile(filePath);
+		if (state) {
+			return state;
+		}
+	}
+	return {};
+}
+
+function sleepSync(milliseconds) {
+	const waitBuffer = new Int32Array(new SharedArrayBuffer(4));
+	Atomics.wait(waitBuffer, 0, 0, milliseconds);
+}
+
+function acquireStateLock() {
+	ensureStateDir();
+	const startedAt = Date.now();
+	for (;;) {
+		try {
+			fs.mkdirSync(stateLockPath);
+			return stateLockPath;
+		} catch (error) {
+			if (!error || error.code !== 'EEXIST') {
+				throw error;
+			}
+			try {
+				const lockStat = fs.statSync(stateLockPath);
+				if (Date.now() - lockStat.mtimeMs > STATE_LOCK_STALE_MS) {
+					fs.rmdirSync(stateLockPath);
+					continue;
+				}
+			} catch (statError) {
+				if (statError && statError.code !== 'ENOENT') {
+					throw statError;
+				}
+			}
+			if (Date.now() - startedAt >= STATE_LOCK_TIMEOUT_MS) {
+				throw new Error('Timed out waiting for the Relay state file lock.');
+			}
+			sleepSync(10);
+		}
+	}
+}
+
+function releaseStateLock(lockPath) {
+	try {
+		fs.rmdirSync(lockPath);
+	} catch (error) {
+		if (!error || error.code !== 'ENOENT') {
+			throw error;
+		}
+	}
+}
+
+function isStateReplacementConflict(error) {
+	return !!(error && ['EEXIST', 'EPERM', 'ENOTEMPTY'].includes(error.code) && fs.existsSync(statePath));
+}
+
+function replaceStateFile(tmpPath) {
+	try {
+		fs.renameSync(tmpPath, statePath);
+		return;
+	} catch (error) {
+		if (!isStateReplacementConflict(error)) {
+			throw error;
+		}
+	}
+
+	try {
+		fs.unlinkSync(stateBackupPath);
+	} catch (error) {
+		if (error && error.code !== 'ENOENT') {
+			throw error;
+		}
+	}
+	let movedPreviousState = false;
+	try {
+		fs.renameSync(statePath, stateBackupPath);
+		movedPreviousState = true;
+		fs.renameSync(tmpPath, statePath);
+	} catch (error) {
+		if (movedPreviousState && !fs.existsSync(statePath)) {
+			try {
+				fs.renameSync(stateBackupPath, statePath);
+			} catch (restoreError) {
+				error.restoreError = restoreError;
+			}
+		}
+		throw error;
+	}
+	try {
+		fs.unlinkSync(stateBackupPath);
+	} catch (error) {
+		/* The new state is valid; an old backup can be recovered or replaced later. */
 	}
 }
 
 function writeState(state) {
-	ensureStateDir();
-	const tmpPath = `${statePath}.tmp`;
-	fs.writeFileSync(tmpPath, JSON.stringify(state, null, 2));
+	const lockPath = acquireStateLock();
+	const tmpPath = `${statePath}.${process.pid}.${Date.now().toString(36)}.${crypto.randomBytes(8).toString('hex')}.tmp`;
 	try {
-		fs.renameSync(tmpPath, statePath);
-	} catch (error) {
+		const fileDescriptor = fs.openSync(tmpPath, 'wx');
 		try {
-			fs.unlinkSync(statePath);
-		} catch (unlinkError) {}
-		fs.renameSync(tmpPath, statePath);
+			fs.writeFileSync(fileDescriptor, JSON.stringify(state, null, 2), 'utf8');
+			fs.fsyncSync(fileDescriptor);
+		} finally {
+			fs.closeSync(fileDescriptor);
+		}
+		replaceStateFile(tmpPath);
+	} finally {
+		try {
+			fs.unlinkSync(tmpPath);
+		} catch (error) {
+			if (error && error.code !== 'ENOENT') {
+				/* Preserve the original write error when cleanup cannot remove a temp file. */
+			}
+		}
+		releaseStateLock(lockPath);
 	}
 }
 

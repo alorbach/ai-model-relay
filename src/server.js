@@ -991,6 +991,7 @@ async function route(req, res, context) {
 			requestId,
 			type: jobType,
 			model: modelFromPayload(resolved.payload, model),
+			origin,
 			...display,
 		}, (session) => context.backends.run(jobType, resolved.payload, session));
 		context.statusCache.sync();

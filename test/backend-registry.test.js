@@ -819,6 +819,51 @@ function captureCliSpawn(calls) {
 		});
 		const missingArtifactResult = await missingArtifact.images({ prompt: 'missing artifact' });
 		assert.strictEqual(missingArtifactResult.code, 'antigravity_image_artifact_missing');
+		const authenticationOutput = {
+			message: 'Authentication required. Please visit https://accounts.google.com/o/oauth2/auth?code_challenge=secret',
+			text: 'Authentication required. Please visit https://accounts.google.com/o/oauth2/auth?code_challenge=secret',
+			stdout: 'Authentication required. Please visit https://accounts.google.com/o/oauth2/auth?code_challenge=secret',
+			stderr: 'Authentication required. Please visit https://accounts.google.com/o/oauth2/auth?code_challenge=secret',
+		};
+		for (const channel of Object.keys(authenticationOutput)) {
+			const authenticationDriver = createAntigravityCliDriver(mediaAnalysis, {
+				...antigravityOptions,
+				runTextCommand: async (command, args) => args[0] === '--help'
+					? { success: true, text: '', stderr: 'Usage: agy.exe --print PROMPT\n  -p  Short alias for --print' }
+					: { success: false, category: 'cli_process', code: 'cli_request_failed', [channel]: authenticationOutput[channel] },
+			});
+			const authenticationResult = await authenticationDriver.images({ prompt: `authentication ${channel}` });
+			assert.strictEqual(authenticationResult.code, 'antigravity_cli_not_authenticated');
+			assert.match(authenticationResult.message, /Run agy interactively/i);
+			assert.doesNotMatch(authenticationResult.message, /accounts\.google\.com|code_challenge/i);
+		}
+		const structuredRoot = path.join(antigravityRoot, 'structured-output');
+		const structuredArtifact = path.join(structuredRoot, 'brain', 'structured-output.jpg');
+		fs.mkdirSync(path.dirname(structuredArtifact), { recursive: true });
+		fs.writeFileSync(structuredArtifact, Buffer.from('structured image'));
+		const structuredDriver = createAntigravityCliDriver(mediaAnalysis, {
+			...antigravityOptions,
+			stateRoot: structuredRoot,
+			runTextCommand: async (command, args) => args[0] === '--help'
+				? { success: true, text: '', stderr: 'Usage: agy.exe --print PROMPT\n  -p  Short alias for --print' }
+				: { success: true, text: JSON.stringify({ response: { image_path: path.relative(structuredRoot, structuredArtifact) } }) },
+		});
+		const structuredImage = await structuredDriver.images({ prompt: 'structured artifact path' });
+		assert.strictEqual(structuredImage.success, true);
+		assert.strictEqual(Buffer.from(structuredImage.response.data[0].b64_json, 'base64').toString(), 'structured image');
+		const unrelatedRoot = path.join(antigravityRoot, 'unrelated-output');
+		const unrelatedArtifact = path.join(unrelatedRoot, 'brain', 'other-request_123.jpg');
+		fs.mkdirSync(path.dirname(unrelatedArtifact), { recursive: true });
+		fs.writeFileSync(unrelatedArtifact, Buffer.from('unrelated image'));
+		const unrelatedDriver = createAntigravityCliDriver(mediaAnalysis, {
+			...antigravityOptions,
+			stateRoot: unrelatedRoot,
+			runTextCommand: async (command, args) => args[0] === '--help'
+				? { success: true, text: '', stderr: 'Usage: agy.exe --print PROMPT\n  -p  Short alias for --print' }
+				: { success: true, text: 'completed without a request-correlated artifact' },
+		});
+		const unrelatedImage = await unrelatedDriver.images({ prompt: 'do not import another job image' });
+		assert.strictEqual(unrelatedImage.code, 'antigravity_image_artifact_missing');
 		const quotaExhausted = createAntigravityCliDriver(mediaAnalysis, {
 			...antigravityOptions,
 			runTextCommand: async (command, args) => args[0] === '--help'
