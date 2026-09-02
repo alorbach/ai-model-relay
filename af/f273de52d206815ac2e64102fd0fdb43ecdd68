@@ -1,0 +1,151 @@
+test/token-policy.test.js
+  s_ccc5056bd9c369::t_1062956bb51944 32-33
+src/security.js
+  s_ccc5056bd9c369::t_74d0b25469e3a2 51-99
+  s_ccc5056bd9c369::t_4afcfdec6073e5 14-20
+  s_ccc5056bd9c369::t_44120143287881 159-160,164,172
+test/relay-routes.test.js
+  s_ccc5056bd9c369::t_7dc87ca330f2da 384
+  s_ccc5056bd9c369::t_8978d5849e9bd6 71
+  s_ccc5056bd9c369::t_4127fc5a751d92 275-276
+  s_ccc5056bd9c369::t_919c20b6691803 380
+  s_ccc5056bd9c369::t_2395c9719f567e 421-424
+  s_ccc5056bd9c369::t_370dd85ee54c0e 376
+  s_ccc5056bd9c369::t_d528085cb78c46 388
+  s_ccc5056bd9c369::t_95c11245c7c2e4 393
+  s_ccc5056bd9c369::t_7658ee789cf4b6 335,339
+  s_ccc5056bd9c369::t_a446c39ceb4677 249
+  s_ccc5056bd9c369::t_48dcc591a1ed89 359
+  s_ccc5056bd9c369::t_58f4f08893e1d4 239-248,250-252
+  s_ccc5056bd9c369::t_20e8ed94b801f5 416-420,425-430
+  s_ccc5056bd9c369::t_a89545ee885742 400
+  s_ccc5056bd9c369::t_a06d49bd7e8465 272-274,277,281
+  s_ccc5056bd9c369::t_058b51b53f79be 346
+  s_ccc5056bd9c369::t_fa988a6ca9852c 369
+  s_ccc5056bd9c369::t_cfdc46308bcc9d 355
+  s_ccc5056bd9c369::t_67315d83957fdb 363
+  s_ccc5056bd9c369::t_740e4a4405d699 5
+src/codex.js
+  s_ccc5056bd9c369::t_235cab719252bd 796
+  s_ccc5056bd9c369::t_3a76eb8d21f3aa 1073
+  s_ccc5056bd9c369::t_5e48252f31a5cc 167
+  s_ccc5056bd9c369::t_d2bad3ecf1235b 1190-1192
+  s_ccc5056bd9c369::t_f3f9e6711a9289 786
+  s_ccc5056bd9c369::t_5e0cb24892371a 9
+  s_ccc5056bd9c369::t_9b43913bb83c8a 1084
+  s_ccc5056bd9c369::t_7790635a0ea1dc 157-161
+  s_ccc5056bd9c369::t_4709afabe1fb30 880-882
+src/backend-registry.js
+  s_ccc5056bd9c369::t_45e3a39676c46f 1695
+  s_ccc5056bd9c369::t_7aacef6e7c3410 1583-1584
+  s_ccc5056bd9c369::t_67d89684afa812 31-47
+  s_ccc5056bd9c369::t_a8db6364cc3e57 1781
+  s_ccc5056bd9c369::t_4bcd0060c8d5c0 1387
+  s_ccc5056bd9c369::t_ffda988cbf5e65 9
+  s_ccc5056bd9c369::t_5561f2fbcbbbd8 20-30,48-51
+  s_ccc5056bd9c369::t_ab19aa06d46c30 1825
+  s_ccc5056bd9c369::t_850e7aed849eea 1824,1826-1827
+  s_ccc5056bd9c369::t_cda04565522920 1675-1678
+test/transcribe.test.js
+  s_ccc5056bd9c369::t_9032b3103f1255 92
+src/status-page.js
+  s_ccc5056bd9c369::t_66b8824f396cdb 2388
+src/local-upscale.js
+  s_ccc5056bd9c369::t_80201800ad3557 608-610,624-626,628-629
+src/video.js
+  s_ccc5056bd9c369::t_a72ad671cd3746 153-157,159
+  s_ccc5056bd9c369::t_9798805aa416d1 47-54
+  s_ccc5056bd9c369::t_7f9c2c0e6ccf3d 102-118
+  s_ccc5056bd9c369::t_abac3bd0eb0410 210,214
+  s_ccc5056bd9c369::t_745b2485f1091e 90-93,98-101,120-132,136,138-139,142
+  s_ccc5056bd9c369::t_125de9d2af8700 14-19
+  s_ccc5056bd9c369::t_41ec15e36e14f7 276,278,280,282,284,295,302
+  s_ccc5056bd9c369::t_0466fe618bb092 315
+  s_ccc5056bd9c369::t_60954c94afd6eb 84
+  s_ccc5056bd9c369::t_32fc0bbf0859b6 171,174-175,178,184,188-189,192-193
+  s_ccc5056bd9c369::t_3e4312f30d1f1e 258,262,264-266
+test/local-cli.test.js
+  s_ccc5056bd9c369::t_dbd12c2bf3ce59 84-85
+src/asr.js
+  s_ccc5056bd9c369::t_05dd6f236ed9aa 975
+test/security.test.js
+  s_ccc5056bd9c369::t_cd553a292c08ec 11-14,17-19,24-25
+  s_ccc5056bd9c369::t_813ed74321fbeb 15-16,20-23
+src/local-cli.js
+  s_ccc5056bd9c369::t_0a34c94f7b6a41 197
+  s_ccc5056bd9c369::t_892284401f00b9 192
+  s_ccc5056bd9c369::t_a3838b4db9dd69 21
+  s_ccc5056bd9c369::t_77b5677841152a 244,249,251-252
+  s_ccc5056bd9c369::t_5b04668ba4cb28 250
+  s_ccc5056bd9c369::t_d71c3aa496ef9f 7
+src/server.js
+  s_ccc5056bd9c369::t_7c0bc08b850334 354,356
+  s_ccc5056bd9c369::t_6c407130e05291 612-616
+  s_ccc5056bd9c369::t_1aeac6f7224a69 934,941
+  s_ccc5056bd9c369::t_4c7cbd5c329f7d 809-811
+  s_ccc5056bd9c369::t_d8774a20da9420 629-639
+  s_ccc5056bd9c369::t_74b081bdac0280 1152
+  s_ccc5056bd9c369::t_4dfd5838df0bfc 8
+  s_ccc5056bd9c369::t_4f295f3af6f11b 679,684,689,693
+  s_ccc5056bd9c369::t_afdee755f93a83 536-545
+  s_ccc5056bd9c369::t_af8678a608e839 662-668,673
+  s_ccc5056bd9c369::t_e9b1a9e895e3ea 279-282,302-306,317-324,328
+  s_ccc5056bd9c369::t_3cb651ca6e82b6 773,775
+  s_ccc5056bd9c369::t_86baa8119793cb 798
+  s_ccc5056bd9c369::t_412a51a746b122 800-806,814
+  s_ccc5056bd9c369::t_422321a81c3a54 160-166,169-170
+  s_ccc5056bd9c369::t_d960ed940c44f4 750
+  s_ccc5056bd9c369::t_d42dce2d166cfb 718
+  s_ccc5056bd9c369::t_2284af2b05fd96 550
+  s_ccc5056bd9c369::t_9a1af9bfc975ab 701
+  s_ccc5056bd9c369::t_31bd8764fe9f98 399-401,404-414,417-418,426
+  s_ccc5056bd9c369::t_f712365796b072 141-159,167-168,171-205
+  s_ccc5056bd9c369::t_7ced649fb8cd0a 774
+test/job-manager.test.js
+  s_ccc5056bd9c369::t_8bd882295eb0c3 7
+  s_ccc5056bd9c369::t_b5e0738cfe65bf 261-272
+test/multimodal.test.js
+  s_ccc5056bd9c369::t_17600cdd854d35 235
+  s_ccc5056bd9c369::t_4e986d3414543e 81
+src/music-analysis.js
+  s_ccc5056bd9c369::t_ec4bbfcfa0ea6c 8
+  s_ccc5056bd9c369::t_65fc720aef1330 220,229,231-232
+  s_ccc5056bd9c369::t_e00e7d79ab9b1e 230
+src/job-manager.js
+  s_ccc5056bd9c369::t_86e3716bff6957 500
+  s_ccc5056bd9c369::t_9724f8d1f77ee1 69-89
+  s_ccc5056bd9c369::t_810d63af09065c 451,454-466
+src/cuda-torch-venv.js
+  s_ccc5056bd9c369::t_e74e5213782916 80,82-83
+test/server-jobs.test.js
+  s_ccc5056bd9c369::t_749c35dac3290c 30
+  s_ccc5056bd9c369::t_25a1b11f004ac2 283-285,292-300
+src/token-policy.js
+  s_ccc5056bd9c369::t_638bb64eb54360 58
+test/status-page.test.js
+  s_ccc5056bd9c369::t_826b266f40437a 66-67
+src/status-cache.js
+  s_ccc5056bd9c369::t_d56d2795a18e62 46
+  s_ccc5056bd9c369::t_e83ef951cbf7e5 3-14,21
+package.json
+  s_ccc5056bd9c369::t_6de8e087d56595 12-13
+test/video.test.js
+  s_ccc5056bd9c369::t_aa1f92796c66e0 1-12,14
+  s_ccc5056bd9c369::t_f5e75bf9cefeb4 13,15
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "aff273de52d206815ac2e64102fd0fdb43ecdd68",
+  "prompts": {},
+  "sessions": {
+    "s_ccc5056bd9c369": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "67f1d9c9-e731-4ea0-9823-708ed8acfbce",
+        "model": "grok-4.6"
+      },
+      "human_author": null
+    }
+  }
+}
