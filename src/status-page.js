@@ -606,7 +606,7 @@ function statusPageHtml() {
 			border: 1px solid var(--line);
 			border-radius: 12px;
 			min-width: 0;
-			min-height: 0;
+			min-height: min(72vh, 720px);
 			overflow: hidden;
 			box-shadow: var(--shadow);
 		}
@@ -685,7 +685,7 @@ function statusPageHtml() {
 			align-content: start;
 			gap: 0;
 			flex: 1 1 auto;
-			min-height: 0;
+			min-height: 240px;
 			overflow: auto;
 		}
 		.live-job-card {
@@ -1402,6 +1402,7 @@ function statusPageHtml() {
 		let liveFilter = 'all';
 		let liveSearchQuery = '';
 		let selectedLiveRequestId = '';
+		let livePinned = false;
 		const seenLiveRequestIds = new Set();
 		let settingsSection = 'providers';
 		let suppressHashChange = false;
@@ -1688,8 +1689,14 @@ function statusPageHtml() {
 				ensureSettingsLoaded();
 				selectSettingsSection(route.settingsSection, { skipHash: true, force: true });
 			}
-			if (route.tab === 'live' && route.liveRequestId) {
-				selectLiveJob(route.liveRequestId, { skipHash: true });
+			if (route.tab === 'live') {
+				if (route.liveRequestId) {
+					selectLiveJob(route.liveRequestId, { skipHash: true, pin: true });
+				} else {
+					livePinned = false;
+					selectedLiveRequestId = '';
+					autoSelectLiveJob(currentStatus.jobs || {});
+				}
 			}
 		}
 
@@ -1717,8 +1724,10 @@ function statusPageHtml() {
 				const route = routeForTabId(nextButton.id);
 				if (route === 'settings') {
 					setHash('settings/' + settingsSection);
-				} else if (route === 'live' && selectedLiveRequestId) {
-					setHash('live/' + encodeURIComponent(selectedLiveRequestId));
+				} else if (route === 'live') {
+					livePinned = false;
+					setHash('live');
+					autoSelectLiveJob(currentStatus.jobs || {});
 				} else {
 					setHash(route);
 				}
@@ -2062,9 +2071,13 @@ function statusPageHtml() {
 		function renderLiveJobList(jobs) {
 			updateLiveFilterCounts(jobs);
 			const unified = collectUnifiedJobs(jobs).filter((job) => liveJobMatchesFilter(job) && liveJobMatchesSearch(job));
-			if (selectedLiveRequestId && !unified.some((job) => jobRequestId(job) === selectedLiveRequestId)) {
-				const selected = findJobByRequestId(selectedLiveRequestId, jobs) || pendingLiveJob(selectedLiveRequestId);
-				unified.unshift(selected);
+			if (livePinned && selectedLiveRequestId && !unified.some((job) => jobRequestId(job) === selectedLiveRequestId)) {
+				const selected = findJobByRequestId(selectedLiveRequestId, jobs);
+				if (selected) {
+					unified.unshift(selected);
+				} else if (!seenLiveRequestIds.has(selectedLiveRequestId)) {
+					unified.unshift(pendingLiveJob(selectedLiveRequestId));
+				}
 			}
 			if (!unified.length) {
 				fields.liveJobList.innerHTML = '<div class="muted" style="padding:12px;">No jobs match this filter.</div>';
@@ -2186,30 +2199,46 @@ function statusPageHtml() {
 
 		function selectLiveJob(requestId, options = {}) {
 			selectedLiveRequestId = String(requestId || '');
-			if (!options.skipHash && selectedLiveRequestId) {
+			livePinned = options.pin !== false && !!selectedLiveRequestId;
+			if (!options.skipHash && livePinned) {
 				setHash('live/' + encodeURIComponent(selectedLiveRequestId));
 			}
 			const jobs = currentStatus && currentStatus.jobs || {};
 			renderLiveJobList(jobs);
-			renderLiveDetail(findJobByRequestId(selectedLiveRequestId, jobs) || (selectedLiveRequestId ? pendingLiveJob(selectedLiveRequestId) : null));
+			renderLiveDetail(findJobByRequestId(selectedLiveRequestId, jobs) || (livePinned && selectedLiveRequestId ? pendingLiveJob(selectedLiveRequestId) : null));
 		}
 
 		function autoSelectLiveJob(jobs) {
-			if (selectedLiveRequestId) {
+			if (livePinned && selectedLiveRequestId) {
 				const selected = findJobByRequestId(selectedLiveRequestId, jobs);
-				renderLiveDetail(selected || pendingLiveJob(selectedLiveRequestId));
+				renderLiveDetail(selected || (!seenLiveRequestIds.has(selectedLiveRequestId) ? pendingLiveJob(selectedLiveRequestId) : selected));
 				return;
 			}
 			const active = Array.isArray(jobs.active) ? jobs.active : [];
 			if (active.length) {
-				selectLiveJob(jobRequestId(active[0]), { skipHash: parseHash().tab !== 'live' });
+				selectedLiveRequestId = jobRequestId(active[0]);
+				livePinned = false;
+				renderLiveJobList(jobs);
+				renderLiveDetail(findJobByRequestId(selectedLiveRequestId, jobs));
+				return;
+			}
+			const queued = Array.isArray(jobs.queued) ? jobs.queued : [];
+			if (queued.length) {
+				selectedLiveRequestId = jobRequestId(queued[0]);
+				livePinned = false;
+				renderLiveJobList(jobs);
+				renderLiveDetail(findJobByRequestId(selectedLiveRequestId, jobs));
 				return;
 			}
 			const unified = collectUnifiedJobs(jobs).filter((job) => liveJobMatchesFilter(job) && liveJobMatchesSearch(job));
 			if (unified.length) {
-				selectLiveJob(jobRequestId(unified[0]), { skipHash: parseHash().tab !== 'live' });
+				selectedLiveRequestId = jobRequestId(unified[0]);
+				livePinned = false;
+				renderLiveJobList(jobs);
+				renderLiveDetail(findJobByRequestId(selectedLiveRequestId, jobs));
 				return;
 			}
+			selectedLiveRequestId = '';
 			renderLiveDetail(null);
 		}
 
@@ -2222,8 +2251,8 @@ function statusPageHtml() {
 					});
 					const jobs = currentStatus && currentStatus.jobs || {};
 					renderLiveJobList(jobs);
-					if (selectedLiveRequestId) {
-						renderLiveDetail(findJobByRequestId(selectedLiveRequestId, jobs) || pendingLiveJob(selectedLiveRequestId));
+					if (livePinned && selectedLiveRequestId) {
+						renderLiveDetail(findJobByRequestId(selectedLiveRequestId, jobs) || (!seenLiveRequestIds.has(selectedLiveRequestId) ? pendingLiveJob(selectedLiveRequestId) : null));
 					} else {
 						autoSelectLiveJob(jobs);
 					}
@@ -3403,8 +3432,8 @@ function statusPageHtml() {
 			fields.jobCounts.textContent = 'Running ' + Number(jobs.running_count || 0) + ' / Queued ' + Number(jobs.queued_count || 0);
 			fields.maxConcurrent.textContent = text(jobs.max_concurrent);
 			renderLiveJobList(jobs);
-			if (selectedLiveRequestId) {
-				renderLiveDetail(findJobByRequestId(selectedLiveRequestId, jobs) || pendingLiveJob(selectedLiveRequestId));
+			if (livePinned && selectedLiveRequestId) {
+				renderLiveDetail(findJobByRequestId(selectedLiveRequestId, jobs) || (!seenLiveRequestIds.has(selectedLiveRequestId) ? pendingLiveJob(selectedLiveRequestId) : null));
 			} else {
 				autoSelectLiveJob(jobs);
 			}
@@ -3430,7 +3459,7 @@ function statusPageHtml() {
 					if (status === 'running' || status === 'queued' || status === 'pending') {
 						renderLiveDetail(job);
 					}
-				} else if (selectedLiveRequestId) {
+				} else if (livePinned && !seenLiveRequestIds.has(selectedLiveRequestId)) {
 					renderLiveDetail(pendingLiveJob(selectedLiveRequestId));
 				}
 			}

@@ -19,6 +19,7 @@ const {
 	ANTIGRAVITY_IMAGE_CAPABILITIES,
 	GROK_IMAGE_CAPABILITIES,
 	isCompleteImageCapabilityContract,
+	findRelayImageModel,
 	relayCatalogEntrySupportsImages,
 	antigravityImageToolGuidance,
 	grokImageToolGuidance,
@@ -158,11 +159,25 @@ function captureCliSpawn(calls) {
 	assert.strictEqual(grokImageModel.image_capabilities.provider_options.aspect_ratio.delivery, 'native');
 	assert.strictEqual(grokImageModel.image_capabilities.resolution_mode, 'guidance');
 	assert.strictEqual(grokImageModel.image_capabilities.aspect_ratio_delivery, 'native');
+	assert.ok(capabilities.every((backend) => backend.kind === 'driver'));
+	assert.ok(models.filter((model) => model.type === 'image').every((model) => Array.isArray(model.job_types) && model.job_types.includes('images') && !model.job_types.includes('chat')));
 	assert.ok(isCompleteImageCapabilityContract(grokImageModel));
 	assert.ok(!relayCatalogEntrySupportsImages({ backends: [grokImageModel] }, grokImageModel), 'Persona-style clients fail when /v1/relay/models omits the grok-cli driver record');
 	assert.ok(relayCatalogEntrySupportsImages({ backends: [{ id: 'grok-cli', ready: true, job_types: ['chat', 'images'] }, grokImageModel] }, grokImageModel));
 	assert.ok(!relayCatalogEntrySupportsImages({ backends: models }, xaiImageModel), 'model-only catalogs are not enough for image clients');
 	assert.ok(relayCatalogEntrySupportsImages({ backends: [...capabilities, ...models] }, xaiImageModel));
+	assert.ok(relayCatalogEntrySupportsImages({ backends: [...models, ...capabilities] }, xaiImageModel));
+	const grokDriverRecord = { id: 'grok-cli', kind: 'driver', ready: true, job_types: ['chat', 'images'] };
+	const requestedGrokImageId = grokImageModel.id;
+	const naiveModelsFirst = [grokImageModel, grokDriverRecord].find((entry) => requestedGrokImageId.includes(entry.id));
+	assert.strictEqual(naiveModelsFirst.id, requestedGrokImageId);
+	assert.ok(isCompleteImageCapabilityContract(naiveModelsFirst));
+	const naiveDriversFirst = [grokDriverRecord, grokImageModel].find((entry) => requestedGrokImageId.includes(entry.id));
+	assert.strictEqual(naiveDriversFirst.id, 'grok-cli');
+	assert.ok(!isCompleteImageCapabilityContract(naiveDriversFirst));
+	assert.strictEqual(findRelayImageModel({ backends: [grokImageModel, grokDriverRecord] }, requestedGrokImageId).id, requestedGrokImageId);
+	assert.strictEqual(findRelayImageModel({ backends: [grokDriverRecord, grokImageModel] }, requestedGrokImageId).id, requestedGrokImageId);
+	assert.strictEqual(findRelayImageModel({ backends: [grokImageModel] }, requestedGrokImageId), null);
 	assert.ok(!isCompleteImageCapabilityContract({ ...grokImageModel, job_types: ['chat', 'images', 'videos'] }), 'mixed chat/image job_types is not a complete image contract');
 	assert.ok(!isCompleteImageCapabilityContract({ ...grokImageModel, image_capabilities: { ...GROK_IMAGE_CAPABILITIES, provider_options: { resolution: GROK_IMAGE_CAPABILITIES.provider_options.resolution } } }), 'native aspect_ratio must appear in provider_options');
 	const antigravityImageModel = { id: 'model-relay:antigravity-cli:image', type: 'image', backend: 'antigravity-cli', ready: true, job_types: ['images'], image_capabilities: ANTIGRAVITY_IMAGE_CAPABILITIES };

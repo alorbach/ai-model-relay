@@ -10,7 +10,7 @@ const { killProcessTree } = require('./cuda-torch-venv');
 const { detectCli, detectCliAsync, materializeChatImages, messagesToPromptJson, messagesToText, runTextCommand, writePromptFile } = require('./local-cli');
 const { createLocalUpscaleDriver } = require('./local-upscale');
 const { resolveMaxTokens } = require('./token-policy');
-const { IMAGE_CAPABILITY_CONTRACT_VERSION, imageCapabilityContract, isCompleteImageCapabilityContract, normalizeImageOutputFormat, normalizeImagePayloadForModel, relayCatalogEntrySupportsImages } = require('./image-capabilities');
+const { IMAGE_CAPABILITY_CONTRACT_VERSION, imageCapabilityContract, isCompleteImageCapabilityContract, findRelayImageModel, normalizeImageOutputFormat, normalizeImagePayloadForModel, relayCatalogEntrySupportsImages } = require('./image-capabilities');
 const { readImageDimensions } = require('./image-dimensions');
 const { antigravityAuthenticationFailure, antigravityResultText, createAntigravityImageArtifactResolver, findAntigravityImagePath, isAntigravityAuthenticationError } = require('./antigravity-cli');
 
@@ -1802,7 +1802,16 @@ function createBackendRegistry(options = {}) {
 	function capabilitiesFor(driver) {
 		if (!driver || !driver.capabilities) return null;
 		const capabilities = driver.capabilities();
-		return { ...capabilities, job_types: capabilities.job_types || driver.job_types || [] };
+		return { ...capabilities, kind: 'driver', job_types: capabilities.job_types || driver.job_types || [] };
+	}
+
+	function publishedModelJobTypes(model, capabilities) {
+		const own = Array.isArray(model && model.job_types) ? model.job_types.filter(Boolean) : [];
+		if (model && model.type === 'image') {
+			if (own.includes('images') && !own.includes('chat')) return own;
+			return ['images'];
+		}
+		return own.length ? own : (Array.isArray(capabilities && capabilities.job_types) ? capabilities.job_types : []);
 	}
 
 	function resolve(jobType, payload = {}) {
@@ -1846,7 +1855,7 @@ function createBackendRegistry(options = {}) {
 		capabilities: () => drivers.map((driver) => capabilitiesFor(driver)),
 		models: () => drivers.flatMap((driver) => {
 			const capabilities = capabilitiesFor(driver);
-			return driver.models().map((model) => ({ ...model, ready: model.ready !== undefined ? model.ready : !!capabilities.ready, job_types: model.job_types || capabilities.job_types }));
+			return driver.models().map((model) => ({ ...model, ready: model.ready !== undefined ? model.ready : !!capabilities.ready, job_types: publishedModelJobTypes(model, capabilities) }));
 		}),
 		refresh: () => Promise.all(drivers.map((driver) => driver.refresh ? driver.refresh({ resetMedia: true }) : driver.capabilities())),
 		getDriver: (jobType, payload) => driverFor(jobType, payload),
@@ -1867,6 +1876,7 @@ module.exports = {
 	GROK_IMAGE_CAPABILITIES,
 	IMAGE_CAPABILITY_CONTRACT_VERSION,
 	isCompleteImageCapabilityContract,
+	findRelayImageModel,
 	relayCatalogEntrySupportsImages,
 	createApiKeyChatDriver,
 	createAntigravityCliDriver,

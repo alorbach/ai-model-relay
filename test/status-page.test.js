@@ -127,6 +127,11 @@ assert.ok(html.includes('class="live-status-pill'));
 assert.ok(html.includes('id="liveDetailStatus"'));
 assert.ok(html.includes('class="live-artifact-download"'));
 assert.ok(html.includes('currentStatus.jobs = jobs'));
+assert.ok(html.includes('let livePinned = false'));
+assert.ok(html.includes("setHash('live')"));
+assert.ok(html.includes('jobs.active'));
+assert.ok(html.includes('!seenLiveRequestIds.has(selectedLiveRequestId)'));
+assert.ok(html.includes('min-height: 240px'));
 assert.ok(html.includes('data-open-live-job'));
 assert.ok(html.includes('--accent:'));
 

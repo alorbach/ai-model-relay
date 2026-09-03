@@ -3,7 +3,7 @@
 const assert = require('assert');
 const http = require('http');
 const { createServer, getPairingCode, publicStatusProjection } = require('../src/server');
-const { GROK_IMAGE_CAPABILITIES, isCompleteImageCapabilityContract, relayCatalogEntrySupportsImages } = require('../src/backend-registry');
+const { GROK_IMAGE_CAPABILITIES, isCompleteImageCapabilityContract, findRelayImageModel, relayCatalogEntrySupportsImages } = require('../src/backend-registry');
 
 function requestJson(port, method, pathname, body, headers = {}) {
 	return new Promise((resolve, reject) => {
@@ -228,6 +228,12 @@ function createMockSecurity() {
 		const relayGrokImage = models.body.backends.find((model) => model.id === 'model-relay:grok-cli:image');
 		assert.ok(isCompleteImageCapabilityContract(relayGrokImage));
 		assert.ok(relayCatalogEntrySupportsImages(models.body, relayGrokImage));
+		const requestedGrokImageId = 'model-relay:grok-cli:image';
+		const naiveGrokLookup = models.body.backends.find((entry) => requestedGrokImageId.includes(entry.id));
+		assert.strictEqual(naiveGrokLookup.id, requestedGrokImageId);
+		assert.ok(isCompleteImageCapabilityContract(naiveGrokLookup));
+		assert.ok(models.body.backends.indexOf(relayGrokImage) < models.body.backends.findIndex((item) => item.id === 'grok-cli'));
+		assert.strictEqual(findRelayImageModel(models.body, requestedGrokImageId).id, requestedGrokImageId);
 		assert.ok(!relayCatalogEntrySupportsImages({ backends: models.body.backends.filter((item) => item.id !== 'grok-cli') }, relayGrokImage), 'clients require a grok-cli driver record in the same backends array');
 		const relayUpscale = models.body.backends.find((model) => model.id === 'model-relay:local-upscale:swinir-classical-x2');
 		assert.strictEqual(relayUpscale.upscale_capabilities.native_scale, 2);

@@ -454,8 +454,10 @@ function modelsPayload(context) {
 	const backendDrivers = context.backends.capabilities ? context.backends.capabilities() : [];
 	modelPayload.models.relay = backendModels.map((model) => model.id);
 	/* Image clients look up both the model id and the driver id (entry.backend,
-	 * e.g. grok-cli) inside this same backends array. */
-	modelPayload.backends = [...backendDrivers, ...backendModels];
+	 * e.g. grok-cli) inside this same backends array. Publish models first so a
+	 * naive includes(grok-cli) search hits model-relay:grok-cli:image before the
+	 * driver record, which is not a complete image capability contract. */
+	modelPayload.backends = [...backendModels, ...backendDrivers];
 	modelPayload.image_capability_contract_version = IMAGE_CAPABILITY_CONTRACT_VERSION;
 	modelPayload.image_capability_minimum_relay_version = '1.0.10';
 	modelPayload.bridge = { ...(modelPayload.bridge || {}), version: packageInfo.version };
