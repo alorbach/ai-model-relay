@@ -1,0 +1,47 @@
+test/backend-registry.test.js
+  s_1f38774d9ada8c::t_b7b5ab309cc920 162-163,169-180
+  s_1f38774d9ada8c::t_03c2352c7f5848 22
+src/server.js
+  s_1f38774d9ada8c::t_95a89f5de4b608 457-460
+src/image-capabilities.js
+  s_1f38774d9ada8c::t_2697f070b537d6 108-116
+  s_1f38774d9ada8c::t_04c2584a7a2b17 218
+src/status-page.js
+  s_1f38774d9ada8c::t_fec975a342943e 1728-1730
+  s_1f38774d9ada8c::t_21f5126ef58a6a 2254-2255
+  s_1f38774d9ada8c::t_39e47cc8e4c825 3435-3436
+  s_1f38774d9ada8c::t_80382b43e072e7 609
+  s_1f38774d9ada8c::t_fed0c308c36b0e 1405
+  s_1f38774d9ada8c::t_7593d16e00cc72 3462
+  s_1f38774d9ada8c::t_f63dd1cb47f6e5 1692-1699
+  s_1f38774d9ada8c::t_2596358fd7b30e 688
+  s_1f38774d9ada8c::t_6c5027c6951b0b 1727
+  s_1f38774d9ada8c::t_0d78157d21c4e9 2074-2080
+  s_1f38774d9ada8c::t_de172170b1dc75 2202-2203,2208,2212,2214,2219-2230,2235-2238,2241
+test/relay-routes.test.js
+  s_1f38774d9ada8c::t_595860c7ee90f8 6
+  s_1f38774d9ada8c::t_34c100ec0bdcec 231-236
+test/status-page.test.js
+  s_1f38774d9ada8c::t_8ff8630939f64f 130-134
+src/backend-registry.js
+  s_1f38774d9ada8c::t_eca59022f130ae 13
+  s_1f38774d9ada8c::t_18cd206f04e46c 1805-1814
+  s_1f38774d9ada8c::t_876132ddfcd304 1879
+  s_1f38774d9ada8c::t_3ba27b63d17dbf 1858
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "54156911a776b5108319db860e307cdd3d178354",
+  "prompts": {},
+  "sessions": {
+    "s_1f38774d9ada8c": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "401e17c9-5fec-4247-9bb4-04f063f9f7e8",
+        "model": "grok-4.6"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
