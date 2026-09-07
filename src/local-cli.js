@@ -17,9 +17,12 @@ function cleanText(value) {
 	return String(value || '').replace(/\x1b\[[0-9;]*m/g, '').replace(/[\r\n]+/g, ' ').trim().slice(0, 500);
 }
 
+const UNAUTHENTICATED_RE = /not logged in|not authenticated|no auth credentials|login required/i;
+const LOGGED_IN_RE = /you are logged in|logged in with/i;
+
 function safeDiagnostic(value) {
 	const text = cleanText(value).replace(/\b(authorization|bearer|token|api[_ -]?key)(?:\s*[:=]\s*|\s+)(?:bearer\s+)?[^\s,;]+/ig, '$1: <redacted>');
-	if (/not logged in|not authenticated|no auth credentials|login required/i.test(text)) return 'Not authenticated.';
+	if (UNAUTHENTICATED_RE.test(text)) return 'Not authenticated.';
 	if (/access is denied|permission denied/i.test(text)) return 'Authentication state could not be read by this process.';
 	if (/timed out/i.test(text)) return 'CLI probe timed out.';
 	return text || 'CLI is unavailable.';
@@ -47,6 +50,12 @@ function collectModelIds(value, add, depth = 0) {
 				collectModelIds(parsed, add, depth + 1);
 				return;
 			} catch (error) {}
+		}
+		const defaultMatch = text.match(/default\s+models?\s*[:=]\s*([^\s,;]+)/i);
+		if (defaultMatch) add(defaultMatch[1]);
+		const availableMatch = text.match(/available\s+models?\s*[:=]\s*([\s\S]+)/i);
+		if (availableMatch) {
+			for (const token of availableMatch[1].split(/\s*[*,•]\s+|\s+-\s+|,\s+/)) add(token);
 		}
 		for (const rawLine of text.split(/\r?\n/)) {
 			const line = rawLine.trim();
@@ -93,6 +102,51 @@ function parseCliModelList(output, maxModels = MAX_CLI_MODELS) {
 	};
 	collectModelIds(String(output || '').slice(0, MAX_CLI_MODEL_OUTPUT_CHARS), add);
 	return models;
+}
+
+function parseCliDefaultModel(output) {
+	const text = String(output || '').replace(/\x1b\[[0-9;]*m/g, '').slice(0, MAX_CLI_MODEL_OUTPUT_CHARS);
+	if (!text.trim()) return '';
+	try {
+		const parsed = JSON.parse(text.trim());
+		if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+			for (const key of ['default_model', 'defaultModel', 'default']) {
+				const id = normalizeModelId(parsed[key]);
+				if (id && id !== 'auto') return id;
+			}
+		}
+	} catch (error) {}
+	const labeled = text.match(/default\s+models?\s*[:=]\s*([^\s,;]+)/i);
+	if (labeled) {
+		const id = normalizeModelId(labeled[1]);
+		if (id) return id;
+	}
+	for (const rawLine of text.split(/\r?\n/)) {
+		if (!/\(\s*default\s*\)/i.test(rawLine)) continue;
+		const id = normalizeModelId(rawLine);
+		if (id) return id;
+	}
+	const marked = text.match(/([A-Za-z0-9][A-Za-z0-9_.:/@+-]{0,127})\s*\(\s*default\s*\)/i);
+	return marked ? normalizeModelId(marked[1]) : '';
+}
+
+function cliAuthLooksPositive(authText) {
+	const text = String(authText || '');
+	if (UNAUTHENTICATED_RE.test(text)) return false;
+	if (LOGGED_IN_RE.test(text)) return true;
+	if (parseCliDefaultModel(text)) return true;
+	return parseCliModelList(text).length > 1;
+}
+
+function isCliAuthFailure(auth, authText) {
+	if (!auth) return false;
+	if (UNAUTHENTICATED_RE.test(String(authText || ''))) return true;
+	if (auth.error || (auth.status !== 0 && auth.status != null)) return !cliAuthLooksPositive(authText);
+	return false;
+}
+
+function defaultModelFrom(models, text) {
+	return parseCliDefaultModel(text) || (Array.isArray(models) ? models.find((id) => id && id !== 'auto') : '') || '';
 }
 
 function modelListArguments(definition) {
@@ -211,11 +265,12 @@ function detectCli(definition, options = {}) {
 	if (version.error || version.status !== 0) return { ...base, state: 'unavailable', diagnostic: safeDiagnostic(version.error && version.error.message || version.stderr || version.stdout) };
 	const auth = definition.authArgs && !options.skipAuth ? run(command, definition.authArgs, options) : null;
 	const authText = auth ? `${auth.stdout || ''}\n${auth.stderr || ''}` : '';
-	const unauthenticated = auth && (/not logged in|not authenticated|no auth credentials|login required/i.test(authText) || auth.status !== 0);
+	const unauthenticated = isCliAuthFailure(auth, authText);
 	const fallbackModels = definition.models || ['auto'];
 	const authModels = auth && !unauthenticated ? modelsFromProbe(authText, fallbackModels) : fallbackModels;
 	const models = authModels.length > 1 ? authModels : (!unauthenticated ? probeModelListSync(command, definition, options, fallbackModels) : fallbackModels);
-	return { ...base, version: cleanText(version.stdout || version.stderr), authenticated: auth ? !unauthenticated : null, ready: auth ? !unauthenticated : false, state: unauthenticated ? 'not_authenticated' : (auth ? 'ready' : 'installed'), diagnostic: unauthenticated ? safeDiagnostic(authText) : (auth ? 'Ready.' : 'Authentication not checked yet.'), models };
+	const default_model = unauthenticated ? '' : defaultModelFrom(models, authText);
+	return { ...base, version: cleanText(version.stdout || version.stderr), authenticated: auth ? !unauthenticated : null, ready: auth ? !unauthenticated : false, state: unauthenticated ? 'not_authenticated' : (auth ? 'ready' : 'installed'), diagnostic: unauthenticated ? safeDiagnostic(authText) : (auth ? 'Ready.' : 'Authentication not checked yet.'), models, default_model };
 }
 
 async function detectCliAsync(definition, options = {}) {
@@ -226,11 +281,12 @@ async function detectCliAsync(definition, options = {}) {
 	if (version.error || version.status !== 0) return { ...base, state: 'unavailable', diagnostic: safeDiagnostic(version.error && version.error.message || version.stderr || version.stdout) };
 	const auth = definition.authArgs ? await runAsync(command, definition.authArgs, options) : null;
 	const authText = auth ? `${auth.stdout || ''}\n${auth.stderr || ''}` : '';
-	const unauthenticated = auth && (/not logged in|not authenticated|no auth credentials|login required/i.test(authText) || auth.status !== 0);
+	const unauthenticated = isCliAuthFailure(auth, authText);
 	const fallbackModels = definition.models || ['auto'];
 	const authModels = auth && !unauthenticated ? modelsFromProbe(authText, fallbackModels) : fallbackModels;
 	const models = authModels.length > 1 ? authModels : (!unauthenticated ? await probeModelListAsync(command, definition, options, fallbackModels) : fallbackModels);
-	return { ...base, version: cleanText(version.stdout || version.stderr), authenticated: auth ? !unauthenticated : null, ready: !!auth && !unauthenticated, state: unauthenticated ? 'not_authenticated' : 'ready', diagnostic: unauthenticated ? safeDiagnostic(authText) : 'Ready.', models };
+	const default_model = unauthenticated ? '' : defaultModelFrom(models, authText);
+	return { ...base, version: cleanText(version.stdout || version.stderr), authenticated: auth ? !unauthenticated : null, ready: !!auth && !unauthenticated, state: unauthenticated ? 'not_authenticated' : 'ready', diagnostic: unauthenticated ? safeDiagnostic(authText) : 'Ready.', models, default_model };
 }
 
 function runTextCommand(command, args, input, session = {}, options = {}) {
@@ -366,4 +422,4 @@ function messagesToPromptJson(payload = {}, imageReferences = []) {
 	return blocks;
 }
 
-module.exports = { detectCli, detectCliAsync, expandWindowsEnvironmentVariables, materializeChatImages, messagesToPromptJson, messagesToText, parseCliModelList, resolveCommand, runTextCommand, safeDiagnostic, writePromptFile };
+module.exports = { detectCli, detectCliAsync, expandWindowsEnvironmentVariables, materializeChatImages, messagesToPromptJson, messagesToText, parseCliDefaultModel, parseCliModelList, resolveCommand, runTextCommand, safeDiagnostic, writePromptFile };

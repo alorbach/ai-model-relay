@@ -631,6 +631,26 @@ function cliModelFromRelay(model, provider) {
 	return value.startsWith(prefix) ? value.slice(prefix.length) || 'auto' : 'auto';
 }
 
+function grokCliDefaultModel(state = {}) {
+	const known = (state.models || []).filter((id) => id && id !== 'auto');
+	return String(state.default_model || known[0] || '').trim();
+}
+
+function resolveGrokNativeModel(requested, state = {}) {
+	const known = (state.models || []).filter((id) => id && id !== 'auto');
+	const defaultModel = grokCliDefaultModel(state);
+	if (!requested || requested === 'auto' || !known.includes(requested)) {
+		return defaultModel || requested || 'auto';
+	}
+	return requested;
+}
+
+function isInvalidCliModelFailure(result) {
+	const details = result && result.details && typeof result.details === 'object' ? result.details : {};
+	const message = [result && result.message, details.stderr, details.stdout, result && result.text].filter(Boolean).join('\n');
+	return /unknown model|invalid model|unrecognized model|model .* not (?:found|available|supported)|no such model/i.test(message);
+}
+
 function createNamedCliDriver(definition, options = {}) {
 	let cached = { id: definition.id, label: definition.label, kind: 'local-cli', installed: null, ready: false, state: 'checking', diagnostic: 'Checking in background.', models: definition.models || ['auto'], job_types: definition.jobTypes || ['chat'] };
 	const detector = options.detectCliAsync || detectCliAsync;
@@ -654,7 +674,8 @@ function createNamedCliDriver(definition, options = {}) {
 		async chat(payload = {}, session = {}) {
 			const state = await this.refresh();
 			if (!state.ready) return { success: false, category: 'configuration', code: `${definition.id}_unavailable`, message: `${definition.label} is unavailable: ${state.diagnostic}` };
-			const model = cliModelFromRelay(payload.model, definition.id);
+			const requested = cliModelFromRelay(payload.model, definition.id);
+			let model = typeof definition.nativeModel === 'function' ? definition.nativeModel(requested, state) || requested : requested;
 			const workspace = fs.mkdtempSync(path.join(os.tmpdir(), `ai-model-relay-${definition.id}-`));
 			try {
 				const materialized = materializeChatImages(payload, workspace);
@@ -662,8 +683,15 @@ function createNamedCliDriver(definition, options = {}) {
 				const prompt = messagesToText(payload, { imageReferences: materialized.references });
 				const promptPath = writePromptFile(workspace, prompt);
 				const request = { prompt, promptPath, workspace, imageReferences: materialized.references, promptJsonSupported: state.prompt_json_supported === true, promptJson: state.prompt_json_supported === true ? messagesToPromptJson(payload, materialized.references) : null };
-				const args = definition.requestArgs(model, promptPath, workspace, request);
-				const result = await commandRunner(state.command, args, '', session, { ...options, cwd: workspace });
+				const runWithModel = (nativeModel) => commandRunner(state.command, definition.requestArgs(nativeModel, promptPath, workspace, request), '', session, { ...options, cwd: workspace });
+				let result = await runWithModel(model);
+				if (!result.success && definition.retryInvalidModel && isInvalidCliModelFailure(result)) {
+					const fallback = String((typeof definition.defaultNativeModel === 'function' && definition.defaultNativeModel(state)) || state.default_model || '').trim();
+					if (fallback && fallback !== 'auto' && fallback !== model) {
+						result = await runWithModel(fallback);
+						if (result.success) model = fallback;
+					}
+				}
 				if (!result.success) return result;
 				let parsed = null; try { parsed = JSON.parse(result.text); } catch (error) {}
 				return normalizeChatResponse(definition.id, model, parsed, result.text);
@@ -673,10 +701,10 @@ function createNamedCliDriver(definition, options = {}) {
 }
 
 function createGrokCliDriver(options = {}) {
-	const definition = { id: 'grok-cli', label: 'Grok CLI', candidates: [options.command, process.env.AI_MODEL_RELAY_GROK_BINARY, 'grok'], versionArgs: ['--version'], authArgs: ['models'], jobTypes: ['chat'], models: ['auto'], requestArgs: (model, promptPath, workspace, request = {}) => {
+	const definition = { id: 'grok-cli', label: 'Grok CLI', candidates: [options.command, process.env.AI_MODEL_RELAY_GROK_BINARY, 'grok'], versionArgs: ['--version'], authArgs: ['models'], jobTypes: ['chat'], models: ['auto'], nativeModel: resolveGrokNativeModel, defaultNativeModel: grokCliDefaultModel, retryInvalidModel: true, requestArgs: (model, promptPath, workspace, request = {}) => {
 		const promptJson = request.promptJsonSupported && request.promptJson ? JSON.stringify(request.promptJson) : '';
 		const usePromptJson = !!promptJson && promptJson.length <= MAX_CLI_PROMPT_JSON_ARG_CHARS;
-		return [usePromptJson ? '--prompt-json' : '--prompt-file', usePromptJson ? promptJson : promptPath, '--output-format', 'json', '--cwd', workspace, '--disallowed-tools', 'run_terminal_cmd', '--permission-mode', 'dontAsk', '--no-subagents', '--disable-web-search', ...(model !== 'auto' ? ['--model', model] : [])];
+		return [usePromptJson ? '--prompt-json' : '--prompt-file', usePromptJson ? promptJson : promptPath, '--output-format', 'json', '--cwd', workspace, '--disallowed-tools', 'run_terminal_cmd', '--permission-mode', 'dontAsk', '--no-subagents', '--disable-web-search', ...(model && model !== 'auto' ? ['--model', model] : [])];
 	} };
 	const configuredMediaTimeout = Number(options.mediaTimeoutMs || process.env.AI_MODEL_RELAY_GROK_MEDIA_TIMEOUT_MS || GROK_MEDIA_TIMEOUT_MS);
 	const mediaTimeoutMs = Number.isFinite(configuredMediaTimeout) && configuredMediaTimeout > 0 ? configuredMediaTimeout : GROK_MEDIA_TIMEOUT_MS;

@@ -586,6 +586,51 @@ function captureCliSpawn(calls) {
 	assert.ok(grokCalls[0].args.includes('--disable-web-search'));
 	assert.ok(!grokCalls[0].args.includes('--max-turns'));
 
+	function grokReady(definition, extra = {}) {
+		return { ...readyCli(definition), models: ['auto', 'grok-4.6', 'grok-4.5'], default_model: 'grok-4.6', ...extra };
+	}
+	const grokDefaultCalls = [];
+	const grokDefaultCli = createGrokCliDriver({
+		detectCliAsync: async (definition) => grokReady(definition),
+		spawn: captureCliSpawn(grokDefaultCalls),
+	});
+	const grokAutoDefault = await grokDefaultCli.chat({ model: 'model-relay:grok-cli:auto', prompt: 'hi' });
+	assert.strictEqual(grokAutoDefault.success, true);
+	assert.ok(grokDefaultCalls[0].args.includes('--model'));
+	assert.strictEqual(grokDefaultCalls[0].args[grokDefaultCalls[0].args.indexOf('--model') + 1], 'grok-4.6');
+	assert.ok(!grokDefaultCalls[0].args.includes('auto'));
+	const grokUnknownCalls = [];
+	const grokUnknownCli = createGrokCliDriver({
+		detectCliAsync: async (definition) => grokReady(definition),
+		spawn: captureCliSpawn(grokUnknownCalls),
+	});
+	const grokUnknown = await grokUnknownCli.chat({ model: 'model-relay:grok-cli:not-a-model', prompt: 'hi' });
+	assert.strictEqual(grokUnknown.success, true);
+	assert.strictEqual(grokUnknownCalls[0].args[grokUnknownCalls[0].args.indexOf('--model') + 1], 'grok-4.6');
+	const grokExplicitCalls = [];
+	const grokExplicitCli = createGrokCliDriver({
+		detectCliAsync: async (definition) => grokReady(definition),
+		spawn: captureCliSpawn(grokExplicitCalls),
+	});
+	const grokExplicit = await grokExplicitCli.chat({ model: 'model-relay:grok-cli:grok-4.5', prompt: 'hi' });
+	assert.strictEqual(grokExplicit.success, true);
+	assert.strictEqual(grokExplicitCalls[0].args[grokExplicitCalls[0].args.indexOf('--model') + 1], 'grok-4.5');
+	const grokInvalidModels = [];
+	const grokInvalidRetry = createGrokCliDriver({
+		detectCliAsync: async (definition) => grokReady(definition),
+		runTextCommand: async (command, args) => {
+			if (args[0] === '--help') return { success: true, text: 'Usage: grok --prompt-file <PATH>', stderr: '' };
+			grokInvalidModels.push(args[args.indexOf('--model') + 1]);
+			if (grokInvalidModels.length === 1) return { success: false, category: 'cli_process', code: 'cli_request_failed', message: 'Unknown model: grok-4.5', details: { stderr: 'Unknown model: grok-4.5' } };
+			return { success: true, text: JSON.stringify({ choices: [{ index: 0, message: { role: 'assistant', content: 'retried default' }, finish_reason: 'stop' }] }) };
+		},
+	});
+	const grokInvalidResult = await grokInvalidRetry.chat({ model: 'model-relay:grok-cli:grok-4.5', prompt: 'hi' });
+	assert.strictEqual(grokInvalidResult.success, true);
+	assert.deepStrictEqual(grokInvalidModels, ['grok-4.5', 'grok-4.6']);
+	assert.strictEqual(grokInvalidResult.response.model, 'model-relay:grok-cli:grok-4.6');
+	assert.strictEqual(grokInvalidResult.response.choices[0].message.content, 'retried default');
+
 	const discoveredGrok = createGrokCliDriver({ detectCliAsync: async (definition) => ({ ...readyCli(definition), models: ['auto', 'grok-4.6', 'grok-4.5'] }) });
 	await discoveredGrok.refresh();
 	assert.deepStrictEqual(discoveredGrok.models().filter((model) => model.type === 'text').map((model) => model.id), ['model-relay:grok-cli:auto', 'model-relay:grok-cli:grok-4.6', 'model-relay:grok-cli:grok-4.5']);
