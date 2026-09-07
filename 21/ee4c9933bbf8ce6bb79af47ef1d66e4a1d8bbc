@@ -1,0 +1,38 @@
+src/local-cli.js
+  s_d6e76276c9603a::t_0f846602d9d8a0 107-151
+  s_d6e76276c9603a::t_702d1bbe7b504a 268,272-273
+  s_d6e76276c9603a::t_485f31c0e355af 284,288-289
+  s_d6e76276c9603a::t_eab24b7f7d4d6b 425
+  s_d6e76276c9603a::t_6d5a7c33714323 20-22,25
+  s_d6e76276c9603a::t_24fa1b675226a0 54-59
+docs/local-bridge-api.md
+  s_d6e76276c9603a::t_088e85366aed4d 552
+docs/architecture.md
+  s_d6e76276c9603a::t_100650943218bf 65
+src/backend-registry.js
+  s_d6e76276c9603a::t_610e30f40412e4 704,707
+  s_d6e76276c9603a::t_d47316a493603a 634-653
+  s_d6e76276c9603a::t_b44616e8593f0a 677-678,686-694
+test/local-cli.test.js
+  s_d6e76276c9603a::t_9d9f813efa06c7 9
+  s_d6e76276c9603a::t_432cb6dff7285c 21,24-27
+  s_d6e76276c9603a::t_2b84429c8ed060 85-93
+test/backend-registry.test.js
+  s_d6e76276c9603a::t_2e5f37a1872935 589-633
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "21ee4c9933bbf8ce6bb79af47ef1d66e4a1d8bbc",
+  "prompts": {},
+  "sessions": {
+    "s_d6e76276c9603a": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "7acee15c-33f5-4b94-a912-1cadaff85696",
+        "model": "grok-4.6"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
