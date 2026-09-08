@@ -1,0 +1,34 @@
+src/local-cli.js
+  s_d6e76276c9603a::t_6c617be1c60406 5
+  s_b7d30f3593ddce::t_99e705c3060882 380-419,424,426,428
+docs/architecture.md
+  s_b7d30f3593ddce::t_1031479d418be8 65
+docs/local-bridge-api.md
+  s_b7d30f3593ddce::t_8b3f0a765eee23 552
+test/local-cli.test.js
+  s_b7d30f3593ddce::t_e88bc11cf5adc9 140-162
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "462f127f7d397f9b801b598af389af4caceba0b4",
+  "prompts": {},
+  "sessions": {
+    "s_b7d30f3593ddce": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "5a9b008b-15df-4845-a8fd-4c8d6723ca01",
+        "model": "grok-4.6"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_d6e76276c9603a": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "7acee15c-33f5-4b94-a912-1cadaff85696",
+        "model": "grok-4.6"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
