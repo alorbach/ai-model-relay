@@ -1,0 +1,90 @@
+test/local-upscale.test.js
+  s_d6e76276c9603a::t_126919384d0819 79-104
+docs/operations.md
+  s_d6e76276c9603a::t_0bfe3da3325380 219
+  s_d6e76276c9603a::t_eac2c2d4f98516 184
+  s_d6e76276c9603a::t_8c3d4b95d20a5d 59
+  s_d6e76276c9603a::t_e0d9b399f6a728 241
+  s_d6e76276c9603a::t_e05a95b9c1e885 27-28
+  s_d6e76276c9603a::t_1832fe5c86e512 158
+src/relay-settings.js
+  s_d6e76276c9603a::t_f19a16c0d7c4f9 23-43,46-49,96-200,202-206,208,210-212,214-317,319-401,411-413,416,428-430,438-454
+  s_d6e76276c9603a::t_c4f047c23f8bcb 207,209,213
+  s_d6e76276c9603a::t_a83e65d40b132e 418-420,423,431
+  s_d6e76276c9603a::t_850c0a0a6cd305 44-45,51,56
+  s_7eae3211597961::t_4107752f548e2c 50
+src/video.js
+  s_d6e76276c9603a::t_02759eb451d9a4 18
+  s_d6e76276c9603a::t_f4b7402bec7718 6-11,13,24,28
+  s_65faff205c672e::t_4de8be08b1ebcd 22-23,25-27,29,311,330
+test/asr.test.js
+  s_d6e76276c9603a::t_dd8f77c4f20462 40-42
+src/codex.js
+  s_d6e76276c9603a::t_4ca97f199620a7 12
+  s_65faff205c672e::t_547a58143ed20e 89-98,103,268,866,1178
+test/relay-settings.test.js
+  s_d6e76276c9603a::t_fe02556e96c49b 85-138
+test/music-analysis.test.js
+  s_d6e76276c9603a::t_d6e9bb9de81d12 19
+src/server.js
+  s_d6e76276c9603a::t_fc6a7547c84f2e 27-30
+  s_d6e76276c9603a::t_119604fa50e5a9 750-759,994-997,999,1004,1230,1233,1235-1243,1250-1256,1288-1291
+docs/architecture.md
+  s_10290d47949857::t_69f5bdcaa43494 29,55,57,59-61,71
+src/asr.js
+  s_65faff205c672e::t_382719c9f0a506 173-175,201-203,236-243,395,397-399,536,948,951,1090-1091,1093,1279,1438,1571,1701
+src/backend-registry.js
+  s_10290d47949857::t_784a25523ae249 695,711,1132,1358,1678,1737,1822-1825,1827,1837,1839
+src/job-manager.js
+  s_65faff205c672e::t_42d517091b0a6b 206-211
+src/local-upscale.js
+  s_10290d47949857::t_d5c7e5b7f0a5e4 133-135,153-155,608-612,625
+src/music-analysis.js
+  s_10290d47949857::t_e8997053479ead 47,59,217,327
+src/status-page.js
+  s_7eae3211597961::t_0318d1187643d3 1242,1257,1261-1266,1417,1461-1464,1577,1616,1619-1620,1630-1676,2598-2651,2935,2937,2942-2945,2950-2953,2965,2975,3034-3037,3053-3056,3187-3189,3238-3240,3819-3827
+test/relay-routes.test.js
+  s_65faff205c672e::t_fcd6ddcf5a2e60 167-183,211-226,229-259,307-308,354-364
+test/status-page.test.js
+  s_65faff205c672e::t_aaa15dd1d391ff 104,106-117
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "790553ce774ac7230799c3162944e5a2199cd3d5",
+  "prompts": {},
+  "sessions": {
+    "s_10290d47949857": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a042f6-86f9-7493-ae27-a8387fbc9764",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_65faff205c672e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a07126-118c-77a3-8f25-212b48bb7c6a",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_7eae3211597961": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a07f7b-6389-7802-a905-e52896c7b194",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_d6e76276c9603a": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "7acee15c-33f5-4b94-a912-1cadaff85696",
+        "model": "grok-4.6"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
