@@ -7,14 +7,21 @@ const statePaths = require('./state-paths');
 const MAX_BODY_BYTES = 12 * 1024 * 1024;
 const stateDir = statePaths.stateDir;
 const statePath = statePaths.statePath;
+const stateBackupPath = `${statePath}.bak`;
+const stateLockPath = `${statePath}.lock`;
+const STATE_LOCK_TIMEOUT_MS = 5000;
+const STATE_LOCK_STALE_MS = 30000;
 
 function timingSafeEqual(left, right) {
 	const a = Buffer.from(String(left || ''), 'utf8');
 	const b = Buffer.from(String(right || ''), 'utf8');
-	if (a.length !== b.length) {
-		return false;
-	}
-	return crypto.timingSafeEqual(a, b);
+	const size = Math.max(a.length, b.length, 1);
+	const leftPadded = Buffer.alloc(size);
+	const rightPadded = Buffer.alloc(size);
+	a.copy(leftPadded);
+	b.copy(rightPadded);
+	const sameBytes = crypto.timingSafeEqual(leftPadded, rightPadded);
+	return sameBytes && a.length === b.length;
 }
 
 function normalizeOrigin(origin) {
@@ -33,19 +40,175 @@ function ensureStateDir() {
 	fs.mkdirSync(stateDir, { recursive: true });
 }
 
-function readState() {
+function readStateFile(filePath) {
 	try {
-		const raw = fs.readFileSync(statePath, 'utf8');
+		const raw = fs.readFileSync(filePath, 'utf8');
 		const state = JSON.parse(raw);
-		return state && typeof state === 'object' ? state : {};
+		return state && typeof state === 'object' ? state : null;
 	} catch (error) {
-		return {};
+		return null;
+	}
+}
+
+function readState() {
+	for (const filePath of [statePath, stateBackupPath]) {
+		const state = readStateFile(filePath);
+		if (state) {
+			return state;
+		}
+	}
+	return {};
+}
+
+function sleepSync(milliseconds) {
+	const waitBuffer = new Int32Array(new SharedArrayBuffer(4));
+	Atomics.wait(waitBuffer, 0, 0, milliseconds);
+}
+
+function acquireStateLock() {
+	ensureStateDir();
+	const startedAt = Date.now();
+	for (;;) {
+		try {
+			fs.mkdirSync(stateLockPath);
+			return stateLockPath;
+		} catch (error) {
+			if (!error || error.code !== 'EEXIST') {
+				throw error;
+			}
+			try {
+				const lockStat = fs.statSync(stateLockPath);
+				if (Date.now() - lockStat.mtimeMs > STATE_LOCK_STALE_MS) {
+					fs.rmdirSync(stateLockPath);
+					continue;
+				}
+			} catch (statError) {
+				if (statError && statError.code !== 'ENOENT') {
+					throw statError;
+				}
+			}
+			if (Date.now() - startedAt >= STATE_LOCK_TIMEOUT_MS) {
+				throw new Error('Timed out waiting for the Relay state file lock.');
+			}
+			sleepSync(10);
+		}
+	}
+}
+
+function releaseStateLock(lockPath) {
+	try {
+		fs.rmdirSync(lockPath);
+	} catch (error) {
+		if (!error || error.code !== 'ENOENT') {
+			throw error;
+		}
+	}
+}
+
+function isStateReplacementConflict(error) {
+	return !!(error && ['EEXIST', 'EPERM', 'ENOTEMPTY'].includes(error.code) && fs.existsSync(statePath));
+}
+
+function replaceStateFile(tmpPath) {
+	try {
+		fs.renameSync(tmpPath, statePath);
+		return;
+	} catch (error) {
+		if (!isStateReplacementConflict(error)) {
+			throw error;
+		}
+	}
+
+	try {
+		fs.unlinkSync(stateBackupPath);
+	} catch (error) {
+		if (error && error.code !== 'ENOENT') {
+			throw error;
+		}
+	}
+	let movedPreviousState = false;
+	try {
+		fs.renameSync(statePath, stateBackupPath);
+		movedPreviousState = true;
+		fs.renameSync(tmpPath, statePath);
+	} catch (error) {
+		if (movedPreviousState && !fs.existsSync(statePath)) {
+			try {
+				fs.renameSync(stateBackupPath, statePath);
+			} catch (restoreError) {
+				error.restoreError = restoreError;
+			}
+		}
+		throw error;
+	}
+	try {
+		fs.unlinkSync(stateBackupPath);
+	} catch (error) {
+		/* The new state is valid; an old backup can be recovered or replaced later. */
 	}
 }
 
 function writeState(state) {
-	ensureStateDir();
-	fs.writeFileSync(statePath, JSON.stringify(state, null, 2));
+	const lockPath = acquireStateLock();
+	const tmpPath = `${statePath}.${process.pid}.${Date.now().toString(36)}.${crypto.randomBytes(8).toString('hex')}.tmp`;
+	try {
+		const fileDescriptor = fs.openSync(tmpPath, 'wx');
+		try {
+			fs.writeFileSync(fileDescriptor, JSON.stringify(state, null, 2), 'utf8');
+			fs.fsyncSync(fileDescriptor);
+		} finally {
+			fs.closeSync(fileDescriptor);
+		}
+		replaceStateFile(tmpPath);
+	} finally {
+		try {
+			fs.unlinkSync(tmpPath);
+		} catch (error) {
+			if (error && error.code !== 'ENOENT') {
+				/* Preserve the original write error when cleanup cannot remove a temp file. */
+			}
+		}
+		releaseStateLock(lockPath);
+	}
+}
+
+const PAIRING_MAX_FAILURES = 5;
+const PAIRING_WINDOW_MS = 60000;
+
+function createPairingLimiter(options = {}) {
+	const maxFailures = Number(options.maxFailures || PAIRING_MAX_FAILURES) || PAIRING_MAX_FAILURES;
+	const windowMs = Number(options.windowMs || PAIRING_WINDOW_MS) || PAIRING_WINDOW_MS;
+	const now = typeof options.now === 'function' ? options.now : () => Date.now();
+	const failures = [];
+	function prune(at) {
+		const cutoff = at - windowMs;
+		while (failures.length && failures[0] < cutoff) {
+			failures.shift();
+		}
+	}
+	return {
+		allow() {
+			const at = now();
+			prune(at);
+			return failures.length < maxFailures;
+		},
+		recordFailure() {
+			const at = now();
+			prune(at);
+			failures.push(at);
+		},
+		reset() {
+			failures.length = 0;
+		},
+		retryAfterMs() {
+			const at = now();
+			prune(at);
+			if (failures.length < maxFailures || !failures.length) {
+				return 0;
+			}
+			return Math.max(0, (failures[0] + windowMs) - at);
+		},
+	};
 }
 
 function getPairings() {
@@ -105,9 +268,12 @@ function isLocalAddress(req) {
 
 module.exports = {
 	MAX_BODY_BYTES,
+	PAIRING_MAX_FAILURES,
+	PAIRING_WINDOW_MS,
 	stateDir,
 	statePath,
 	createPairingCode,
+	createPairingLimiter,
 	createToken,
 	getPairing,
 	getPairings,
@@ -115,6 +281,7 @@ module.exports = {
 	normalizeOrigin,
 	removePairing,
 	savePairing,
+	timingSafeEqual,
 	validateBridgeToken,
 	readState,
 	writeState,

@@ -19,6 +19,7 @@ const {
 	ANTIGRAVITY_IMAGE_CAPABILITIES,
 	GROK_IMAGE_CAPABILITIES,
 	isCompleteImageCapabilityContract,
+	findRelayImageModel,
 	relayCatalogEntrySupportsImages,
 	antigravityImageToolGuidance,
 	grokImageToolGuidance,
@@ -158,11 +159,25 @@ function captureCliSpawn(calls) {
 	assert.strictEqual(grokImageModel.image_capabilities.provider_options.aspect_ratio.delivery, 'native');
 	assert.strictEqual(grokImageModel.image_capabilities.resolution_mode, 'guidance');
 	assert.strictEqual(grokImageModel.image_capabilities.aspect_ratio_delivery, 'native');
+	assert.ok(capabilities.every((backend) => backend.kind === 'driver'));
+	assert.ok(models.filter((model) => model.type === 'image').every((model) => Array.isArray(model.job_types) && model.job_types.includes('images') && !model.job_types.includes('chat')));
 	assert.ok(isCompleteImageCapabilityContract(grokImageModel));
 	assert.ok(!relayCatalogEntrySupportsImages({ backends: [grokImageModel] }, grokImageModel), 'Persona-style clients fail when /v1/relay/models omits the grok-cli driver record');
 	assert.ok(relayCatalogEntrySupportsImages({ backends: [{ id: 'grok-cli', ready: true, job_types: ['chat', 'images'] }, grokImageModel] }, grokImageModel));
 	assert.ok(!relayCatalogEntrySupportsImages({ backends: models }, xaiImageModel), 'model-only catalogs are not enough for image clients');
 	assert.ok(relayCatalogEntrySupportsImages({ backends: [...capabilities, ...models] }, xaiImageModel));
+	assert.ok(relayCatalogEntrySupportsImages({ backends: [...models, ...capabilities] }, xaiImageModel));
+	const grokDriverRecord = { id: 'grok-cli', kind: 'driver', ready: true, job_types: ['chat', 'images'] };
+	const requestedGrokImageId = grokImageModel.id;
+	const naiveModelsFirst = [grokImageModel, grokDriverRecord].find((entry) => requestedGrokImageId.includes(entry.id));
+	assert.strictEqual(naiveModelsFirst.id, requestedGrokImageId);
+	assert.ok(isCompleteImageCapabilityContract(naiveModelsFirst));
+	const naiveDriversFirst = [grokDriverRecord, grokImageModel].find((entry) => requestedGrokImageId.includes(entry.id));
+	assert.strictEqual(naiveDriversFirst.id, 'grok-cli');
+	assert.ok(!isCompleteImageCapabilityContract(naiveDriversFirst));
+	assert.strictEqual(findRelayImageModel({ backends: [grokImageModel, grokDriverRecord] }, requestedGrokImageId).id, requestedGrokImageId);
+	assert.strictEqual(findRelayImageModel({ backends: [grokDriverRecord, grokImageModel] }, requestedGrokImageId).id, requestedGrokImageId);
+	assert.strictEqual(findRelayImageModel({ backends: [grokImageModel] }, requestedGrokImageId), null);
 	assert.ok(!isCompleteImageCapabilityContract({ ...grokImageModel, job_types: ['chat', 'images', 'videos'] }), 'mixed chat/image job_types is not a complete image contract');
 	assert.ok(!isCompleteImageCapabilityContract({ ...grokImageModel, image_capabilities: { ...GROK_IMAGE_CAPABILITIES, provider_options: { resolution: GROK_IMAGE_CAPABILITIES.provider_options.resolution } } }), 'native aspect_ratio must appear in provider_options');
 	const antigravityImageModel = { id: 'model-relay:antigravity-cli:image', type: 'image', backend: 'antigravity-cli', ready: true, job_types: ['images'], image_capabilities: ANTIGRAVITY_IMAGE_CAPABILITIES };
@@ -571,6 +586,84 @@ function captureCliSpawn(calls) {
 	assert.ok(grokCalls[0].args.includes('--disable-web-search'));
 	assert.ok(!grokCalls[0].args.includes('--max-turns'));
 
+	function grokReady(definition, extra = {}) {
+		return { ...readyCli(definition), models: ['auto', 'grok-4.6', 'grok-4.5'], default_model: 'grok-4.6', ...extra };
+	}
+	const grokDefaultCalls = [];
+	const grokDefaultCli = createGrokCliDriver({
+		detectCliAsync: async (definition) => grokReady(definition),
+		spawn: captureCliSpawn(grokDefaultCalls),
+	});
+	const grokAutoDefault = await grokDefaultCli.chat({ model: 'model-relay:grok-cli:auto', prompt: 'hi' });
+	assert.strictEqual(grokAutoDefault.success, true);
+	assert.ok(grokDefaultCalls[0].args.includes('--model'));
+	assert.strictEqual(grokDefaultCalls[0].args[grokDefaultCalls[0].args.indexOf('--model') + 1], 'grok-4.6');
+	assert.ok(!grokDefaultCalls[0].args.includes('auto'));
+	const grokUnknownCalls = [];
+	const grokUnknownCli = createGrokCliDriver({
+		detectCliAsync: async (definition) => grokReady(definition),
+		spawn: captureCliSpawn(grokUnknownCalls),
+	});
+	const grokUnknown = await grokUnknownCli.chat({ model: 'model-relay:grok-cli:not-a-model', prompt: 'hi' });
+	assert.strictEqual(grokUnknown.success, true);
+	assert.strictEqual(grokUnknownCalls[0].args[grokUnknownCalls[0].args.indexOf('--model') + 1], 'grok-4.6');
+	const grokExplicitCalls = [];
+	const grokExplicitCli = createGrokCliDriver({
+		detectCliAsync: async (definition) => grokReady(definition),
+		spawn: captureCliSpawn(grokExplicitCalls),
+	});
+	const grokExplicit = await grokExplicitCli.chat({ model: 'model-relay:grok-cli:grok-4.5', prompt: 'hi' });
+	assert.strictEqual(grokExplicit.success, true);
+	assert.strictEqual(grokExplicitCalls[0].args[grokExplicitCalls[0].args.indexOf('--model') + 1], 'grok-4.5');
+	const grokInvalidModels = [];
+	const grokInvalidRetry = createGrokCliDriver({
+		detectCliAsync: async (definition) => grokReady(definition),
+		runTextCommand: async (command, args) => {
+			if (args[0] === '--help') return { success: true, text: 'Usage: grok --prompt-file <PATH>', stderr: '' };
+			grokInvalidModels.push(args[args.indexOf('--model') + 1]);
+			if (grokInvalidModels.length === 1) return { success: false, category: 'cli_process', code: 'cli_request_failed', message: 'Unknown model: grok-4.5', details: { stderr: 'Unknown model: grok-4.5' } };
+			return { success: true, text: JSON.stringify({ choices: [{ index: 0, message: { role: 'assistant', content: 'retried default' }, finish_reason: 'stop' }] }) };
+		},
+	});
+	const grokInvalidResult = await grokInvalidRetry.chat({ model: 'model-relay:grok-cli:grok-4.5', prompt: 'hi' });
+	assert.strictEqual(grokInvalidResult.success, true);
+	assert.deepStrictEqual(grokInvalidModels, ['grok-4.5', 'grok-4.6']);
+	assert.strictEqual(grokInvalidResult.response.model, 'model-relay:grok-cli:grok-4.6');
+	assert.strictEqual(grokInvalidResult.response.choices[0].message.content, 'retried default');
+
+	let grokProbeCount = 0;
+	const stickyGrokCalls = [];
+	const stickyGrok = createGrokCliDriver({
+		detectCliAsync: async (definition) => {
+			grokProbeCount += 1;
+			if (grokProbeCount === 1) return grokReady(definition);
+			return { ...grokReady(definition), ready: false, authenticated: null, state: 'unavailable', diagnostic: 'CLI probe timed out.' };
+		},
+		spawn: captureCliSpawn(stickyGrokCalls),
+	});
+	await stickyGrok.refresh();
+	assert.strictEqual(stickyGrok.capabilities().ready, true);
+	await stickyGrok.refresh();
+	assert.strictEqual(stickyGrok.capabilities().ready, true, 'a timed-out grok models probe must not disable a connected Grok CLI');
+	const stickyBeforeChat = grokProbeCount;
+	const stickyChat = await stickyGrok.chat({ model: 'model-relay:grok-cli:auto', prompt: 'stay ready' });
+	assert.strictEqual(stickyChat.success, true);
+	assert.strictEqual(grokProbeCount, stickyBeforeChat, 'ready Grok chat must not re-probe and disable the CLI');
+	assert.strictEqual(stickyGrokCalls[0].args[stickyGrokCalls[0].args.indexOf('--model') + 1], 'grok-4.6');
+
+	let logoutProbes = 0;
+	const logoutGrok = createGrokCliDriver({
+		detectCliAsync: async (definition) => {
+			logoutProbes += 1;
+			if (logoutProbes === 1) return grokReady(definition);
+			return { ...grokReady(definition), ready: false, authenticated: false, state: 'not_authenticated', diagnostic: 'Not authenticated.' };
+		},
+	});
+	await logoutGrok.refresh();
+	await logoutGrok.refresh();
+	assert.strictEqual(logoutGrok.capabilities().ready, false);
+	assert.strictEqual(logoutGrok.capabilities().state, 'not_authenticated');
+
 	const discoveredGrok = createGrokCliDriver({ detectCliAsync: async (definition) => ({ ...readyCli(definition), models: ['auto', 'grok-4.6', 'grok-4.5'] }) });
 	await discoveredGrok.refresh();
 	assert.deepStrictEqual(discoveredGrok.models().filter((model) => model.type === 'text').map((model) => model.id), ['model-relay:grok-cli:auto', 'model-relay:grok-cli:grok-4.6', 'model-relay:grok-cli:grok-4.5']);
@@ -819,6 +912,51 @@ function captureCliSpawn(calls) {
 		});
 		const missingArtifactResult = await missingArtifact.images({ prompt: 'missing artifact' });
 		assert.strictEqual(missingArtifactResult.code, 'antigravity_image_artifact_missing');
+		const authenticationOutput = {
+			message: 'Authentication required. Please visit https://accounts.google.com/o/oauth2/auth?code_challenge=secret',
+			text: 'Authentication required. Please visit https://accounts.google.com/o/oauth2/auth?code_challenge=secret',
+			stdout: 'Authentication required. Please visit https://accounts.google.com/o/oauth2/auth?code_challenge=secret',
+			stderr: 'Authentication required. Please visit https://accounts.google.com/o/oauth2/auth?code_challenge=secret',
+		};
+		for (const channel of Object.keys(authenticationOutput)) {
+			const authenticationDriver = createAntigravityCliDriver(mediaAnalysis, {
+				...antigravityOptions,
+				runTextCommand: async (command, args) => args[0] === '--help'
+					? { success: true, text: '', stderr: 'Usage: agy.exe --print PROMPT\n  -p  Short alias for --print' }
+					: { success: false, category: 'cli_process', code: 'cli_request_failed', [channel]: authenticationOutput[channel] },
+			});
+			const authenticationResult = await authenticationDriver.images({ prompt: `authentication ${channel}` });
+			assert.strictEqual(authenticationResult.code, 'antigravity_cli_not_authenticated');
+			assert.match(authenticationResult.message, /Run agy interactively/i);
+			assert.doesNotMatch(authenticationResult.message, /accounts\.google\.com|code_challenge/i);
+		}
+		const structuredRoot = path.join(antigravityRoot, 'structured-output');
+		const structuredArtifact = path.join(structuredRoot, 'brain', 'structured-output.jpg');
+		fs.mkdirSync(path.dirname(structuredArtifact), { recursive: true });
+		fs.writeFileSync(structuredArtifact, Buffer.from('structured image'));
+		const structuredDriver = createAntigravityCliDriver(mediaAnalysis, {
+			...antigravityOptions,
+			stateRoot: structuredRoot,
+			runTextCommand: async (command, args) => args[0] === '--help'
+				? { success: true, text: '', stderr: 'Usage: agy.exe --print PROMPT\n  -p  Short alias for --print' }
+				: { success: true, text: JSON.stringify({ response: { image_path: path.relative(structuredRoot, structuredArtifact) } }) },
+		});
+		const structuredImage = await structuredDriver.images({ prompt: 'structured artifact path' });
+		assert.strictEqual(structuredImage.success, true);
+		assert.strictEqual(Buffer.from(structuredImage.response.data[0].b64_json, 'base64').toString(), 'structured image');
+		const unrelatedRoot = path.join(antigravityRoot, 'unrelated-output');
+		const unrelatedArtifact = path.join(unrelatedRoot, 'brain', 'other-request_123.jpg');
+		fs.mkdirSync(path.dirname(unrelatedArtifact), { recursive: true });
+		fs.writeFileSync(unrelatedArtifact, Buffer.from('unrelated image'));
+		const unrelatedDriver = createAntigravityCliDriver(mediaAnalysis, {
+			...antigravityOptions,
+			stateRoot: unrelatedRoot,
+			runTextCommand: async (command, args) => args[0] === '--help'
+				? { success: true, text: '', stderr: 'Usage: agy.exe --print PROMPT\n  -p  Short alias for --print' }
+				: { success: true, text: 'completed without a request-correlated artifact' },
+		});
+		const unrelatedImage = await unrelatedDriver.images({ prompt: 'do not import another job image' });
+		assert.strictEqual(unrelatedImage.code, 'antigravity_image_artifact_missing');
 		const quotaExhausted = createAntigravityCliDriver(mediaAnalysis, {
 			...antigravityOptions,
 			runTextCommand: async (command, args) => args[0] === '--help'

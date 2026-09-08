@@ -5,7 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const codex = require('./codex');
 const { attachDebugHelp } = require('./debug-help');
-const { JobManager, clampMaxConcurrent } = require('./job-manager');
+const { JobManager, clampMaxConcurrent, publicJobsSnapshot } = require('./job-manager');
 const mediaAnalysis = require('./media-analysis');
 const musicAnalysis = require('./music-analysis');
 const localUpscale = require('./local-upscale');
@@ -75,6 +75,7 @@ function createStatusEvents() {
 				events: new Set(options.events || ['jobs']),
 				heartbeatTimer: null,
 				closed: false,
+				includePairedOrigins: options.includePairedOrigins === true,
 			};
 			clients.add(client);
 			res.on('close', () => remove(client));
@@ -114,7 +115,12 @@ function createStatusEvents() {
 			}
 			let data;
 			try {
-				data = JSON.stringify(payload);
+				let outbound = payload;
+				if (event === 'status' && payload && payload.bridge && !client.includePairedOrigins && Object.prototype.hasOwnProperty.call(payload.bridge, 'paired_origins')) {
+					outbound = { ...payload, bridge: { ...payload.bridge } };
+					delete outbound.bridge.paired_origins;
+				}
+				data = JSON.stringify(outbound);
 			} catch (error) {
 				appendLog('server', 'Status event payload could not be serialized.', { event, error: safeError(error) });
 				return;
@@ -136,6 +142,71 @@ function createJobManager(options = {}) {
 		onChange: options.onJobState || (() => sendJobState(manager)),
 	});
 	return manager;
+}
+
+function refererOrigin(req, bridgeSecurity) {
+	try {
+		return bridgeSecurity.normalizeOrigin(new URL(String(req.headers.referer || '')).origin);
+	} catch (error) {
+		return '';
+	}
+}
+
+function corsOrigin(req, bridgeSecurity, options = {}) {
+	const origin = exposeOrigin(req, bridgeSecurity);
+	if (!origin) {
+		return '';
+	}
+	if (isLocalPageOrigin(req, origin)) {
+		return origin;
+	}
+	if (options.bootstrap) {
+		return origin;
+	}
+	if (options.allowPaired === false) {
+		return '';
+	}
+	if (!bridgeSecurity.getPairing(origin)) {
+		return '';
+	}
+	if (req.method === 'OPTIONS' || options.requireToken === false) {
+		return origin;
+	}
+	const token = req.headers['x-alorbach-bridge-token'];
+	return bridgeSecurity.validateBridgeToken(origin, token) ? origin : '';
+}
+
+function isTrustedStatusViewer(req, bridgeSecurity) {
+	const origin = exposeOrigin(req, bridgeSecurity);
+	if (isLocalPageOrigin(req, origin) && origin) {
+		return true;
+	}
+	if (!origin) {
+		const referer = refererOrigin(req, bridgeSecurity);
+		if (referer && isLocalPageOrigin(req, referer)) {
+			return true;
+		}
+	}
+	const token = req.headers['x-alorbach-bridge-token'];
+	return !!(origin && bridgeSecurity.validateBridgeToken(origin, token));
+}
+
+function isLocalStatusViewer(req, bridgeSecurity) {
+	const origin = exposeOrigin(req, bridgeSecurity);
+	if (origin) {
+		return isLocalPageOrigin(req, origin);
+	}
+	const referer = refererOrigin(req, bridgeSecurity);
+	return !!(referer && isLocalPageOrigin(req, referer));
+}
+
+function bridgeMetadata() {
+	return {
+		version: packageInfo.version,
+		product_name: PRODUCT_NAME,
+		short_name: SHORT_NAME,
+		legacy_name: LEGACY_PRODUCT_NAME,
+	};
 }
 
 function sendJson(res, statusCode, payload, origin) {
@@ -211,7 +282,10 @@ function readBody(req, maxBytes) {
 			if (size > maxBytes) {
 				if (!rejected) {
 					rejected = true;
-					reject(new Error('Request body is too large.'));
+					req.pause();
+					const error = new Error('Request body is too large.');
+					error.statusCode = 413;
+					reject(error);
 				}
 				return;
 			}
@@ -231,7 +305,11 @@ function readBody(req, maxBytes) {
 				reject(new Error('Request body was not valid JSON.'));
 			}
 		});
-		req.on('error', reject);
+		req.on('error', (error) => {
+			if (!rejected) {
+				reject(error);
+			}
+		});
 	});
 }
 
@@ -242,11 +320,18 @@ function readBinaryBody(req, maxBytes) {
 		req.on('data', (chunk) => {
 			if (rejected) return;
 			size += chunk.length;
-			if (size > maxBytes) { rejected = true; reject(new Error('Binary transfer exceeds the local upscale limit.')); return; }
+			if (size > maxBytes) {
+				rejected = true;
+				req.pause();
+				const error = new Error('Binary transfer exceeds the local upscale limit.');
+				error.statusCode = 413;
+				reject(error);
+				return;
+			}
 			chunks.push(chunk);
 		});
 		req.on('end', () => { if (!rejected) resolve(Buffer.concat(chunks)); });
-		req.on('error', reject);
+		req.on('error', (error) => { if (!rejected) reject(error); });
 	});
 }
 
@@ -269,16 +354,12 @@ function exposeOrigin(req, bridgeSecurity) {
 	return bridgeSecurity.normalizeOrigin(req.headers.origin || '');
 }
 
-function pairedOriginForCors(req, bridgeSecurity) {
-	const origin = exposeOrigin(req, bridgeSecurity);
-	return origin && bridgeSecurity.getPairing(origin) ? origin : '';
-}
-
 function requirePairing(req, res, bridgeSecurity) {
 	const origin = exposeOrigin(req, bridgeSecurity);
 	const token = req.headers['x-alorbach-bridge-token'];
+	const allowedOrigin = corsOrigin(req, bridgeSecurity);
 	if (!origin || !bridgeSecurity.validateBridgeToken(origin, token)) {
-		sendErrorJson(req, res, 403, { success: false, message: 'This WordPress origin is not paired with the local Codex bridge.' }, origin);
+		sendErrorJson(req, res, 403, { success: false, message: 'This WordPress origin is not paired with the local Codex bridge.' }, allowedOrigin);
 		return null;
 	}
 	return origin;
@@ -321,19 +402,28 @@ function capabilitiesPayload(context) {
 }
 
 function statusPayload(context, options = {}) {
+	const includePairedOrigins = options.includePairedOrigins === true;
+	const includeDiagnostics = options.includeDiagnostics !== false;
+	const jobs = includeDiagnostics ? context.jobManager.snapshot() : publicJobsSnapshot(context.jobManager.snapshot());
 	if (context.statusCache) {
-		const cached = context.statusCache.status();
-		if (options.includePairedOrigins !== false) cached.bridge = { ...(cached.bridge || {}), paired_origins: Object.keys(context.security.getPairings()) };
-		return cached;
+		const cachedStatus = context.statusCache.status();
+		const cached = includeDiagnostics ? cachedStatus : publicStatusProjection(cachedStatus);
+		const bridge = {
+			...bridgeMetadata(),
+			...(cached.bridge || {}),
+			...bridgeMetadata(),
+		};
+		if (includePairedOrigins) {
+			bridge.paired_origins = Object.keys(context.security.getPairings());
+		} else {
+			delete bridge.paired_origins;
+		}
+		return { ...cached, bridge, jobs };
 	}
-	const status = context.codex.checkStatus();
-	const bridge = {
-		version: packageInfo.version,
-		product_name: PRODUCT_NAME,
-		short_name: SHORT_NAME,
-		legacy_name: LEGACY_PRODUCT_NAME,
-	};
-	if (options.includePairedOrigins !== false) {
+	const checkedStatus = context.codex.checkStatus();
+	const status = includeDiagnostics ? checkedStatus : publicStatusProjection(checkedStatus);
+	const bridge = bridgeMetadata();
+	if (includePairedOrigins) {
 		bridge.paired_origins = Object.keys(context.security.getPairings());
 	}
 	return {
@@ -341,8 +431,16 @@ function statusPayload(context, options = {}) {
 		bridge,
 		asr: context.codex.asrStatus ? context.codex.asrStatus() : {},
 		music_analysis: context.musicAnalysis.capabilities ? context.musicAnalysis.capabilities() : {},
-		jobs: context.jobManager.snapshot(),
+		jobs,
 	};
+}
+
+function publicStatusProjection(status) {
+	if (!status || typeof status !== 'object') {
+		return status;
+	}
+	const { details, ...publicStatus } = status;
+	return publicStatus;
 }
 
 function modelsPayload(context) {
@@ -356,8 +454,10 @@ function modelsPayload(context) {
 	const backendDrivers = context.backends.capabilities ? context.backends.capabilities() : [];
 	modelPayload.models.relay = backendModels.map((model) => model.id);
 	/* Image clients look up both the model id and the driver id (entry.backend,
-	 * e.g. grok-cli) inside this same backends array. */
-	modelPayload.backends = [...backendDrivers, ...backendModels];
+	 * e.g. grok-cli) inside this same backends array. Publish models first so a
+	 * naive includes(grok-cli) search hits model-relay:grok-cli:image before the
+	 * driver record, which is not a complete image capability contract. */
+	modelPayload.backends = [...backendModels, ...backendDrivers];
 	modelPayload.image_capability_contract_version = IMAGE_CAPABILITY_CONTRACT_VERSION;
 	modelPayload.image_capability_minimum_relay_version = '1.0.10';
 	modelPayload.bridge = { ...(modelPayload.bridge || {}), version: packageInfo.version };
@@ -451,11 +551,21 @@ const STATUS_PAGE_MUTATORS = new Set([
 	'/v1/upscale/setup',
 	'/v1/music-analysis/settings',
 	'/v1/music-analysis/setup',
+	'/v1/relay/settings',
+	'/v1/relay/refresh',
+	'/v1/relay/test',
+]);
+const STATUS_BOOTSTRAP_PATHS = new Set([
+	'/v1/status',
+	'/v1/relay/status',
+	'/v1/capabilities',
+	'/v1/relay/capabilities',
+	'/v1/pair',
 ]);
 const setupLocks = new Set();
 
 function isLocalPageOrigin(req, origin) {
-	if (!origin) return true;
+	if (!origin) return false;
 	let parsed;
 	try { parsed = new URL(origin); } catch (error) { return false; }
 	if (parsed.protocol !== 'http:') return false;
@@ -474,6 +584,29 @@ function requireLocalPageOrigin(req, res, origin) {
 	if (isLocalPageOrigin(req, origin)) return true;
 	sendErrorJson(req, res, 403, { success: false, message: 'Status-page install and settings are only accepted from the local Relay page.' });
 	return false;
+}
+
+function pairingLimiterFor(context, req, requesterOrigin, targetOrigin) {
+	const address = String(req.socket && req.socket.remoteAddress || '').trim() || 'unknown';
+	const key = `${address}|${requesterOrigin || '-'}|${targetOrigin || '-'}`;
+	if (!context.pairingLimiters) {
+		context.pairingLimiters = new Map();
+	}
+	const existing = context.pairingLimiters.get(key);
+	if (existing) {
+		return existing;
+	}
+	while (context.pairingLimiters.size >= 256) {
+		const oldest = context.pairingLimiters.keys().next().value;
+		if (oldest === undefined) break;
+		context.pairingLimiters.delete(oldest);
+	}
+	const createLimiter = context.security && typeof context.security.createPairingLimiter === 'function'
+		? context.security.createPairingLimiter
+		: security.createPairingLimiter;
+	const limiter = createLimiter();
+	context.pairingLimiters.set(key, limiter);
+	return limiter;
 }
 
 function acquireSetupLock(key) {
@@ -517,7 +650,11 @@ async function route(req, res, context) {
 			sendJson(res, 204, {}, origin);
 			return;
 		}
-		sendJson(res, 204, {}, origin || pairedOriginForCors(req, bridgeSecurity));
+		if (STATUS_BOOTSTRAP_PATHS.has(url.pathname)) {
+			sendJson(res, 204, {}, corsOrigin(req, bridgeSecurity, { bootstrap: true }));
+			return;
+		}
+		sendJson(res, 204, {}, corsOrigin(req, bridgeSecurity));
 		return;
 	}
 	if (req.method === 'GET' && url.pathname === '/favicon.ico') {
@@ -530,6 +667,17 @@ async function route(req, res, context) {
 	}
 	const artifactMatch = url.pathname.match(/^\/v1\/status\/jobs\/(\d+)\/artifacts\/(\d+)$/);
 	if (req.method === 'GET' && artifactMatch) {
+		if (!isLocalStatusViewer(req, bridgeSecurity)) {
+			const pairedOrigin = requirePairing(req, res, bridgeSecurity);
+			if (!pairedOrigin) return;
+			const artifact = jobManager.artifact(artifactMatch[1], artifactMatch[2], pairedOrigin);
+			if (!artifact) {
+				sendJson(res, 404, { success: false, message: 'Generated job artifact was not found.' }, pairedOrigin);
+				return;
+			}
+			sendArtifact(res, artifact, pairedOrigin);
+			return;
+		}
 		const artifact = jobManager.artifact(artifactMatch[1], artifactMatch[2]);
 		if (!artifact) {
 			sendJson(res, 404, { success: false, message: 'Generated job artifact was not found.' });
@@ -552,41 +700,47 @@ async function route(req, res, context) {
 	}
 
 	if (req.method === 'GET' && (url.pathname === '/v1/status' || url.pathname === '/v1/relay/status')) {
-		const status = statusPayload(context);
-		sendJson(res, status.success ? 200 : 503, status, origin || pairedOriginForCors(req, bridgeSecurity));
+		const trusted = isTrustedStatusViewer(req, bridgeSecurity);
+		const localViewer = isLocalStatusViewer(req, bridgeSecurity);
+		const status = statusPayload(context, {
+			includePairedOrigins: localViewer,
+			includeDiagnostics: trusted,
+		});
+		sendJson(res, status.success ? 200 : 503, status, corsOrigin(req, bridgeSecurity, { bootstrap: true }));
 		return;
 	}
 
 	if (req.method === 'GET' && (url.pathname === '/v1/capabilities' || url.pathname === '/v1/relay/capabilities')) {
-		sendJson(res, 200, capabilitiesPayload(context), origin || pairedOriginForCors(req, bridgeSecurity));
+		sendJson(res, 200, capabilitiesPayload(context), corsOrigin(req, bridgeSecurity, { bootstrap: true }));
 		return;
 	}
 
 	if (req.method === 'GET' && url.pathname === '/v1/asr/settings') {
 		const payload = context.codex.asrSettings ? context.codex.asrSettings({ refresh: url.searchParams.get('refresh') === '1' }) : { success: false, message: 'ASR settings are unavailable.' };
-		sendJson(res, payload.success === false ? 500 : 200, payload, origin || pairedOriginForCors(req, bridgeSecurity));
+		sendJson(res, payload.success === false ? 500 : 200, payload, corsOrigin(req, bridgeSecurity));
 		return;
 	}
 	if (req.method === 'GET' && url.pathname === '/v1/music-analysis/settings') {
 		const payload = context.musicAnalysis.publicSettings ? context.musicAnalysis.publicSettings({ refresh: url.searchParams.get('refresh') === '1' }) : { success: false, message: 'Music analysis settings are unavailable.' };
-		sendJson(res, payload.success === false ? 500 : 200, payload, origin || pairedOriginForCors(req, bridgeSecurity));
+		sendJson(res, payload.success === false ? 500 : 200, payload, corsOrigin(req, bridgeSecurity));
 		return;
 	}
 	if (req.method === 'GET' && url.pathname === '/v1/upscale/settings') {
 		const payload = context.localUpscale.publicSettings ? context.localUpscale.publicSettings() : { success: false, message: 'Local upscale settings are unavailable.' };
-		sendJson(res, payload.success === false ? 500 : 200, payload, origin || pairedOriginForCors(req, bridgeSecurity));
+		sendJson(res, payload.success === false ? 500 : 200, payload, corsOrigin(req, bridgeSecurity));
 		return;
 	}
 	if (req.method === 'GET' && url.pathname === '/v1/relay/settings') {
-		sendJson(res, 200, { success: true, settings: context.relaySettings.settings(), models: context.backends.models(), backends: context.backends.capabilities() }, origin || pairedOriginForCors(req, bridgeSecurity));
+		sendJson(res, 200, { success: true, settings: context.relaySettings.settings(), models: context.backends.models(), backends: context.backends.capabilities() }, corsOrigin(req, bridgeSecurity));
 		return;
 	}
 
 	if (req.method === 'GET' && url.pathname === '/v1/status/events') {
 		context.statusEvents.add(res, {
+			includePairedOrigins: true,
 			events: ['status', 'capabilities', 'jobs'],
 			initialEvents: [
-				['status', statusPayload(context)],
+				['status', statusPayload(context, { includePairedOrigins: true, includeDiagnostics: true })],
 				['capabilities', capabilitiesPayload(context)],
 				['jobs', jobManager.snapshot()],
 			],
@@ -603,7 +757,7 @@ async function route(req, res, context) {
 			origin: pairedOrigin,
 			events: ['status', 'capabilities', 'jobs'],
 			initialEvents: [
-				['status', statusPayload(context, { includePairedOrigins: false })],
+				['status', statusPayload(context, { includePairedOrigins: false, includeDiagnostics: true })],
 				['capabilities', capabilitiesPayload(context)],
 				['jobs', jobManager.snapshot()],
 			],
@@ -635,7 +789,7 @@ async function route(req, res, context) {
 			return;
 		}
 		let bytes;
-		try { bytes = await readBinaryBody(req, 64 * 1024 * 1024); } catch (error) { sendErrorJson(req, res, 413, { success: false, category: 'validation', message: error.message || 'Binary transfer failed.' }, pairedOrigin, { requestId, route: url.pathname }); return; }
+		try { bytes = await readBinaryBody(req, 64 * 1024 * 1024); } catch (error) { sendErrorJson(req, res, error && error.statusCode === 413 ? 413 : 400, { success: false, category: 'validation', message: error.message || 'Binary transfer failed.' }, pairedOrigin, { requestId, route: url.pathname }); try { req.destroy(); } catch (destroyError) {} return; }
 		if (!bytes.length) { sendErrorJson(req, res, 400, { success: false, category: 'validation', message: 'The local-upscale source body is empty.' }, pairedOrigin, { requestId, route: url.pathname }); return; }
 		const resolved = relayPayloadFor(context, 'upscale', { ...payload, source_bytes: bytes, source_mime_type: mimeType });
 		if (resolved.error) { sendErrorJson(req, res, errorStatusForResult(resolved.error), resolved.error, pairedOrigin, { requestId, route: url.pathname }); return; }
@@ -658,7 +812,9 @@ async function route(req, res, context) {
 	try {
 		body = await readBody(req, bridgeSecurity.MAX_BODY_BYTES || security.MAX_BODY_BYTES);
 	} catch (error) {
-		sendErrorJson(req, res, 400, { success: false, message: error.message || 'Invalid request.' }, origin);
+		const statusCode = error && error.statusCode === 413 ? 413 : 400;
+		sendErrorJson(req, res, statusCode, { success: false, message: error.message || 'Invalid request.' }, corsOrigin(req, bridgeSecurity));
+		try { req.destroy(); } catch (destroyError) {}
 		return;
 	}
 
@@ -681,14 +837,23 @@ async function route(req, res, context) {
 
 	if (url.pathname === '/v1/pair') {
 		const safeOrigin = bridgeSecurity.normalizeOrigin(body.origin || origin);
+		const pairCors = safeOrigin && origin === safeOrigin ? safeOrigin : '';
 		if (!safeOrigin) {
-			sendErrorJson(req, res, 400, { success: false, message: 'A valid WordPress origin is required.' }, origin);
+			sendErrorJson(req, res, 400, { success: false, message: 'A valid WordPress origin is required.' }, pairCors);
 			return;
 		}
-		if (String(body.pairing_code || '') !== pairingCode) {
-			sendErrorJson(req, res, 403, { success: false, message: 'Pairing code did not match the local tray app.' }, safeOrigin);
+		const limiter = pairingLimiterFor(context, req, origin, safeOrigin);
+		if (limiter && !limiter.allow()) {
+			const retryAfterMs = limiter.retryAfterMs ? limiter.retryAfterMs() : 0;
+			sendErrorJson(req, res, 429, { success: false, category: 'rate_limit', code: 'pairing_rate_limited', message: 'Too many pairing attempts. Wait and retry.', retry_after_ms: retryAfterMs }, pairCors);
 			return;
 		}
+		if (!security.timingSafeEqual(String(body.pairing_code || ''), pairingCode)) {
+			if (limiter) limiter.recordFailure();
+			sendErrorJson(req, res, 403, { success: false, message: 'Pairing code did not match the local tray app.' }, pairCors);
+			return;
+		}
+		if (limiter) limiter.reset();
 		const token = bridgeSecurity.createToken();
 		bridgeSecurity.savePairing(safeOrigin, token);
 		pairingCode = bridgeSecurity.createPairingCode();
@@ -714,7 +879,7 @@ async function route(req, res, context) {
 		}
 		const settings = context.codex.saveAsrSettings(body.settings || body || {});
 		const payload = context.codex.asrSettings();
-		context.statusEvents.broadcast('status', statusPayload(context));
+		context.statusEvents.broadcast('status', statusPayload(context, { includePairedOrigins: true }));
 		context.statusEvents.broadcast('capabilities', capabilitiesPayload(context));
 		sendJson(res, 200, { success: true, settings, capabilities: payload.capabilities }, origin);
 		return;
@@ -729,7 +894,7 @@ async function route(req, res, context) {
 			context.codex.asrStatus({ refresh: true });
 		}
 		context.statusCache.sync();
-		context.statusEvents.broadcast('status', statusPayload(context));
+		context.statusEvents.broadcast('status', statusPayload(context, { includePairedOrigins: true }));
 		context.statusEvents.broadcast('capabilities', capabilitiesPayload(context));
 		if (!result.success) {
 			sendErrorJson(req, res, errorStatusForResult(result), result, origin, { route: url.pathname });
@@ -745,7 +910,7 @@ async function route(req, res, context) {
 		}
 		const settings = context.musicAnalysis.saveSettings(body.settings || body || {});
 		const payload = context.musicAnalysis.publicSettings();
-		context.statusEvents.broadcast('status', statusPayload(context));
+		context.statusEvents.broadcast('status', statusPayload(context, { includePairedOrigins: true }));
 		context.statusEvents.broadcast('capabilities', capabilitiesPayload(context));
 		sendJson(res, 200, { success: true, settings, capabilities: payload.capabilities }, origin);
 		return;
@@ -757,7 +922,7 @@ async function route(req, res, context) {
 		}
 		const result = await withSetupLock('music-analysis', () => context.musicAnalysis.setup());
 		context.statusCache.sync();
-		context.statusEvents.broadcast('status', statusPayload(context));
+		context.statusEvents.broadcast('status', statusPayload(context, { includePairedOrigins: true }));
 		context.statusEvents.broadcast('capabilities', capabilitiesPayload(context));
 		if (!result.success) {
 			sendErrorJson(req, res, errorStatusForResult(result), result, origin, { route: url.pathname });
@@ -776,7 +941,7 @@ async function route(req, res, context) {
 		if (driver && driver.refresh) await driver.refresh();
 		const payload = context.localUpscale.publicSettings();
 		context.statusCache.sync();
-		context.statusEvents.broadcast('status', statusPayload(context));
+		context.statusEvents.broadcast('status', statusPayload(context, { includePairedOrigins: true }));
 		context.statusEvents.broadcast('capabilities', capabilitiesPayload(context));
 		sendJson(res, 200, { success: true, settings, models: payload.models, capabilities: payload }, origin);
 		return;
@@ -790,7 +955,7 @@ async function route(req, res, context) {
 		const driver = context.backends && context.backends.getDriverById ? context.backends.getDriverById('local-upscale') : null;
 		if (driver && driver.refresh) await driver.refresh();
 		context.statusCache.sync();
-		context.statusEvents.broadcast('status', statusPayload(context));
+		context.statusEvents.broadcast('status', statusPayload(context, { includePairedOrigins: true }));
 		context.statusEvents.broadcast('capabilities', capabilitiesPayload(context));
 		if (!result.success) {
 			sendErrorJson(req, res, errorStatusForResult(result), result, origin, { route: url.pathname });
@@ -806,16 +971,16 @@ async function route(req, res, context) {
 		context.rebuildBackends();
 		context.statusCache.sync();
 		if (cliPathsChanged) context.statusCache.refresh();
-		context.statusEvents.broadcast('status', statusPayload(context));
+		context.statusEvents.broadcast('status', statusPayload(context, { includePairedOrigins: true }));
 		context.statusEvents.broadcast('capabilities', capabilitiesPayload(context));
-		sendJson(res, 200, { success: true, settings, models: context.backends.models(), backends: context.backends.capabilities(), refresh_started: cliPathsChanged, refresh: context.statusCache.status().refresh || null }, origin || pairedOriginForCors(req, bridgeSecurity));
+		sendJson(res, 200, { success: true, settings, models: context.backends.models(), backends: context.backends.capabilities(), refresh_started: cliPathsChanged, refresh: context.statusCache.status().refresh || null }, origin);
 		return;
 	}
 	if (url.pathname === '/v1/relay/refresh') {
 		context.rebuildBackends();
 		context.statusCache.refresh();
 		const current = context.statusCache.status();
-		sendJson(res, 202, { success: true, checking: true, refresh: current.refresh || null }, origin || pairedOriginForCors(req, bridgeSecurity));
+		sendJson(res, 202, { success: true, checking: true, refresh: current.refresh || null }, origin);
 		return;
 	}
 	if (url.pathname === '/v1/relay/test') {
@@ -861,6 +1026,7 @@ async function route(req, res, context) {
 			requestId,
 			type: jobType,
 			model: modelFromPayload(resolved.payload, model),
+			origin,
 			...display,
 		}, (session) => context.backends.run(jobType, resolved.payload, session));
 		context.statusCache.sync();
@@ -890,6 +1056,7 @@ async function route(req, res, context) {
 			requestId: body.request_id,
 			type: 'chat',
 			model: modelFromPayload(resolved.payload, 'codex-local:auto'),
+			origin: pairedOrigin,
 			...display,
 		}, (session) => isRelayRoute ? context.backends.run('chat', resolved.payload, session) : codexAdapter.chat(resolved.payload, session));
 		if (!result.success) {
@@ -908,6 +1075,7 @@ async function route(req, res, context) {
 			requestId: body.request_id,
 			type: 'images',
 			model: modelFromPayload(resolved.payload, 'codex-local:image'),
+			origin: pairedOrigin,
 			...display,
 		}, (session) => isRelayRoute ? context.backends.run('images', resolved.payload, session) : codexAdapter.images(resolved.payload, session));
 		if (!result.success) {
@@ -926,6 +1094,7 @@ async function route(req, res, context) {
 			requestId: body.request_id,
 			type: 'transcribe',
 			model: modelFromPayload(resolved.payload, 'local-asr'),
+			origin: pairedOrigin,
 			...display,
 		}, (session) => isRelayRoute ? context.backends.run('transcribe', resolved.payload, session) : codexAdapter.transcribe(resolved.payload, session));
 		if (!result.success) {
@@ -944,6 +1113,7 @@ async function route(req, res, context) {
 			requestId: body.request_id,
 			type: 'videos',
 			model: modelFromPayload(resolved.payload, 'sora-2'),
+			origin: pairedOrigin,
 			...display,
 		}, (session) => isRelayRoute ? context.backends.run('videos', resolved.payload, session) : context.video.run(resolved.payload, session));
 		if (!result.success) {
@@ -962,6 +1132,7 @@ async function route(req, res, context) {
 			requestId: body.request_id,
 			type: 'media_analysis',
 			model: modelFromPayload(resolved.payload, 'codex-local:auto'),
+			origin: pairedOrigin,
 			...display,
 		}, (session) => isRelayRoute ? context.backends.run('media.analyze', resolved.payload, session) : context.mediaAnalysis.analyze(resolved.payload, codexAdapter, session));
 		if (!result.success) {
@@ -980,6 +1151,7 @@ async function route(req, res, context) {
 			requestId: body.request_id,
 			type: 'music_analysis',
 			model: modelFromPayload(resolved.payload, 'model-relay:music-analysis:core'),
+			origin: pairedOrigin,
 			...display,
 		}, (session) => isRelayRoute ? context.backends.run('music.analyze', resolved.payload, session) : context.musicAnalysis.analyze(resolved.payload, session));
 		if (!result.success) {
@@ -1026,6 +1198,7 @@ function createServer(options = {}) {
 		jobManager: options.jobManager || createJobManager({ ...options, onJobState }),
 		statusEvents,
 		relaySettings: options.relaySettings || relaySettings,
+		pairingLimiters: new Map(),
 	};
 	context.usesProvidedBackends = !!options.backends;
 	context.rebuildBackends = () => {
@@ -1048,7 +1221,7 @@ function createServer(options = {}) {
 	};
 	context.backends = options.backends || null;
 	context.rebuildBackends();
-	context.statusCache = options.statusCache || createStatusCache(context, (status, capabilities) => { context.statusEvents.broadcast('status', statusPayload(context)); context.statusEvents.broadcast('capabilities', capabilitiesPayload(context)); });
+	context.statusCache = options.statusCache || createStatusCache(context, (status, capabilities) => { context.statusEvents.broadcast('status', statusPayload(context, { includePairedOrigins: true })); context.statusEvents.broadcast('capabilities', capabilitiesPayload(context)); });
 	if (options.backgroundRefresh !== false) {
 		const initialRefreshTimer = setTimeout(() => context.statusCache.refresh(), 1000);
 		if (typeof initialRefreshTimer.unref === 'function') initialRefreshTimer.unref();
@@ -1112,5 +1285,6 @@ module.exports = {
 	createStatusEvents,
 	createJobManager,
 	getPairingCode: () => pairingCode,
+	publicStatusProjection,
 	startServer,
 };

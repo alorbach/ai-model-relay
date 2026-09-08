@@ -6,16 +6,50 @@ const path = require('path');
 const { randomUUID } = require('crypto');
 const { spawn } = require('child_process');
 const { createBoundedCollector } = require('./diagnostics');
-const { detectCli, detectCliAsync, materializeChatImages, messagesToPromptJson, messagesToText, runTextCommand, writePromptFile } = require('./local-cli');
+const { killProcessTree } = require('./cuda-torch-venv');
+const { detectCli, detectCliAsync, materializeChatImages, messagesToPromptJson, messagesToText, retainCliReadiness, runTextCommand, writePromptFile } = require('./local-cli');
 const { createLocalUpscaleDriver } = require('./local-upscale');
 const { resolveMaxTokens } = require('./token-policy');
-const { IMAGE_CAPABILITY_CONTRACT_VERSION, imageCapabilityContract, isCompleteImageCapabilityContract, normalizeImageOutputFormat, normalizeImagePayloadForModel, relayCatalogEntrySupportsImages } = require('./image-capabilities');
+const { IMAGE_CAPABILITY_CONTRACT_VERSION, imageCapabilityContract, isCompleteImageCapabilityContract, findRelayImageModel, normalizeImageOutputFormat, normalizeImagePayloadForModel, relayCatalogEntrySupportsImages } = require('./image-capabilities');
 const { readImageDimensions } = require('./image-dimensions');
+const { antigravityAuthenticationFailure, antigravityResultText, createAntigravityImageArtifactResolver, findAntigravityImagePath, isAntigravityAuthenticationError } = require('./antigravity-cli');
 
 const RELAY_MODEL_PREFIX = 'model-relay';
 const GROK_MEDIA_TIMEOUT_MS = 450000;
 const MAX_AUDIO_BASE64_LENGTH = 67108864;
 const MAX_CLI_PROMPT_JSON_ARG_CHARS = 8192;
+const PROVIDER_FETCH_TIMEOUT_MS = Number(process.env.AI_MODEL_RELAY_PROVIDER_FETCH_TIMEOUT_MS || 60000);
+const MAX_PROVIDER_DOWNLOAD_BYTES = 100 * 1024 * 1024;
+
+function withFetchTimeout(fetchImpl, timeoutMs = PROVIDER_FETCH_TIMEOUT_MS) {
+	if (typeof fetchImpl !== 'function') return fetchImpl;
+	return (url, options = {}) => fetchImpl(url, { ...options, signal: options.signal || AbortSignal.timeout(timeoutMs) });
+}
+
+async function readBoundedBytes(response, maxBytes = MAX_PROVIDER_DOWNLOAD_BYTES) {
+	const length = Number(response && response.headers && typeof response.headers.get === 'function' ? response.headers.get('content-length') || 0 : 0);
+	if (length > maxBytes) throw new Error('Provider download exceeds the maximum size.');
+	if (response && response.body && typeof response.body.getReader === 'function') {
+		const reader = response.body.getReader();
+		const chunks = [];
+		let size = 0;
+		while (true) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			const chunk = Buffer.from(value);
+			size += chunk.length;
+			if (size > maxBytes) {
+				try { await reader.cancel(); } catch (error) {}
+				throw new Error('Provider download exceeds the maximum size.');
+			}
+			chunks.push(chunk);
+		}
+		return chunks.length ? Buffer.concat(chunks) : Buffer.alloc(0);
+	}
+	const bytes = Buffer.from(await response.arrayBuffer());
+	if (bytes.length > maxBytes) throw new Error('Provider download exceeds the maximum size.');
+	return bytes;
+}
 
 function truthy(value) {
 	return /^(1|true|yes|on)$/i.test(String(value || ''));
@@ -597,6 +631,26 @@ function cliModelFromRelay(model, provider) {
 	return value.startsWith(prefix) ? value.slice(prefix.length) || 'auto' : 'auto';
 }
 
+function grokCliDefaultModel(state = {}) {
+	const known = (state.models || []).filter((id) => id && id !== 'auto');
+	return String(state.default_model || known[0] || '').trim();
+}
+
+function resolveGrokNativeModel(requested, state = {}) {
+	const known = (state.models || []).filter((id) => id && id !== 'auto');
+	const defaultModel = grokCliDefaultModel(state);
+	if (!requested || requested === 'auto' || !known.includes(requested)) {
+		return defaultModel || requested || 'auto';
+	}
+	return requested;
+}
+
+function isInvalidCliModelFailure(result) {
+	const details = result && result.details && typeof result.details === 'object' ? result.details : {};
+	const message = [result && result.message, details.stderr, details.stdout, result && result.text].filter(Boolean).join('\n');
+	return /unknown model|invalid model|unrecognized model|model .* not (?:found|available|supported)|no such model/i.test(message);
+}
+
 function createNamedCliDriver(definition, options = {}) {
 	let cached = { id: definition.id, label: definition.label, kind: 'local-cli', installed: null, ready: false, state: 'checking', diagnostic: 'Checking in background.', models: definition.models || ['auto'], job_types: definition.jobTypes || ['chat'] };
 	const detector = options.detectCliAsync || detectCliAsync;
@@ -616,11 +670,17 @@ function createNamedCliDriver(definition, options = {}) {
 			const state = detect();
 			return (state.models && state.models.length ? state.models : ['auto']).map((id) => ({ id: relayModel(definition.id, id), type: 'text', backend: definition.id, ready: state.ready, job_types: definition.jobTypes || ['chat'] }));
 		},
-		refresh: async () => { cached = await detector(definition, { ...options, timeoutMs: Number(options.timeoutMs || process.env.AI_MODEL_RELAY_CLI_PROBE_TIMEOUT_MS || 10000) }); return cached; },
+		refresh: async () => {
+			const previous = cached;
+			cached = retainCliReadiness(previous, await detector(definition, { ...options, timeoutMs: Number(options.timeoutMs || process.env.AI_MODEL_RELAY_CLI_PROBE_TIMEOUT_MS || 10000) }));
+			return cached;
+		},
 		async chat(payload = {}, session = {}) {
-			const state = await this.refresh();
+			let state = detect();
+			if (state.ready !== true) state = await this.refresh();
 			if (!state.ready) return { success: false, category: 'configuration', code: `${definition.id}_unavailable`, message: `${definition.label} is unavailable: ${state.diagnostic}` };
-			const model = cliModelFromRelay(payload.model, definition.id);
+			const requested = cliModelFromRelay(payload.model, definition.id);
+			let model = typeof definition.nativeModel === 'function' ? definition.nativeModel(requested, state) || requested : requested;
 			const workspace = fs.mkdtempSync(path.join(os.tmpdir(), `ai-model-relay-${definition.id}-`));
 			try {
 				const materialized = materializeChatImages(payload, workspace);
@@ -628,8 +688,15 @@ function createNamedCliDriver(definition, options = {}) {
 				const prompt = messagesToText(payload, { imageReferences: materialized.references });
 				const promptPath = writePromptFile(workspace, prompt);
 				const request = { prompt, promptPath, workspace, imageReferences: materialized.references, promptJsonSupported: state.prompt_json_supported === true, promptJson: state.prompt_json_supported === true ? messagesToPromptJson(payload, materialized.references) : null };
-				const args = definition.requestArgs(model, promptPath, workspace, request);
-				const result = await commandRunner(state.command, args, '', session, { ...options, cwd: workspace });
+				const runWithModel = (nativeModel) => commandRunner(state.command, definition.requestArgs(nativeModel, promptPath, workspace, request), '', session, { ...options, cwd: workspace });
+				let result = await runWithModel(model);
+				if (!result.success && definition.retryInvalidModel && isInvalidCliModelFailure(result)) {
+					const fallback = String((typeof definition.defaultNativeModel === 'function' && definition.defaultNativeModel(state)) || state.default_model || '').trim();
+					if (fallback && fallback !== 'auto' && fallback !== model) {
+						result = await runWithModel(fallback);
+						if (result.success) model = fallback;
+					}
+				}
 				if (!result.success) return result;
 				let parsed = null; try { parsed = JSON.parse(result.text); } catch (error) {}
 				return normalizeChatResponse(definition.id, model, parsed, result.text);
@@ -639,10 +706,10 @@ function createNamedCliDriver(definition, options = {}) {
 }
 
 function createGrokCliDriver(options = {}) {
-	const definition = { id: 'grok-cli', label: 'Grok CLI', candidates: [options.command, process.env.AI_MODEL_RELAY_GROK_BINARY, 'grok'], versionArgs: ['--version'], authArgs: ['models'], jobTypes: ['chat'], models: ['auto'], requestArgs: (model, promptPath, workspace, request = {}) => {
+	const definition = { id: 'grok-cli', label: 'Grok CLI', candidates: [options.command, process.env.AI_MODEL_RELAY_GROK_BINARY, 'grok'], versionArgs: ['--version'], authArgs: ['models'], jobTypes: ['chat'], models: ['auto'], nativeModel: resolveGrokNativeModel, defaultNativeModel: grokCliDefaultModel, retryInvalidModel: true, requestArgs: (model, promptPath, workspace, request = {}) => {
 		const promptJson = request.promptJsonSupported && request.promptJson ? JSON.stringify(request.promptJson) : '';
 		const usePromptJson = !!promptJson && promptJson.length <= MAX_CLI_PROMPT_JSON_ARG_CHARS;
-		return [usePromptJson ? '--prompt-json' : '--prompt-file', usePromptJson ? promptJson : promptPath, '--output-format', 'json', '--cwd', workspace, '--disallowed-tools', 'run_terminal_cmd', '--permission-mode', 'dontAsk', '--no-subagents', '--disable-web-search', ...(model !== 'auto' ? ['--model', model] : [])];
+		return [usePromptJson ? '--prompt-json' : '--prompt-file', usePromptJson ? promptJson : promptPath, '--output-format', 'json', '--cwd', workspace, '--disallowed-tools', 'run_terminal_cmd', '--permission-mode', 'dontAsk', '--no-subagents', '--disable-web-search', ...(model && model !== 'auto' ? ['--model', model] : [])];
 	} };
 	const configuredMediaTimeout = Number(options.mediaTimeoutMs || process.env.AI_MODEL_RELAY_GROK_MEDIA_TIMEOUT_MS || GROK_MEDIA_TIMEOUT_MS);
 	const mediaTimeoutMs = Number.isFinite(configuredMediaTimeout) && configuredMediaTimeout > 0 ? configuredMediaTimeout : GROK_MEDIA_TIMEOUT_MS;
@@ -837,7 +904,8 @@ function createGrokCliDriver(options = {}) {
 		return { ...state, prompt_json_supported: promptJsonSupported, imagine };
 	};
 	async function media(kind, payload = {}, session = {}) {
-		const state = await driver.refresh();
+		let state = driver.capabilities();
+		if (state.ready !== true) state = await driver.refresh();
 		if (!state.ready) return { success: false, category: 'configuration', code: 'grok_cli_unavailable', message: `Grok CLI is unavailable: ${state.diagnostic}` };
 		if (!driver.supports(kind)) return { success: false, category: 'configuration', code: 'grok_imagine_unavailable', message: `Grok ${kind === 'images' ? 'image' : 'video'} generation is unavailable: ${imagine.diagnostic}` };
 		const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-model-relay-grok-'));
@@ -916,6 +984,7 @@ function createAntigravityCliDriver(mediaAnalysis, options = {}) {
 	const imageTimeoutMs = Number(options.imageTimeoutMs || process.env.AI_MODEL_RELAY_ANTIGRAVITY_IMAGE_TIMEOUT_MS || 1800000);
 	const mediaTimeoutMs = Number(options.mediaTimeoutMs || process.env.AI_MODEL_RELAY_ANTIGRAVITY_MEDIA_TIMEOUT_MS || 600000);
 	const chatTimeoutMs = Number(options.chatTimeoutMs || process.env.AI_MODEL_RELAY_ANTIGRAVITY_CHAT_TIMEOUT_MS || 600000);
+	const artifactResolver = createAntigravityImageArtifactResolver({ stateRoot, maxBytes: MAX_IMAGE_REFERENCE_BYTES });
 	let snapshot = { id: definition.id, label: definition.label, kind: 'local-cli', installed: null, ready: false, authenticated: null, state: 'checking', diagnostic: 'Checking Antigravity CLI in background.', job_types: definition.jobTypes, features: {} };
 
 	function imageExtension(mime) {
@@ -964,47 +1033,12 @@ function createAntigravityCliDriver(mediaAnalysis, options = {}) {
 		return { paths };
 	}
 
-	function findGeneratedImages(imageName, startedAt) {
-		const found = [];
-		const root = stateRoot;
-		const acceptedStems = [imageName, imageName.replace(/-/g, '_')];
-		if (!fs.existsSync(root)) return found;
-		const maxEntries = 5000;
-		let scanned = 0;
-		const walk = (folder, depth) => {
-			if (depth > 8 || scanned >= maxEntries) return;
-			let entries;
-			try { entries = fs.readdirSync(folder, { withFileTypes: true }); } catch (error) { return; }
-			for (const entry of entries) {
-				if (scanned >= maxEntries) return;
-				scanned += 1;
-				const target = path.resolve(folder, entry.name);
-				if (target !== root && !pathIsInside(root, target)) continue;
-				if (entry.isDirectory()) { walk(target, depth + 1); continue; }
-				if (!entry.isFile()) continue;
-				const extension = path.extname(entry.name).toLowerCase();
-				const stem = path.basename(entry.name, extension);
-				const matchingName = acceptedStems.some((candidate) => stem === candidate || stem.startsWith(`${candidate}-`) || stem.startsWith(`${candidate}_`));
-				if (!['.png', '.jpg', '.jpeg', '.webp'].includes(extension) || !matchingName) continue;
-				try {
-					const stat = fs.statSync(target);
-					if (stat.size > 0 && stat.size <= 20 * 1024 * 1024 && stat.mtimeMs >= startedAt - 5000) found.push({ path: target, mtimeMs: stat.mtimeMs });
-				} catch (error) {}
-			}
-		};
-		walk(root, 0);
-		return found.sort((left, right) => right.mtimeMs - left.mtimeMs);
-	}
-
 	function resultFailure(result, operation) {
 		if (result && result.success) {
 			snapshot = { ...snapshot, authenticated: true, state: 'ready', diagnostic: 'Ready.' };
 			return null;
 		}
-		const details = result && result.details && typeof result.details === 'object' ? result.details : {};
-		const output = [result && result.message, result && result.text, result && result.stdout, result && result.stderr, details.message, details.stdout, details.stderr]
-			.filter((value) => typeof value === 'string' && value.trim())
-			.join('\n');
+		const output = antigravityResultText(result);
 		const quotaExhausted = /(?:quota|usage|capacity|credits?).{0,120}(?:exhausted|depleted|exceeded)|(?:exhausted|depleted).{0,120}(?:quota|usage|capacity|credits?)/i.test(output);
 		const rateLimited = /\b429\b|too many requests|rate limit|quota exhaustion/i.test(output);
 		if (quotaExhausted || rateLimited) {
@@ -1020,9 +1054,9 @@ function createAntigravityCliDriver(mediaAnalysis, options = {}) {
 			};
 		}
 		const message = String(result && result.message || 'Antigravity CLI request failed.');
-		if (/not logged in|not authenticated|no auth credentials|login required|sign in/i.test(message)) {
+		if (isAntigravityAuthenticationError(output)) {
 			snapshot = { ...snapshot, authenticated: false, ready: false, state: 'not_authenticated', diagnostic: 'Not authenticated.' };
-			return { success: false, category: 'configuration', code: 'antigravity_cli_not_authenticated', message: 'Antigravity CLI is not authenticated. Run agy interactively and sign in with the same Windows account.' };
+			return antigravityAuthenticationFailure();
 		}
 		if (/unknown tool|tool .*not found|generate_image.*unavailable|unsupported tool/i.test(message)) {
 			return { ...result, code: 'antigravity_cli_tool_unavailable', message: `Antigravity CLI ${operation} tooling is unavailable.` };
@@ -1043,56 +1077,6 @@ function createAntigravityCliDriver(mediaAnalysis, options = {}) {
 			}
 		}
 		return '';
-	}
-
-	function findImagePathMarker(value, seen = new Set(), depth = 0) {
-		if (typeof value === 'string') {
-			if (depth < 2) {
-				try {
-					const parsed = JSON.parse(value);
-					const nested = findImagePathMarker(parsed, seen, depth + 1);
-					if (nested) return nested;
-				} catch (error) {}
-			}
-			const marker = /(?:^|\r?\n)\s*IMAGE_PATH:\s*(.*?)(?:\r?\n|$)/im.exec(value);
-			return marker ? { present: true, path: marker[1].trim() } : null;
-		}
-		if (!value || typeof value !== 'object' || seen.has(value)) return null;
-		seen.add(value);
-		const preferredKeys = ['text', 'stdout', 'stderr', 'response', 'result', 'output', 'content', 'message', 'details'];
-		const keys = Array.isArray(value)
-			? Object.keys(value)
-			: [...preferredKeys, ...Object.keys(value).filter((key) => !preferredKeys.includes(key))];
-		for (const key of keys) {
-			const nested = findImagePathMarker(value[key], seen, depth);
-			if (nested) return nested;
-		}
-		return null;
-	}
-
-	function validateGeneratedImagePath(candidate, workspace) {
-		const raw = String(candidate || '').trim();
-		if (!raw) return { error: 'Antigravity returned an empty IMAGE_PATH marker.' };
-		const target = path.resolve(raw);
-		if (!pathIsInside(stateRoot, target) && !pathIsInside(workspace, target)) {
-			return { error: 'Antigravity IMAGE_PATH must point inside the Antigravity state root or request workspace.' };
-		}
-		let stat;
-		try { stat = fs.statSync(target); } catch (error) { return { error: 'Antigravity IMAGE_PATH does not point to an existing file.' }; }
-		if (!stat.isFile()) return { error: 'Antigravity IMAGE_PATH must point to a file.' };
-		const extension = path.extname(target).toLowerCase();
-		if (!['.png', '.jpg', '.jpeg', '.webp'].includes(extension)) return { error: 'Antigravity IMAGE_PATH must point to a PNG, JPEG, or WebP file.' };
-		if (stat.size <= 0 || stat.size > MAX_IMAGE_REFERENCE_BYTES) return { error: 'Antigravity IMAGE_PATH must point to a non-empty image no larger than 20 MB.' };
-		try {
-			const realTarget = fs.realpathSync(target);
-			const realRoots = [stateRoot, workspace].map((root) => {
-				try { return fs.realpathSync(root); } catch (error) { return ''; }
-			}).filter(Boolean);
-			if (!realRoots.some((root) => pathIsInside(root, realTarget))) return { error: 'Antigravity IMAGE_PATH must point inside the Antigravity state root or request workspace.' };
-		} catch (error) {
-			return { error: 'Antigravity IMAGE_PATH could not be validated.' };
-		}
-		return { path: target, size: stat.size };
 	}
 
 	async function runPrompt(workspace, prompt, timeoutMs, session, operation = 'CLI request') {
@@ -1175,14 +1159,14 @@ function createAntigravityCliDriver(mediaAnalysis, options = {}) {
 				const startedAt = Date.now();
 				const result = await runPrompt(workspace, prompt, imageTimeoutMs, session, 'image-generation');
 				if (!result.success) return result;
-				const marker = findImagePathMarker(result);
+				const marker = findAntigravityImagePath(result);
 				let images;
 				if (marker) {
-					const validated = validateGeneratedImagePath(marker.path, workspace);
+					const validated = artifactResolver.validatePath(marker.path, workspace);
 					if (validated.error) return { success: false, category: 'output_detection', code: 'antigravity_image_artifact_invalid', message: validated.error };
 					images = [validated];
 				} else {
-					images = findGeneratedImages(imageName, startedAt);
+					images = artifactResolver.findGeneratedImages(imageName, startedAt);
 				}
 				if (!images.length) return { success: false, category: 'output_detection', code: 'antigravity_image_artifact_missing', message: 'Antigravity CLI completed without creating the requested image artifact.' };
 				const data = [];
@@ -1351,7 +1335,7 @@ function createOpenAiVideosDriver(video) {
 }
 
 function createXaiApiDriver(options = {}) {
-	const fetchImpl = options.fetch || globalThis.fetch;
+	const fetchImpl = withFetchTimeout(options.fetch || globalThis.fetch);
 	const apiKey = options.apiKey || process.env.XAI_API_KEY || process.env.AI_MODEL_RELAY_XAI_API_KEY || '';
 	const baseUrl = String(options.baseUrl || process.env.XAI_BASE_URL || process.env.AI_MODEL_RELAY_XAI_BASE_URL || 'https://api.x.ai/v1').replace(/\/+$/, '');
 	const defaultModels = String(options.models || process.env.AI_MODEL_RELAY_XAI_MODELS || DEFAULT_XAI_CHAT_MODELS).split(',').map((id) => id.trim()).filter(Boolean);
@@ -1547,7 +1531,8 @@ function createXaiApiDriver(options = {}) {
 				try {
 					const downloaded = await fetchImpl(url, { headers: { Authorization: `Bearer ${apiKey}` } });
 					if (!downloaded.ok || typeof downloaded.arrayBuffer !== 'function') continue;
-					const bytes = Buffer.from(await downloaded.arrayBuffer());
+					let bytes;
+					try { bytes = await readBoundedBytes(downloaded); } catch (error) { continue; }
 					if (!bytes.length) continue;
 					data.push({ b64_json: bytes.toString('base64'), mime_type: mimeFromImageBytes(bytes) });
 				} catch (error) {}
@@ -1638,7 +1623,10 @@ function createXaiApiDriver(options = {}) {
 			if (!downloaded.ok || typeof downloaded.arrayBuffer !== 'function') {
 				return { success: false, category: 'api', code: 'xai_video_download_failed', message: 'xAI Imagine video download failed.', details: { status: downloaded.status, provider: 'xai-api', request_id: requestId } };
 			}
-			const bytes = Buffer.from(await downloaded.arrayBuffer());
+			let bytes;
+			try { bytes = await readBoundedBytes(downloaded); } catch (error) {
+				return { success: false, category: 'api', code: 'xai_video_download_failed', message: 'xAI Imagine video download exceeded the maximum size.', details: { provider: 'xai-api', request_id: requestId } };
+			}
 			if (!bytes.length) {
 				return { success: false, category: 'api', code: 'xai_video_artifact_missing', message: 'xAI Imagine video download was empty.' };
 			}
@@ -1655,7 +1643,7 @@ function createXaiApiDriver(options = {}) {
 }
 
 function createApiKeyChatDriver(options = {}) {
-	const fetchImpl = options.fetch || globalThis.fetch;
+	const fetchImpl = withFetchTimeout(options.fetch || globalThis.fetch);
 	const apiKey = options.apiKey || process.env.AI_MODEL_RELAY_CHAT_API_KEY || '';
 	const baseUrl = String(options.baseUrl || process.env.AI_MODEL_RELAY_CHAT_BASE_URL || '').replace(/\/+$/, '');
 	const providerId = String(options.providerId || process.env.AI_MODEL_RELAY_CHAT_PROVIDER_ID || 'api-key-chat').replace(/[^a-z0-9_.-]/gi, '-').toLowerCase();
@@ -1741,7 +1729,7 @@ function createCliProcessDriver(options = {}) {
 					if (settled) {
 						return;
 					}
-					child.kill();
+					killProcessTree(child);
 					settled = true;
 					resolve({ success: false, category: 'timeout', code: 'cli_process_timeout', message: 'CLI process timed out.', details: { timeout_ms: timeoutMs } });
 				}, timeoutMs);
@@ -1784,7 +1772,10 @@ function createCliProcessDriver(options = {}) {
 					resolve(normalizeChatResponse('cli', 'default', parsed, out));
 				});
 				const input = payload.input || payload.prompt || textFromMessages(payload.messages);
-				child.stdin.end(String(input || ''));
+				if (child.stdin) {
+					if (typeof child.stdin.once === 'function') child.stdin.once('error', () => {});
+					child.stdin.end(String(input || ''));
+				}
 			});
 		},
 	};
@@ -1845,7 +1836,16 @@ function createBackendRegistry(options = {}) {
 	function capabilitiesFor(driver) {
 		if (!driver || !driver.capabilities) return null;
 		const capabilities = driver.capabilities();
-		return { ...capabilities, job_types: capabilities.job_types || driver.job_types || [] };
+		return { ...capabilities, kind: 'driver', job_types: capabilities.job_types || driver.job_types || [] };
+	}
+
+	function publishedModelJobTypes(model, capabilities) {
+		const own = Array.isArray(model && model.job_types) ? model.job_types.filter(Boolean) : [];
+		if (model && model.type === 'image') {
+			if (own.includes('images') && !own.includes('chat')) return own;
+			return ['images'];
+		}
+		return own.length ? own : (Array.isArray(capabilities && capabilities.job_types) ? capabilities.job_types : []);
 	}
 
 	function resolve(jobType, payload = {}) {
@@ -1889,7 +1889,7 @@ function createBackendRegistry(options = {}) {
 		capabilities: () => drivers.map((driver) => capabilitiesFor(driver)),
 		models: () => drivers.flatMap((driver) => {
 			const capabilities = capabilitiesFor(driver);
-			return driver.models().map((model) => ({ ...model, ready: model.ready !== undefined ? model.ready : !!capabilities.ready, job_types: model.job_types || capabilities.job_types }));
+			return driver.models().map((model) => ({ ...model, ready: model.ready !== undefined ? model.ready : !!capabilities.ready, job_types: publishedModelJobTypes(model, capabilities) }));
 		}),
 		refresh: () => Promise.all(drivers.map((driver) => driver.refresh ? driver.refresh({ resetMedia: true }) : driver.capabilities())),
 		getDriver: (jobType, payload) => driverFor(jobType, payload),
@@ -1910,6 +1910,7 @@ module.exports = {
 	GROK_IMAGE_CAPABILITIES,
 	IMAGE_CAPABILITY_CONTRACT_VERSION,
 	isCompleteImageCapabilityContract,
+	findRelayImageModel,
 	relayCatalogEntrySupportsImages,
 	createApiKeyChatDriver,
 	createAntigravityCliDriver,

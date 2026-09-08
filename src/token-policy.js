@@ -55,7 +55,7 @@ function resolveMaxTokens(jobType, requested, settings) {
 		return defaultMaxTokens;
 	}
 
-	return Math.floor(numericRequested);
+	return Math.min(TOKEN_DEFAULT_MAX, Math.floor(numericRequested));
 }
 
 module.exports = {

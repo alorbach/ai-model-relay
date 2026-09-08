@@ -78,7 +78,7 @@ function jobBody(id, payload) {
 }
 
 async function withServer(options, callback) {
-	const server = createServer(options);
+	const server = createServer({ backgroundRefresh: false, ...options });
 	await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
 	try {
 		await callback(server.address().port);
@@ -232,7 +232,7 @@ async function withServer(options, callback) {
 
 	await withServer({ codex, video, mediaAnalysis, security: createMockSecurity(64) }, async (port) => {
 		const oversized = await requestJson(port, 'POST', '/v1/media/analyze', jobBody('large', { frames: ['x'.repeat(200)] }));
-		assert.strictEqual(oversized.statusCode, 400);
+		assert.strictEqual(oversized.statusCode, 413);
 		assert.strictEqual(oversized.body.message, 'Request body is too large.');
 	});
 

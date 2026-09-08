@@ -4,7 +4,7 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { JobManager, collectSessionOutput, normalizeDiagnosticText, truncateOutput } = require('../src/job-manager');
+const { JobManager, collectSessionOutput, normalizeDiagnosticText, publicJobsSnapshot, redactSessionInput, truncateOutput } = require('../src/job-manager');
 
 function tick() {
 	return new Promise((resolve) => setImmediate(resolve));
@@ -207,6 +207,12 @@ function deferredRunner(label, started, resolvers, result = { success: true }) {
 
 	{
 		const manager = new JobManager({ maxConcurrent: 1 });
+		await manager.run({ requestId: 'unowned-artifact', type: 'upscale', provider: 'local-upscale' }, () => Promise.resolve({ success: true, artifact: { mime_type: 'image/png', bytes: Buffer.from('unowned-png') } }));
+		assert.strictEqual(manager.artifactByRequestId('unowned-artifact', 'http://site-a'), null);
+	}
+
+	{
+		const manager = new JobManager({ maxConcurrent: 1 });
 		const running = manager.run({ requestId: 'owned-cancel', type: 'upscale', origin: 'http://site-a', provider: 'local-upscale' }, (session) => new Promise((resolve) => {
 			session.signal.addEventListener('abort', () => resolve({ success: false, category: 'cancelled' }), { once: true });
 		}));
@@ -252,12 +258,83 @@ function deferredRunner(label, started, resolvers, result = { success: true }) {
 		assert.strictEqual(manager.snapshot().running_count, 0);
 	}
 
+	{
+		let now = 1_000_000;
+		const manager = new JobManager({
+			maxConcurrent: 1,
+			retentionMs: 15 * 60 * 1000,
+			maxRecent: 50,
+			now: () => now,
+		});
+		for (let index = 0; index < 12; index += 1) {
+			await manager.run({ requestId: 'keep-' + index, type: 'chat' }, () => ({ success: true }));
+		}
+		const snapshot = manager.snapshot();
+		assert.strictEqual(snapshot.recent.length, 12);
+		assert.strictEqual(snapshot.retention_ms, 15 * 60 * 1000);
+		assert.strictEqual(snapshot.recent[0].request_id, 'keep-11');
+		assert.strictEqual(snapshot.recent[11].request_id, 'keep-0');
+		now += 16 * 60 * 1000;
+		assert.strictEqual(manager.snapshot().recent.length, 0);
+	}
+
+	{
+		let now = 1_000_000;
+		const manager = new JobManager({
+			maxConcurrent: 1,
+			maxRecent: 3,
+			retentionMs: 60_000,
+			now: () => now,
+		});
+		for (let index = 0; index < 5; index += 1) {
+			await manager.run({ requestId: 'cap-' + index, type: 'chat' }, () => ({ success: true }));
+		}
+		assert.strictEqual(manager.snapshot().recent.length, 3);
+		assert.strictEqual(manager.snapshot().recent[0].request_id, 'cap-4');
+		assert.strictEqual(manager.snapshot().recent[2].request_id, 'cap-2');
+	}
+
+	{
+		const tinyPng = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=', 'base64');
+		let now = 1_000_000;
+		const manager = new JobManager({
+			maxConcurrent: 1,
+			maxRecent: 20,
+			retentionMs: 15 * 60 * 1000,
+			now: () => now,
+		});
+		for (let index = 0; index < 10; index += 1) {
+			await manager.run({ requestId: 'img-' + index, type: 'images' }, () => ({
+				success: true,
+				response: { data: [{ b64_json: tinyPng.toString('base64'), mime_type: 'image/png' }] },
+			}));
+		}
+		assert.ok(manager.artifactByRequestId('img-0'));
+		assert.ok(manager.artifactByRequestId('img-9'));
+		assert.strictEqual(manager.snapshot().recent.length, 10);
+		now += 16 * 60 * 1000;
+		assert.strictEqual(manager.snapshot().recent.length, 0);
+		assert.strictEqual(manager.artifactByRequestId('img-0'), null);
+	}
+
 	assert.ok(collectSessionOutput({ details: { stdout: 'out', stderr: 'err', response_text: 'last' } }).includes('STDOUT:\nout'));
 	assert.ok(collectSessionOutput({ details: { stdout: 'out', stderr: 'err', response_text: 'last' } }).includes('STDERR:\nerr'));
 	assert.ok(collectSessionOutput({ details: { stdout: 'out', stderr: 'err', response_text: 'last' } }).includes('RESPONSE_TEXT:\nlast'));
 	assert.strictEqual(normalizeDiagnosticText('I\u00e2\u0080\u0099m ready \u00e2\u0080\u0094 wait\u00e2\u0080\u00a6'), "I'm ready - wait...");
 	assert.strictEqual(collectSessionOutput({ details: { stderr: 'I\u00e2\u0080\u0099m ready' } }), "STDERR:\nI'm ready");
 	assert.ok(truncateOutput('x'.repeat(13000)).includes('[truncated'));
+	assert.strictEqual(redactSessionInput('Authorization: Bearer sk-abc123'), 'Authorization: <redacted>');
+	assert.strictEqual(redactSessionInput('Authorization: Bearer sk-abc123 leftover'), 'Authorization: <redacted> leftover');
+	assert.ok(!redactSessionInput('Authorization: Bearer sk-abc123').includes('sk-abc123'));
+	const publicJobs = publicJobsSnapshot({
+		running_count: 1,
+		recent: [{ request_id: 'job-1', session_input: 'STDIN:\nsecret', session_output: 'STDOUT:\nout', debug_logs: [{ prompt: 'full prompt' }], artifacts: [{ url: '/v1/status/jobs/1/artifacts/0' }] }],
+	});
+	assert.strictEqual(publicJobs.recent[0].request_id, 'job-1');
+	assert.ok(!Object.prototype.hasOwnProperty.call(publicJobs.recent[0], 'session_input'));
+	assert.ok(!Object.prototype.hasOwnProperty.call(publicJobs.recent[0], 'session_output'));
+	assert.ok(!Object.prototype.hasOwnProperty.call(publicJobs.recent[0], 'debug_logs'));
+	assert.ok(!Object.prototype.hasOwnProperty.call(publicJobs.recent[0], 'artifacts'));
 
 	console.log('job manager tests passed');
 })().catch((error) => {

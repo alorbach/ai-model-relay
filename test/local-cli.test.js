@@ -6,7 +6,7 @@ const os = require('os');
 const path = require('path');
 const { EventEmitter } = require('events');
 const { PassThrough } = require('stream');
-const { detectCli, detectCliAsync, expandWindowsEnvironmentVariables, materializeChatImages, parseCliModelList, safeDiagnostic, writePromptFile } = require('../src/local-cli');
+const { detectCli, detectCliAsync, expandWindowsEnvironmentVariables, materializeChatImages, parseCliDefaultModel, parseCliModelList, retainCliReadiness, safeDiagnostic, writePromptFile } = require('../src/local-cli');
 
 const definition = { id: 'grok-cli', label: 'Grok CLI', candidates: ['grok'], versionArgs: ['--version'], authArgs: ['models'], jobTypes: ['chat'], models: ['auto'] };
 
@@ -18,8 +18,13 @@ assert.strictEqual(ready.installed, true);
 assert.strictEqual(ready.ready, true);
 assert.strictEqual(ready.version, 'grok 1.2.3');
 assert.deepStrictEqual(ready.models, ['auto', 'grok-build']);
+assert.strictEqual(ready.default_model, 'grok-build');
 
 assert.deepStrictEqual(parseCliModelList('Available models:\n- grok-4.6 (default)\n- grok-4.5\n'), ['auto', 'grok-4.6', 'grok-4.5']);
+assert.strictEqual(parseCliDefaultModel('Available models:\n- grok-4.6 (default)\n- grok-4.5\n'), 'grok-4.6');
+assert.strictEqual(parseCliDefaultModel('You are logged in with grok.com.\nDefault model: grok-4.6\nAvailable models:\n* grok-4.6 (default)\n- grok-4.5'), 'grok-4.6');
+assert.deepStrictEqual(parseCliModelList('You are logged in with grok.com. Default model: grok-4.6 Available models: * grok-4.6 (default) - grok-4.5'), ['auto', 'grok-4.6', 'grok-4.5']);
+assert.strictEqual(parseCliDefaultModel(JSON.stringify({ default_model: 'grok-4.6', models: [{ id: 'grok-4.6' }, { id: 'grok-4.5' }] })), 'grok-4.6');
 assert.deepStrictEqual(parseCliModelList(JSON.stringify({ models: [{ id: 'cursor-gpt-5' }, { model: 'claude-4' }] })), ['auto', 'cursor-gpt-5', 'claude-4']);
 assert.deepStrictEqual(parseCliModelList('not a model list'), ['auto']);
 assert.strictEqual(parseCliModelList(Array.from({ length: 80 }, (_, index) => `model-${index}`)).length, 50);
@@ -77,10 +82,33 @@ assert.strictEqual(unauthenticated.state, 'not_authenticated');
 assert.strictEqual(unauthenticated.ready, false);
 assert.ok(!JSON.stringify(unauthenticated).includes('secret-value'));
 
+calls = 0;
+const loggedInNonZero = detectCli(definition, { lookup, spawnSync: () => (++calls === 1 ? { status: 0, stdout: 'grok 1.0.13 (5e9a58528b76) [stable]' } : { status: 1, stdout: 'You are logged in with grok.com.\nDefault model: grok-4.6\nAvailable models:\n* grok-4.6 (default)\n- grok-4.5' }) });
+assert.strictEqual(loggedInNonZero.ready, true);
+assert.strictEqual(loggedInNonZero.authenticated, true);
+assert.strictEqual(loggedInNonZero.state, 'ready');
+assert.strictEqual(loggedInNonZero.diagnostic, 'Ready.');
+assert.strictEqual(loggedInNonZero.default_model, 'grok-4.6');
+assert.deepStrictEqual(loggedInNonZero.models, ['auto', 'grok-4.6', 'grok-4.5']);
+
+calls = 0;
+const timedOutAuth = detectCli(definition, { lookup, spawnSync: () => (++calls === 1 ? { status: 0, stdout: 'grok 1.2.3' } : { error: new Error('CLI probe timed out.'), status: null, stdout: '', stderr: '' }) });
+assert.strictEqual(timedOutAuth.ready, false);
+assert.strictEqual(timedOutAuth.state, 'unavailable');
+assert.notStrictEqual(timedOutAuth.state, 'not_authenticated');
+assert.match(timedOutAuth.diagnostic, /timed out/i);
+
+const previousReady = { id: 'grok-cli', ready: true, installed: true, authenticated: true, state: 'ready', diagnostic: 'Ready.', models: ['auto', 'grok-4.6'], default_model: 'grok-4.6' };
+assert.strictEqual(retainCliReadiness(previousReady, timedOutAuth).ready, true);
+assert.strictEqual(retainCliReadiness(previousReady, { ...previousReady, ready: false, authenticated: false, state: 'not_authenticated', diagnostic: 'Not authenticated.' }).ready, false);
+assert.strictEqual(retainCliReadiness(previousReady, { ...previousReady, ready: false, installed: false, state: 'unavailable', diagnostic: 'CLI executable was not found.' }).installed, false);
+
 const absent = detectCli(definition, { lookup: () => ({ status: 1, stdout: '' }) });
 assert.strictEqual(absent.installed, false);
 assert.strictEqual(absent.state, 'unavailable');
 assert.strictEqual(safeDiagnostic('Authorization: abc123'), 'Authorization: <redacted>');
+assert.strictEqual(safeDiagnostic('Authorization: Bearer sk-abc123'), 'Authorization: <redacted>');
+assert.ok(!safeDiagnostic('Authorization: Bearer sk-abc123').includes('sk-abc123'));
 assert.strictEqual(expandWindowsEnvironmentVariables('%LOCALAPPDATA%\\agy\\bin\\agy.exe', { LocalAppData: 'C:\\Users\\AL\\AppData\\Local' }), 'C:\\Users\\AL\\AppData\\Local\\agy\\bin\\agy.exe');
 assert.strictEqual(expandWindowsEnvironmentVariables('%UNKNOWN_VALUE%\\agy.exe', {}), '%UNKNOWN_VALUE%\\agy.exe');
 

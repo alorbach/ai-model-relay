@@ -99,17 +99,11 @@ function runnerPath(filename, baseDir = __dirname) {
 }
 
 function readState() {
-	try {
-		const parsed = JSON.parse(fs.readFileSync(security.statePath, 'utf8'));
-		return parsed && typeof parsed === 'object' ? parsed : {};
-	} catch (error) {
-		return {};
-	}
+	return security.readState();
 }
 
 function writeState(state) {
-	fs.mkdirSync(security.stateDir, { recursive: true });
-	fs.writeFileSync(security.statePath, JSON.stringify(state, null, 2));
+	security.writeState(state);
 }
 
 function fullModelId(id) {
@@ -972,6 +966,7 @@ function runAsync(command, args, options = {}) {
 			return;
 		}
 		if (options.input && child.stdin) {
+			if (typeof child.stdin.once === 'function') child.stdin.once('error', () => {});
 			child.stdin.end(options.input);
 		}
 		const timer = options.timeout ? setTimeout(() => {

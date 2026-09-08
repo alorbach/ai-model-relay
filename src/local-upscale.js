@@ -108,15 +108,11 @@ function sha256File(filePath) {
 function cleanPath(value) { return String(value || '').trim(); }
 
 function readState() {
-	try {
-		const state = JSON.parse(fs.readFileSync(security.statePath, 'utf8'));
-		return state && typeof state === 'object' ? state : {};
-	} catch (error) { return {}; }
+	return security.readState();
 }
 
 function writeState(state) {
-	fs.mkdirSync(security.stateDir, { recursive: true });
-	fs.writeFileSync(security.statePath, JSON.stringify(state, null, 2));
+	security.writeState(state);
 }
 
 function venvPythonPath(venvPath) {
@@ -605,7 +601,9 @@ function createLocalUpscaleDriver(options = {}) {
 				fs.writeFileSync(jobPath, JSON.stringify({ model, source_path: sourcePath, output_path: outputPath, source_mime_type: payload.source_mime_type, crop_pixels: cropPixels, target_print: payload.target_print, output_print: outputPrint, output_policy: payload.output_policy, scale, cuda_device: 0, tile: Number(env.AI_MODEL_RELAY_UPSCALE_TILE || model.preferred_tile), precision: String(env.AI_MODEL_RELAY_UPSCALE_PRECISION || 'fp16'), output_max_bytes: Number(model.max_output_bytes || MAX_BYTES), timeout_seconds: Math.max(1, Math.ceil(Number(env.AI_MODEL_RELAY_UPSCALE_TIMEOUT_MS || 1800000) / 1000)) }));
 				const python = pythonCommand(env, model);
 				const result = await new Promise((resolve) => {
-					let stdout = ''; let stderr = ''; let settled = false; let timeout = null; let stopReason = ''; let removeAbort = () => {};
+					const stdoutCollector = createBoundedCollector({ maxChars: Number(process.env.AI_MODEL_RELAY_UPSCALE_OUTPUT_MAX_CHARS || 1024 * 1024) });
+					const stderrCollector = createBoundedCollector({ maxChars: Number(process.env.AI_MODEL_RELAY_UPSCALE_OUTPUT_MAX_CHARS || 1024 * 1024) });
+					let settled = false; let timeout = null; let stopReason = ''; let removeAbort = () => {};
 					const child = spawn(python, [runner, '--job-json', jobPath], { shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], env: { ...env, PYTHONUNBUFFERED: '1' } });
 					const settle = (value) => { if (settled) return; settled = true; if (timeout) clearTimeout(timeout); removeAbort(); resolve(value); };
 					const requestStop = (reason) => {
@@ -619,10 +617,12 @@ function createLocalUpscaleDriver(options = {}) {
 						if (session.signal.aborted) onAbort();
 						else { session.signal.addEventListener('abort', onAbort, { once: true }); removeAbort = () => session.signal.removeEventListener('abort', onAbort); }
 					}
-					child.stdout.on('data', (chunk) => { stdout += String(chunk); session.appendSessionOutput && session.appendSessionOutput('stdout', String(chunk)); });
-					child.stderr.on('data', (chunk) => { stderr += String(chunk); session.appendSessionOutput && session.appendSessionOutput('stderr', String(chunk)); });
-					child.on('error', (error) => settle({ error, stdout, stderr }));
+					child.stdout.on('data', (chunk) => { stdoutCollector.append(String(chunk)); session.appendSessionOutput && session.appendSessionOutput('stdout', String(chunk)); });
+					child.stderr.on('data', (chunk) => { stderrCollector.append(String(chunk)); session.appendSessionOutput && session.appendSessionOutput('stderr', String(chunk)); });
+					child.on('error', (error) => settle({ error, stdout: stdoutCollector.value(), stderr: stderrCollector.value() }));
 					child.on('close', (status) => {
+						const stdout = stdoutCollector.value();
+						const stderr = stderrCollector.value();
 						if (stopReason === 'cancelled') settle({ cancelled: true, stdout, stderr });
 						else if (stopReason === 'timeout') settle({ timeout: true, stdout, stderr });
 						else settle({ status, stdout, stderr });

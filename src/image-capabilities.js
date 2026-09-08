@@ -105,6 +105,15 @@ function relayCatalogEntrySupportsImages(catalog, entry) {
 	return !!(backend && backend.ready === true && Array.isArray(backend.job_types) && backend.job_types.includes('images'));
 }
 
+function findRelayImageModel(catalog, modelId) {
+	const wanted = String(modelId || '').trim();
+	if (!wanted) return null;
+	const backends = Array.isArray(catalog && catalog.backends) ? catalog.backends : [];
+	const entry = backends.find((item) => item && item.kind !== 'driver' && item.type === 'image' && (item.id === wanted || item.legacy_id === wanted));
+	if (!isCompleteImageCapabilityContract(entry)) return null;
+	return relayCatalogEntrySupportsImages(catalog, entry) ? entry : null;
+}
+
 function imageOptionsError(model, message = 'The requested image size, quality, aspect ratio, format, candidate count, or provider option is not supported by this Relay model.') {
 	return {
 		success: false,
@@ -206,6 +215,7 @@ module.exports = {
 	IMAGE_CAPABILITY_CONTRACT_VERSION,
 	imageCapabilityContract,
 	isCompleteImageCapabilityContract,
+	findRelayImageModel,
 	relayCatalogEntrySupportsImages,
 	normalizeImageOutputFormat,
 	normalizeImagePayloadForModel,

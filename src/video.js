@@ -11,6 +11,12 @@ function apiKeyFromEnv() {
 	return process.env.ALORBACH_OPENAI_API_KEY || process.env.OPENAI_API_KEY || '';
 }
 
+function resolveVideoModel(value) {
+	const raw = String(value == null ? '' : value).trim();
+	const model = (raw || 'sora-2').replace(/^model-relay:openai-videos:/i, '').replace(/^openai-video:/i, '') || 'sora-2';
+	return DEFAULT_MODELS.includes(model) ? model : '';
+}
+
 function capabilities() {
 	const enabled = enabledFromEnv();
 	const configured = !!apiKeyFromEnv();
@@ -38,9 +44,14 @@ function disabledResult() {
 	};
 }
 
-function normalizeModel(value) {
-	const model = String(value || 'sora-2').trim();
-	return DEFAULT_MODELS.includes(model) ? model : 'sora-2';
+function unknownModelResult(value) {
+	return {
+		success: false,
+		code: 'video_model_unknown',
+		category: 'validation',
+		retryable: false,
+		message: `Unknown OpenAI Videos model: ${String(value || '').trim() || 'sora-2'}.`,
+	};
 }
 
 function normalizeAction(payload) {
@@ -70,27 +81,65 @@ function parseDataUrl(value) {
 		return null;
 	}
 	const bytes = Buffer.from(match[2].replace(/\s+/g, ''), 'base64');
-	if (!bytes.length) {
+	if (!bytes.length || bytes.length > 20 * 1024 * 1024) {
 		return null;
 	}
 	return { bytes, mime };
 }
 
-async function parseResponse(response) {
+const FETCH_TIMEOUT_MS = Number(process.env.ALORBACH_VIDEO_FETCH_TIMEOUT_MS || 60000);
+const MAX_VIDEO_DOWNLOAD_BYTES = 100 * 1024 * 1024;
+
+async function parseResponse(response, maxBytes = MAX_VIDEO_DOWNLOAD_BYTES) {
 	const contentType = response.headers && response.headers.get ? String(response.headers.get('content-type') || '') : '';
 	if (/application\/json/i.test(contentType)) {
 		return response.json();
 	}
+	const length = Number(response.headers.get && response.headers.get('content-length') || 0);
+	if (length > maxBytes) {
+		throw new Error('OpenAI Videos download exceeds the maximum size.');
+	}
+	if (response.body && typeof response.body.getReader === 'function') {
+		const reader = response.body.getReader();
+		const chunks = [];
+		let size = 0;
+		while (true) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			const chunk = Buffer.from(value);
+			size += chunk.length;
+			if (size > maxBytes) {
+				try { await reader.cancel(); } catch (error) {}
+				throw new Error('OpenAI Videos download exceeds the maximum size.');
+			}
+			chunks.push(chunk);
+		}
+		return chunks.length ? Buffer.concat(chunks) : Buffer.alloc(0);
+	}
 	const arrayBuffer = await response.arrayBuffer();
-	return Buffer.from(arrayBuffer);
+	const bytes = Buffer.from(arrayBuffer);
+	if (bytes.length > maxBytes) {
+		throw new Error('OpenAI Videos download exceeds the maximum size.');
+	}
+	return bytes;
+}
+
+function requestSignal(options = {}) {
+	const timeout = AbortSignal.timeout(Number(options.timeoutMs || FETCH_TIMEOUT_MS));
+	if (options.signal && typeof AbortSignal.any === 'function') {
+		return AbortSignal.any([timeout, options.signal]);
+	}
+	return options.signal || timeout;
 }
 
 async function requestOpenAi(pathname, options = {}) {
+	const { timeoutMs, signal, ...fetchOptions } = options;
 	const response = await fetch(`https://api.openai.com/v1${pathname}`, {
-		...options,
+		...fetchOptions,
+		signal: requestSignal({ timeoutMs, signal }),
 		headers: {
 			Authorization: `Bearer ${apiKeyFromEnv()}`,
-			...(options.headers || {}),
+			...(fetchOptions.headers || {}),
 		},
 	});
 	const parsed = await parseResponse(response);
@@ -101,9 +150,13 @@ async function requestOpenAi(pathname, options = {}) {
 	return { ok: true, status: response.status, parsed };
 }
 
-async function createVideo(payload) {
+function createVideo(payload, requestOptions = {}) {
+	const model = resolveVideoModel(payload.model);
+	if (!model) {
+		return { ok: false, status: 400, parsed: {}, message: `Unknown OpenAI Videos model: ${String(payload.model || '').trim() || 'sora-2'}.` };
+	}
 	const form = new FormData();
-	form.set('model', normalizeModel(payload.model));
+	form.set('model', model);
 	form.set('prompt', String(payload.prompt || '').trim());
 	if (payload.size) {
 		form.set('size', String(payload.size));
@@ -115,28 +168,29 @@ async function createVideo(payload) {
 	if (imageReference) {
 		form.set('input_reference', new Blob([imageReference.bytes], { type: imageReference.mime }), `reference.${imageReference.mime.split('/')[1].replace('jpeg', 'jpg')}`);
 	}
-	return requestOpenAi('/videos', { method: 'POST', body: form });
+	return requestOpenAi('/videos', { method: 'POST', body: form, signal: requestOptions.signal });
 }
 
-async function retrieveVideo(videoId) {
-	return requestOpenAi(`/videos/${encodeURIComponent(videoId)}`, { method: 'GET' });
+async function retrieveVideo(videoId, requestOptions = {}) {
+	return requestOpenAi(`/videos/${encodeURIComponent(videoId)}`, { method: 'GET', signal: requestOptions.signal });
 }
 
-async function remixVideo(payload) {
+async function remixVideo(payload, requestOptions = {}) {
 	const videoId = String(payload.remix_video_id || payload.video_id || '').trim();
 	return requestOpenAi(`/videos/${encodeURIComponent(videoId)}/remix`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ prompt: String(payload.prompt || '').trim() }),
+		signal: requestOptions.signal,
 	});
 }
 
-async function deleteVideo(videoId) {
-	return requestOpenAi(`/videos/${encodeURIComponent(videoId)}`, { method: 'DELETE' });
+async function deleteVideo(videoId, requestOptions = {}) {
+	return requestOpenAi(`/videos/${encodeURIComponent(videoId)}`, { method: 'DELETE', signal: requestOptions.signal });
 }
 
-async function downloadVideo(videoId) {
-	const result = await requestOpenAi(`/videos/${encodeURIComponent(videoId)}/content`, { method: 'GET' });
+async function downloadVideo(videoId, requestOptions = {}) {
+	const result = await requestOpenAi(`/videos/${encodeURIComponent(videoId)}/content`, { method: 'GET', signal: requestOptions.signal });
 	if (!result.ok) {
 		return result;
 	}
@@ -153,11 +207,11 @@ async function downloadVideo(videoId) {
 	};
 }
 
-async function pollVideo(videoId, timeoutMs, intervalMs) {
+async function pollVideo(videoId, timeoutMs, intervalMs, requestOptions = {}) {
 	const started = Date.now();
 	let latest = null;
 	do {
-		const retrieved = await retrieveVideo(videoId);
+		const retrieved = await retrieveVideo(videoId, requestOptions);
 		if (!retrieved.ok) {
 			return retrieved;
 		}
@@ -201,11 +255,15 @@ function failurePayload(result) {
 	};
 }
 
-async function run(payload = {}) {
+async function run(payload = {}, session = {}) {
 	if (!capabilities().enabled) {
 		return disabledResult();
 	}
+	const requestOptions = { signal: session && session.signal };
 	const action = normalizeAction(payload);
+	if ((action === 'create' || action === 'remix') && !resolveVideoModel(payload.model || 'sora-2')) {
+		return unknownModelResult(payload.model);
+	}
 	if ((action === 'create' || action === 'remix') && !String(payload.prompt || '').trim()) {
 		return { success: false, code: 'video_prompt_required', category: 'validation', retryable: false, message: 'A video prompt is required.' };
 	}
@@ -215,15 +273,15 @@ async function run(payload = {}) {
 
 	let result;
 	if (action === 'create') {
-		result = await createVideo(payload);
+		result = await createVideo(payload, requestOptions);
 	} else if (action === 'retrieve') {
-		result = await retrieveVideo(payload.video_id);
+		result = await retrieveVideo(payload.video_id, requestOptions);
 	} else if (action === 'download') {
-		result = await downloadVideo(payload.video_id);
+		result = await downloadVideo(payload.video_id, requestOptions);
 	} else if (action === 'remix') {
-		result = await remixVideo(payload);
+		result = await remixVideo(payload, requestOptions);
 	} else if (action === 'delete') {
-		result = await deleteVideo(payload.video_id);
+		result = await deleteVideo(payload.video_id, requestOptions);
 	} else {
 		return { success: false, code: 'video_action_invalid', category: 'validation', retryable: false, message: 'Unsupported video action.' };
 	}
@@ -234,14 +292,14 @@ async function run(payload = {}) {
 	let response = result.parsed;
 	let polled = false;
 	if ((action === 'create' || action === 'remix') && payload.poll && response && response.id) {
-		const pollResult = await pollVideo(response.id, Number(process.env.ALORBACH_VIDEO_POLL_TIMEOUT_MS || 600000), Number(process.env.ALORBACH_VIDEO_POLL_INTERVAL_MS || 3000));
+		const pollResult = await pollVideo(response.id, Number(process.env.ALORBACH_VIDEO_POLL_TIMEOUT_MS || 600000), Number(process.env.ALORBACH_VIDEO_POLL_INTERVAL_MS || 3000), requestOptions);
 		if (!pollResult.ok) {
 			return failurePayload(pollResult);
 		}
 		response = pollResult.parsed;
 		polled = true;
 		if (payload.download && String(response.status || '').toLowerCase() === 'completed') {
-			const downloaded = await downloadVideo(response.id);
+			const downloaded = await downloadVideo(response.id, requestOptions);
 			if (!downloaded.ok) {
 				return failurePayload(downloaded);
 			}
@@ -254,5 +312,6 @@ async function run(payload = {}) {
 module.exports = {
 	capabilities,
 	disabledResult,
+	resolveVideoModel,
 	run,
 };
