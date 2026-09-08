@@ -754,6 +754,29 @@ function messagesToPrompt(messages, maxTokens) {
 	return buildChatPrompt(messages, maxTokens, '').prompt;
 }
 
+function nativeCodexChatModel(value) {
+	let model = String(value == null ? '' : value).trim();
+	if (/^model-relay:codex:/i.test(model)) model = model.replace(/^model-relay:codex:/i, '');
+	if (/^codex-local:/i.test(model)) model = model.replace(/^codex-local:/i, '');
+	model = model.trim();
+	if (!model || model === 'image' || /^model-relay:/i.test(model)) return 'auto';
+	return model;
+}
+
+function codexRunDiagnosticText(run) {
+	const structured = run && run.structured && typeof run.structured === 'object' ? run.structured : {};
+	const errors = Array.isArray(structured.errors) ? structured.errors.join('\n') : '';
+	return `${run && run.stdout || ''}\n${run && run.stderr || ''}\n${errors}`;
+}
+
+function codexChatModelUnsupported(run) {
+	if (!run || run.status === 0) return false;
+	const text = codexRunDiagnosticText(run);
+	return /model is not supported when using Codex with a ChatGPT account/i.test(text)
+		|| /Model metadata for [`']?[^`'\n]+[`']? not found/i.test(text)
+		|| /invalid_request_error[\s\S]{0,240}model is not supported/i.test(text);
+}
+
 function buildChatArgs(tempDir, outputFile, model, attachments, options = {}) {
 	const args = [
 		'exec',
@@ -791,7 +814,7 @@ async function chat(payload, session = {}, internalOptions = {}) {
 	if (!messages.length) {
 		return { success: false, message: 'No chat messages were provided.' };
 	}
-	const model = String(payload.model || 'codex-local:auto').replace(/^codex-local:/, '') || 'auto';
+	let model = nativeCodexChatModel(payload.model);
 	const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'alorbach-codex-chat-'));
 	try {
 	const outputFile = path.join(tempDir, 'last-message.txt');
@@ -808,6 +831,7 @@ async function chat(payload, session = {}, internalOptions = {}) {
 		debugLog.writePrompt(prompt);
 		debugLog.writeJson('request', {
 			model: `codex-local:${model}`,
+			requested_model: payload.model || '',
 			max_tokens: resolvedMaxTokens,
 			attachment_count: attachments.length,
 			temp_dir: tempDir,
@@ -816,17 +840,25 @@ async function chat(payload, session = {}, internalOptions = {}) {
 	}
 	const execFeatures = execCapabilities();
 	const outputSchemaPath = typeof internalOptions.outputSchemaPath === 'string' ? internalOptions.outputSchemaPath.trim() : '';
-	const schemaPath = execFeatures.output_schema ? outputSchemaPath : '';
-	const args = buildChatArgs(tempDir, outputFile, model, attachments, {
+	let schemaPath = execFeatures.output_schema ? outputSchemaPath : '';
+	const makeArgs = (nativeModel) => buildChatArgs(tempDir, outputFile, nativeModel, attachments, {
 		sandboxReadOnly: execFeatures.sandbox,
 		outputSchemaPath: schemaPath,
 	});
 	if (typeof session.appendSessionInput === 'function') session.appendSessionInput('stdin', prompt);
 	const runOptions = { cwd: tempDir, timeout: Number(process.env.ALORBACH_CODEX_CHAT_TIMEOUT_MS || 600000), onOutput: session.appendSessionOutput, input: prompt };
-	let run = await runCodexExec(args, runOptions);
+	let run = await runCodexExec(makeArgs(model), runOptions);
 	if (schemaPath && codexOutputSchemaUnsupported(run)) {
-		run = await runCodexExec(removeCodexArgPair(args, '--output-schema'), runOptions);
+		schemaPath = '';
+		run = await runCodexExec(makeArgs(model), runOptions);
 		run.output_schema_fallback_reason = 'Codex CLI rejected `--output-schema`; retried with free-text output.';
+	}
+	if (model !== 'auto' && !run.error && run.status !== 0 && codexChatModelUnsupported(run)) {
+		model = 'auto';
+		const retried = await runCodexExec(makeArgs(model), runOptions);
+		retried.output_schema_fallback_reason = run.output_schema_fallback_reason;
+		retried.chatgpt_model_fallback_reason = 'Codex ChatGPT account rejected the requested model; retried with the account default.';
+		run = retried;
 	}
 	const stdout = (run.stdout || '').trim();
 	const stderr = (run.stderr || '').trim();
@@ -873,6 +905,7 @@ async function chat(payload, session = {}, internalOptions = {}) {
 				structured_events: !!run.used_json,
 				json_fallback_reason: run.json_fallback_reason || undefined,
 				output_schema_fallback_reason: run.output_schema_fallback_reason || undefined,
+				chatgpt_model_fallback_reason: run.chatgpt_model_fallback_reason || undefined,
 				debug_log_dir: debugLog && debugLog.dir || undefined,
 			},
 		},
@@ -1365,9 +1398,10 @@ module.exports = {
 	buildChatArgs,
 	buildChatPrompt,
 	capabilities,
+	chat,
 	checkStatus,
 	checkStatusAsync,
-	chat,
+	codexChatModelUnsupported,
 	codexImageFailureFromOutput,
 	codexJsonUnsupported,
 	codexOutputSchemaUnsupported,
@@ -1378,11 +1412,12 @@ module.exports = {
 	imagePathsFromJsonEvents,
 	images,
 	listGeneratedImages,
-	readGeneratedImage,
 	messagesToPrompt,
 	models,
+	nativeCodexChatModel,
 	parseCodexJsonEvents,
 	parseTimedWords,
+	readGeneratedImage,
 	runCodexAsync,
 	runCodexExec,
 	transcribe,

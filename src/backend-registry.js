@@ -7,7 +7,7 @@ const { randomUUID } = require('crypto');
 const { spawn } = require('child_process');
 const { createBoundedCollector } = require('./diagnostics');
 const { killProcessTree } = require('./cuda-torch-venv');
-const { detectCli, detectCliAsync, materializeChatImages, messagesToPromptJson, messagesToText, runTextCommand, writePromptFile } = require('./local-cli');
+const { detectCli, detectCliAsync, materializeChatImages, messagesToPromptJson, messagesToText, retainCliReadiness, runTextCommand, writePromptFile } = require('./local-cli');
 const { createLocalUpscaleDriver } = require('./local-upscale');
 const { resolveMaxTokens } = require('./token-policy');
 const { IMAGE_CAPABILITY_CONTRACT_VERSION, imageCapabilityContract, isCompleteImageCapabilityContract, findRelayImageModel, normalizeImageOutputFormat, normalizeImagePayloadForModel, relayCatalogEntrySupportsImages } = require('./image-capabilities');
@@ -670,9 +670,14 @@ function createNamedCliDriver(definition, options = {}) {
 			const state = detect();
 			return (state.models && state.models.length ? state.models : ['auto']).map((id) => ({ id: relayModel(definition.id, id), type: 'text', backend: definition.id, ready: state.ready, job_types: definition.jobTypes || ['chat'] }));
 		},
-		refresh: async () => { cached = await detector(definition, { ...options, timeoutMs: Number(options.timeoutMs || process.env.AI_MODEL_RELAY_CLI_PROBE_TIMEOUT_MS || 10000) }); return cached; },
+		refresh: async () => {
+			const previous = cached;
+			cached = retainCliReadiness(previous, await detector(definition, { ...options, timeoutMs: Number(options.timeoutMs || process.env.AI_MODEL_RELAY_CLI_PROBE_TIMEOUT_MS || 10000) }));
+			return cached;
+		},
 		async chat(payload = {}, session = {}) {
-			const state = await this.refresh();
+			let state = detect();
+			if (state.ready !== true) state = await this.refresh();
 			if (!state.ready) return { success: false, category: 'configuration', code: `${definition.id}_unavailable`, message: `${definition.label} is unavailable: ${state.diagnostic}` };
 			const requested = cliModelFromRelay(payload.model, definition.id);
 			let model = typeof definition.nativeModel === 'function' ? definition.nativeModel(requested, state) || requested : requested;
@@ -899,7 +904,8 @@ function createGrokCliDriver(options = {}) {
 		return { ...state, prompt_json_supported: promptJsonSupported, imagine };
 	};
 	async function media(kind, payload = {}, session = {}) {
-		const state = await driver.refresh();
+		let state = driver.capabilities();
+		if (state.ready !== true) state = await driver.refresh();
 		if (!state.ready) return { success: false, category: 'configuration', code: 'grok_cli_unavailable', message: `Grok CLI is unavailable: ${state.diagnostic}` };
 		if (!driver.supports(kind)) return { success: false, category: 'configuration', code: 'grok_imagine_unavailable', message: `Grok ${kind === 'images' ? 'image' : 'video'} generation is unavailable: ${imagine.diagnostic}` };
 		const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-model-relay-grok-'));

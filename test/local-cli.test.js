@@ -6,7 +6,7 @@ const os = require('os');
 const path = require('path');
 const { EventEmitter } = require('events');
 const { PassThrough } = require('stream');
-const { detectCli, detectCliAsync, expandWindowsEnvironmentVariables, materializeChatImages, parseCliDefaultModel, parseCliModelList, safeDiagnostic, writePromptFile } = require('../src/local-cli');
+const { detectCli, detectCliAsync, expandWindowsEnvironmentVariables, materializeChatImages, parseCliDefaultModel, parseCliModelList, retainCliReadiness, safeDiagnostic, writePromptFile } = require('../src/local-cli');
 
 const definition = { id: 'grok-cli', label: 'Grok CLI', candidates: ['grok'], versionArgs: ['--version'], authArgs: ['models'], jobTypes: ['chat'], models: ['auto'] };
 
@@ -90,6 +90,18 @@ assert.strictEqual(loggedInNonZero.state, 'ready');
 assert.strictEqual(loggedInNonZero.diagnostic, 'Ready.');
 assert.strictEqual(loggedInNonZero.default_model, 'grok-4.6');
 assert.deepStrictEqual(loggedInNonZero.models, ['auto', 'grok-4.6', 'grok-4.5']);
+
+calls = 0;
+const timedOutAuth = detectCli(definition, { lookup, spawnSync: () => (++calls === 1 ? { status: 0, stdout: 'grok 1.2.3' } : { error: new Error('CLI probe timed out.'), status: null, stdout: '', stderr: '' }) });
+assert.strictEqual(timedOutAuth.ready, false);
+assert.strictEqual(timedOutAuth.state, 'unavailable');
+assert.notStrictEqual(timedOutAuth.state, 'not_authenticated');
+assert.match(timedOutAuth.diagnostic, /timed out/i);
+
+const previousReady = { id: 'grok-cli', ready: true, installed: true, authenticated: true, state: 'ready', diagnostic: 'Ready.', models: ['auto', 'grok-4.6'], default_model: 'grok-4.6' };
+assert.strictEqual(retainCliReadiness(previousReady, timedOutAuth).ready, true);
+assert.strictEqual(retainCliReadiness(previousReady, { ...previousReady, ready: false, authenticated: false, state: 'not_authenticated', diagnostic: 'Not authenticated.' }).ready, false);
+assert.strictEqual(retainCliReadiness(previousReady, { ...previousReady, ready: false, installed: false, state: 'unavailable', diagnostic: 'CLI executable was not found.' }).installed, false);
 
 const absent = detectCli(definition, { lookup: () => ({ status: 1, stdout: '' }) });
 assert.strictEqual(absent.installed, false);

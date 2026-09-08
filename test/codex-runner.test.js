@@ -6,7 +6,7 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { buildChatArgs, codexImageFailureFromOutput, codexJsonUnsupported, codexOutputSchemaUnsupported, detectNewImage, imagePathsFromJsonEvents, listGeneratedImages, parseCodexJsonEvents, readGeneratedImage, runCodexAsync } = require('../src/codex');
+const { buildChatArgs, codexChatModelUnsupported, codexImageFailureFromOutput, codexJsonUnsupported, codexOutputSchemaUnsupported, detectNewImage, imagePathsFromJsonEvents, listGeneratedImages, nativeCodexChatModel, parseCodexJsonEvents, readGeneratedImage, runCodexAsync } = require('../src/codex');
 
 (async () => {
 	const input = `start\n${'x'.repeat(128 * 1024)}\nend`;
@@ -142,6 +142,20 @@ const { buildChatArgs, codexImageFailureFromOutput, codexJsonUnsupported, codexO
 	assert.deepStrictEqual(chatArgs.slice(chatArgs.indexOf('--sandbox'), chatArgs.indexOf('--sandbox') + 2), ['--sandbox', 'read-only']);
 	assert.deepStrictEqual(chatArgs.slice(chatArgs.indexOf('--output-schema'), chatArgs.indexOf('--output-schema') + 2), ['--output-schema', 'C:\\temp\\media\\media-analysis.schema.json']);
 	assert.ok(!buildChatArgs('C:\\temp\\chat', 'C:\\temp\\chat\\last-message.txt', 'auto', [], { sandboxReadOnly: false }).includes('--sandbox'));
+
+	assert.strictEqual(nativeCodexChatModel('model-relay:codex:auto'), 'auto');
+	assert.strictEqual(nativeCodexChatModel('model-relay:codex:gpt-5.6-terra'), 'gpt-5.6-terra');
+	assert.strictEqual(nativeCodexChatModel('codex-local:auto'), 'auto');
+	assert.strictEqual(nativeCodexChatModel('codex-local:gpt-5'), 'gpt-5');
+	assert.ok(!buildChatArgs('C:\\temp\\chat', 'C:\\temp\\chat\\last-message.txt', nativeCodexChatModel('model-relay:codex:auto'), []).includes('--model'));
+	assert.deepStrictEqual(buildChatArgs('C:\\temp\\chat', 'C:\\temp\\chat\\last-message.txt', nativeCodexChatModel('model-relay:codex:gpt-5'), []).slice(-3), ['--model', 'gpt-5', '-']);
+	const chatgptModelFailure = parseCodexJsonEvents([
+		JSON.stringify({ type: 'item.completed', item: { id: 'item_0', type: 'error', message: 'Model metadata for `model-relay:codex:auto` not found. Defaulting to fallback metadata; this can degrade performance and cause issues.' } }),
+		JSON.stringify({ type: 'error', message: '{"type":"error","status":400,"error":{"type":"invalid_request_error","message":"The \'model-relay:codex:auto\' model is not supported when using Codex with a ChatGPT account."}}' }),
+		JSON.stringify({ type: 'turn.failed', error: { message: '{"type":"error","status":400,"error":{"type":"invalid_request_error","message":"The \'model-relay:codex:auto\' model is not supported when using Codex with a ChatGPT account."}}' } }),
+	].join('\n'));
+	assert.strictEqual(codexChatModelUnsupported({ status: 1, stdout: '', stderr: '', structured: chatgptModelFailure }), true);
+	assert.strictEqual(codexChatModelUnsupported({ status: 1, stderr: 'model failed' }), false);
 
 	console.log('codex runner tests passed');
 })().catch((error) => {

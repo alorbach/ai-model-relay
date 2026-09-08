@@ -140,9 +140,32 @@ function cliAuthLooksPositive(authText) {
 
 function isCliAuthFailure(auth, authText) {
 	if (!auth) return false;
-	if (UNAUTHENTICATED_RE.test(String(authText || ''))) return true;
-	if (auth.error || (auth.status !== 0 && auth.status != null)) return !cliAuthLooksPositive(authText);
-	return false;
+	return UNAUTHENTICATED_RE.test(String(authText || ''));
+}
+
+function isCliAuthProbeUnreliable(auth, authText) {
+	if (!auth || isCliAuthFailure(auth, authText) || cliAuthLooksPositive(authText)) return false;
+	return !!(auth.error || (auth.status !== 0 && auth.status != null));
+}
+
+function retainCliReadiness(previous, next) {
+	if (!next) return previous;
+	if (!previous || previous.ready !== true) return next;
+	if (next.ready === true) return next;
+	if (next.installed === false) return next;
+	if (next.state === 'not_authenticated' && next.authenticated === false) return next;
+	return previous;
+}
+
+function cliDetectAuthFields(base, version, auth, authText, models, defaultModel) {
+	const versionText = cleanText(version && (version.stdout || version.stderr));
+	if (isCliAuthFailure(auth, authText)) {
+		return { ...base, version: versionText, authenticated: false, ready: false, state: 'not_authenticated', diagnostic: 'Not authenticated.', models, default_model: '' };
+	}
+	if (isCliAuthProbeUnreliable(auth, authText)) {
+		return { ...base, version: versionText, authenticated: null, ready: false, state: 'unavailable', diagnostic: safeDiagnostic(auth.error && auth.error.message || authText), models, default_model: defaultModel };
+	}
+	return { ...base, version: versionText, authenticated: auth ? true : null, ready: !!auth, state: auth ? 'ready' : 'installed', diagnostic: auth ? 'Ready.' : 'Authentication not checked yet.', models, default_model: defaultModel };
 }
 
 function defaultModelFrom(models, text) {
@@ -267,10 +290,10 @@ function detectCli(definition, options = {}) {
 	const authText = auth ? `${auth.stdout || ''}\n${auth.stderr || ''}` : '';
 	const unauthenticated = isCliAuthFailure(auth, authText);
 	const fallbackModels = definition.models || ['auto'];
-	const authModels = auth && !unauthenticated ? modelsFromProbe(authText, fallbackModels) : fallbackModels;
-	const models = authModels.length > 1 ? authModels : (!unauthenticated ? probeModelListSync(command, definition, options, fallbackModels) : fallbackModels);
+	const authModels = auth && !unauthenticated && !isCliAuthProbeUnreliable(auth, authText) ? modelsFromProbe(authText, fallbackModels) : fallbackModels;
+	const models = authModels.length > 1 ? authModels : (!unauthenticated && !isCliAuthProbeUnreliable(auth, authText) ? probeModelListSync(command, definition, options, fallbackModels) : fallbackModels);
 	const default_model = unauthenticated ? '' : defaultModelFrom(models, authText);
-	return { ...base, version: cleanText(version.stdout || version.stderr), authenticated: auth ? !unauthenticated : null, ready: auth ? !unauthenticated : false, state: unauthenticated ? 'not_authenticated' : (auth ? 'ready' : 'installed'), diagnostic: unauthenticated ? safeDiagnostic(authText) : (auth ? 'Ready.' : 'Authentication not checked yet.'), models, default_model };
+	return cliDetectAuthFields({ ...base, command }, version, auth, authText, models, default_model);
 }
 
 async function detectCliAsync(definition, options = {}) {
@@ -283,10 +306,10 @@ async function detectCliAsync(definition, options = {}) {
 	const authText = auth ? `${auth.stdout || ''}\n${auth.stderr || ''}` : '';
 	const unauthenticated = isCliAuthFailure(auth, authText);
 	const fallbackModels = definition.models || ['auto'];
-	const authModels = auth && !unauthenticated ? modelsFromProbe(authText, fallbackModels) : fallbackModels;
-	const models = authModels.length > 1 ? authModels : (!unauthenticated ? await probeModelListAsync(command, definition, options, fallbackModels) : fallbackModels);
+	const authModels = auth && !unauthenticated && !isCliAuthProbeUnreliable(auth, authText) ? modelsFromProbe(authText, fallbackModels) : fallbackModels;
+	const models = authModels.length > 1 ? authModels : (!unauthenticated && !isCliAuthProbeUnreliable(auth, authText) ? await probeModelListAsync(command, definition, options, fallbackModels) : fallbackModels);
 	const default_model = unauthenticated ? '' : defaultModelFrom(models, authText);
-	return { ...base, version: cleanText(version.stdout || version.stderr), authenticated: auth ? !unauthenticated : null, ready: !!auth && !unauthenticated, state: unauthenticated ? 'not_authenticated' : 'ready', diagnostic: unauthenticated ? safeDiagnostic(authText) : 'Ready.', models, default_model };
+	return cliDetectAuthFields({ ...base, command }, version, auth, authText, models, default_model);
 }
 
 function runTextCommand(command, args, input, session = {}, options = {}) {
@@ -422,4 +445,4 @@ function messagesToPromptJson(payload = {}, imageReferences = []) {
 	return blocks;
 }
 
-module.exports = { detectCli, detectCliAsync, expandWindowsEnvironmentVariables, materializeChatImages, messagesToPromptJson, messagesToText, parseCliDefaultModel, parseCliModelList, resolveCommand, runTextCommand, safeDiagnostic, writePromptFile };
+module.exports = { detectCli, detectCliAsync, expandWindowsEnvironmentVariables, materializeChatImages, messagesToPromptJson, messagesToText, parseCliDefaultModel, parseCliModelList, retainCliReadiness, resolveCommand, runTextCommand, safeDiagnostic, writePromptFile };

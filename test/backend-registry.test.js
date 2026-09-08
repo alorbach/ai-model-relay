@@ -631,6 +631,39 @@ function captureCliSpawn(calls) {
 	assert.strictEqual(grokInvalidResult.response.model, 'model-relay:grok-cli:grok-4.6');
 	assert.strictEqual(grokInvalidResult.response.choices[0].message.content, 'retried default');
 
+	let grokProbeCount = 0;
+	const stickyGrokCalls = [];
+	const stickyGrok = createGrokCliDriver({
+		detectCliAsync: async (definition) => {
+			grokProbeCount += 1;
+			if (grokProbeCount === 1) return grokReady(definition);
+			return { ...grokReady(definition), ready: false, authenticated: null, state: 'unavailable', diagnostic: 'CLI probe timed out.' };
+		},
+		spawn: captureCliSpawn(stickyGrokCalls),
+	});
+	await stickyGrok.refresh();
+	assert.strictEqual(stickyGrok.capabilities().ready, true);
+	await stickyGrok.refresh();
+	assert.strictEqual(stickyGrok.capabilities().ready, true, 'a timed-out grok models probe must not disable a connected Grok CLI');
+	const stickyBeforeChat = grokProbeCount;
+	const stickyChat = await stickyGrok.chat({ model: 'model-relay:grok-cli:auto', prompt: 'stay ready' });
+	assert.strictEqual(stickyChat.success, true);
+	assert.strictEqual(grokProbeCount, stickyBeforeChat, 'ready Grok chat must not re-probe and disable the CLI');
+	assert.strictEqual(stickyGrokCalls[0].args[stickyGrokCalls[0].args.indexOf('--model') + 1], 'grok-4.6');
+
+	let logoutProbes = 0;
+	const logoutGrok = createGrokCliDriver({
+		detectCliAsync: async (definition) => {
+			logoutProbes += 1;
+			if (logoutProbes === 1) return grokReady(definition);
+			return { ...grokReady(definition), ready: false, authenticated: false, state: 'not_authenticated', diagnostic: 'Not authenticated.' };
+		},
+	});
+	await logoutGrok.refresh();
+	await logoutGrok.refresh();
+	assert.strictEqual(logoutGrok.capabilities().ready, false);
+	assert.strictEqual(logoutGrok.capabilities().state, 'not_authenticated');
+
 	const discoveredGrok = createGrokCliDriver({ detectCliAsync: async (definition) => ({ ...readyCli(definition), models: ['auto', 'grok-4.6', 'grok-4.5'] }) });
 	await discoveredGrok.refresh();
 	assert.deepStrictEqual(discoveredGrok.models().filter((model) => model.type === 'text').map((model) => model.id), ['model-relay:grok-cli:auto', 'model-relay:grok-cli:grok-4.6', 'model-relay:grok-cli:grok-4.5']);
