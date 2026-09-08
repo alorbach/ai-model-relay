@@ -2,6 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { fileURLToPath } = require('url');
 const { spawn, spawnSync } = require('child_process');
 const { createBoundedCollector } = require('./diagnostics');
 const { killProcessTree } = require('./cuda-torch-venv');
@@ -376,28 +377,55 @@ function chatImageParts(payload = {}) {
 	return parts;
 }
 
+function pathIsInside(parent, candidate) {
+	const root = path.resolve(String(parent || ''));
+	const target = path.resolve(String(candidate || ''));
+	const comparableRoot = process.platform === 'win32' ? root.toLowerCase() : root;
+	const comparableTarget = process.platform === 'win32' ? target.toLowerCase() : target;
+	return comparableTarget === comparableRoot || comparableTarget.startsWith(`${comparableRoot}${path.sep}`);
+}
+
+function filesystemPathFromImageValue(imageValue) {
+	const raw = String(imageValue || '').trim();
+	if (!raw || /^https?:\/\//i.test(raw) || /^data:/i.test(raw)) return '';
+	if (/^file:/i.test(raw)) {
+		try { return fileURLToPath(raw); } catch (error) { return ''; }
+	}
+	return raw;
+}
+
+function readWorkspaceChatImage(imageValue, workspace, part) {
+	const root = path.resolve(String(workspace || '').trim());
+	if (!String(workspace || '').trim()) return null;
+	const raw = filesystemPathFromImageValue(imageValue);
+	if (!raw) return null;
+	const resolved = path.isAbsolute(raw) ? path.resolve(raw) : path.resolve(root, raw);
+	if (!pathIsInside(root, resolved)) return null;
+	try {
+		const lstat = fs.lstatSync(resolved);
+		if (lstat.isSymbolicLink() || !lstat.isFile()) return null;
+		const extension = path.extname(resolved).toLowerCase();
+		const extensionMimeType = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp' }[extension] || '';
+		const declaredMimeType = String(part && (part.mime_type || part.mimeType) || '').toLowerCase().replace('image/jpg', 'image/jpeg');
+		if (!extensionMimeType || lstat.size <= 0 || lstat.size > MAX_CHAT_IMAGE_BYTES || (declaredMimeType && declaredMimeType !== extensionMimeType)) return null;
+		const realRoot = fs.realpathSync(root);
+		const realTarget = fs.realpathSync(resolved);
+		if (!pathIsInside(realRoot, realTarget)) return null;
+		return { mime_type: extensionMimeType, bytes: fs.readFileSync(realTarget) };
+	} catch (error) {
+		return null;
+	}
+}
+
 function materializeChatImages(payload = {}, workspace) {
 	const references = [];
 	for (const [index, part] of chatImageParts(payload).entries()) {
 		const imageValue = imageValueFromPart(part);
-		const dataImage = imageMimeAndBytes(imageValue);
-		let image = dataImage;
-		if (!image && imageValue && !/^https?:\/\//i.test(imageValue) && !/^data:/i.test(imageValue)) {
-			try {
-				const stat = fs.statSync(imageValue);
-				const extension = path.extname(imageValue).toLowerCase();
-				const extensionMimeType = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp' }[extension] || '';
-				const declaredMimeType = String(part.mime_type || part.mimeType || '').toLowerCase().replace('image/jpg', 'image/jpeg');
-				if (stat.isFile() && extensionMimeType && stat.size > 0 && stat.size <= MAX_CHAT_IMAGE_BYTES && (!declaredMimeType || declaredMimeType === extensionMimeType)) {
-					const bytes = fs.readFileSync(imageValue);
-					image = { mime_type: extensionMimeType, bytes };
-				}
-			} catch (error) {}
-		}
+		const image = imageMimeAndBytes(imageValue) || readWorkspaceChatImage(imageValue, workspace, part);
 		if (!image) {
-			if (/^https?:\/\//i.test(imageValue)) return { error: 'CLI chat image URLs are not downloaded; provide a PNG, JPEG, or WebP data URL or an existing local image path.' };
+			if (/^https?:\/\//i.test(imageValue)) return { error: 'CLI chat image URLs are not downloaded; provide a PNG, JPEG, or WebP data URL.' };
 			if (/^data:/i.test(imageValue)) return { error: 'CLI chat images must be non-empty PNG, JPEG, or WebP data URLs smaller than 20 MB.' };
-			return { error: 'A CLI chat image must be an existing PNG, JPEG, or WebP file.' };
+			return { error: 'A CLI chat image must be a PNG, JPEG, or WebP data URL, or an existing PNG, JPEG, or WebP file inside the request workspace.' };
 		}
 		const extension = extensionForImageMime(image.mime_type);
 		if (!extension) return { error: 'CLI chat images must be PNG, JPEG, or WebP files.' };

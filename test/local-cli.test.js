@@ -137,6 +137,29 @@ try {
 	assert.match(mismatchedImage.error, /existing PNG, JPEG, or WebP file/i);
 	const remoteImage = materializeChatImages({ messages: [{ role: 'user', content: [{ type: 'input_image', image_url: 'https://example.invalid/image.png' }] }] }, imageWorkspace);
 	assert.match(remoteImage.error, /URLs are not downloaded/i);
+	const tinyPng = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=', 'base64');
+	const outsidePath = path.join(imageDir, 'secret.png');
+	fs.writeFileSync(outsidePath, tinyPng);
+	const outsideImage = materializeChatImages({ messages: [{ role: 'user', content: [{ type: 'input_image', image_url: outsidePath }] }] }, imageWorkspace);
+	assert.match(outsideImage.error, /inside the request workspace/i);
+	const traversalImage = materializeChatImages({ messages: [{ role: 'user', content: [{ type: 'input_image', image_url: path.join(imageWorkspace, '..', 'secret.png') }] }] }, imageWorkspace);
+	assert.match(traversalImage.error, /inside the request workspace/i);
+	const insidePath = path.join(imageWorkspace, 'ok.png');
+	fs.writeFileSync(insidePath, tinyPng);
+	const insideImage = materializeChatImages({ messages: [{ role: 'user', content: [{ type: 'input_image', image_url: insidePath }] }] }, imageWorkspace);
+	assert.ok(!insideImage.error);
+	assert.strictEqual(insideImage.references.length, 1);
+	assert.ok(fs.existsSync(insideImage.references[0].path));
+	const relativeImage = materializeChatImages({ messages: [{ role: 'user', content: [{ type: 'input_image', image_url: 'ok.png' }] }] }, imageWorkspace);
+	assert.ok(!relativeImage.error);
+	try {
+		const linkPath = path.join(imageWorkspace, 'escape.png');
+		fs.symlinkSync(outsidePath, linkPath, 'file');
+		const linkedImage = materializeChatImages({ messages: [{ role: 'user', content: [{ type: 'input_image', image_url: linkPath }] }] }, imageWorkspace);
+		assert.match(linkedImage.error, /inside the request workspace/i);
+	} catch (error) {
+		if (!['EPERM', 'EACCES', 'UNKNOWN'].includes(error && error.code)) throw error;
+	}
 } finally {
 	fs.rmSync(imageDir, { recursive: true, force: true });
 }
