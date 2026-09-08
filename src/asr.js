@@ -219,11 +219,12 @@ function settings() {
 }
 
 function saveSettings(nextSettings) {
-	const state = readState();
-	state.asr = normalizeSettings(nextSettings);
-	writeState(state);
+	const saved = security.updateState((state) => {
+		state.asr = normalizeSettings(nextSettings);
+		return state;
+	});
 	invalidateProbeCache();
-	return state.asr;
+	return saved.asr;
 }
 
 function audioExtensionForFormat(format) {

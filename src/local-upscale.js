@@ -156,9 +156,10 @@ function settings() {
 }
 
 function saveSettings(nextSettings) {
-	const state = readState();
-	state.local_upscale = normalizeSettings({ ...settings(), ...(nextSettings || {}) });
-	writeState(state);
+	security.updateState((state) => {
+		state.local_upscale = normalizeSettings({ ...settings(), ...(nextSettings || {}) });
+		return state;
+	});
 	return settings();
 }
 

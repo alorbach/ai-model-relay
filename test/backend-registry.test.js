@@ -431,6 +431,17 @@ function captureCliSpawn(calls) {
 	assert.strictEqual(generateCall.body.response_format, 'b64_json');
 	assert.strictEqual(generateCall.body.output_format, undefined);
 	assert.strictEqual(generateCall.body.image, undefined);
+	const oversizedXai = createXaiApiDriver({
+		apiKey: 'secret-xai-key',
+		fetch: async () => ({
+			ok: true,
+			status: 200,
+			text: async () => JSON.stringify({ data: [{ b64_json: 'A'.repeat(9 * 1024 * 1024) }] }),
+		}),
+	});
+	const oversizedImage = await oversizedXai.images({ model: 'model-relay:xai:imagine-image', prompt: 'huge' });
+	assert.strictEqual(oversizedImage.success, false);
+	assert.strictEqual(oversizedImage.code, 'xai_image_artifact_missing');
 	const imagineEdit = await xaiImagine.images({
 		model: 'model-relay:xai:imagine-image',
 		prompt: 'edit a cat',

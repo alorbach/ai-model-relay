@@ -52,8 +52,12 @@ function sseHeaders(origin = '') {
 	return headers;
 }
 
-function createStatusEvents() {
+function createStatusEvents(options = {}) {
 	const clients = new Set();
+	const maxBufferedBytes = Math.max(16 * 1024, Number(options.maxBufferedBytes || 2 * 1024 * 1024) || 2 * 1024 * 1024);
+	function bufferedBytes(res) {
+		return Number(res && res.writableLength || 0);
+	}
 	function remove(client, reason = '') {
 		if (!client || client.closed) {
 			return;
@@ -126,8 +130,17 @@ function createStatusEvents() {
 				return;
 			}
 			try {
+				if (bufferedBytes(client.res) > maxBufferedBytes) {
+					remove(client, 'backpressure');
+					try { client.res.destroy(); } catch (destroyError) {}
+					return;
+				}
 				client.res.write(`event: ${event}\n`);
-				client.res.write(`data: ${data}\n\n`);
+				const flushed = client.res.write(`data: ${data}\n\n`);
+				if (flushed === false && bufferedBytes(client.res) > maxBufferedBytes) {
+					remove(client, 'backpressure');
+					try { client.res.destroy(); } catch (destroyError) {}
+				}
 			} catch (error) {
 				remove(client, error && error.message ? error.message : 'write failed');
 			}
@@ -1217,6 +1230,9 @@ function createServer(options = {}) {
 			apiKeyChat: options.apiKeyChat,
 			cliPaths,
 		});
+		if (context.statusCache && typeof context.statusCache.refresh === 'function') {
+			context.statusCache.refresh();
+		}
 		return context.backends;
 	};
 	context.backends = options.backends || null;

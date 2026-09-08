@@ -317,6 +317,44 @@ function deferredRunner(label, started, resolvers, result = { success: true }) {
 		assert.strictEqual(manager.artifactByRequestId('img-0'), null);
 	}
 
+	{
+		const manager = new JobManager({ maxConcurrent: 1, cancelGraceMs: 20 });
+		const hanging = manager.run({ requestId: 'hang-forever', type: 'chat' }, () => new Promise(() => {}));
+		await tick();
+		assert.strictEqual(manager.cancelByRequestId('hang-forever'), true);
+		assert.strictEqual(manager.snapshot().active[0].status, 'cancelling');
+		const cancelled = await hanging;
+		assert.strictEqual(cancelled.category, 'cancelled');
+		assert.strictEqual(manager.snapshot().running_count, 0);
+		assert.strictEqual(manager.snapshot().recent[0].status, 'cancelled');
+		let startedNext = false;
+		await manager.run({ requestId: 'after-hang', type: 'chat' }, () => {
+			startedNext = true;
+			return { success: true };
+		});
+		assert.strictEqual(startedNext, true);
+	}
+
+	{
+		const blob = Buffer.alloc(80, 7);
+		const manager = new JobManager({
+			maxConcurrent: 1,
+			maxRecent: 20,
+			maxArtifactBytes: 100,
+		});
+		await manager.run({ requestId: 'art-a', type: 'images' }, () => ({
+			success: true,
+			response: { data: [{ b64_json: blob.toString('base64'), mime_type: 'image/png' }] },
+		}));
+		await manager.run({ requestId: 'art-b', type: 'images' }, () => ({
+			success: true,
+			response: { data: [{ b64_json: blob.toString('base64'), mime_type: 'image/png' }] },
+		}));
+		assert.strictEqual(manager.artifactByRequestId('art-a'), null);
+		assert.ok(manager.artifactByRequestId('art-b'));
+		assert.strictEqual(manager.snapshot().recent.length, 2);
+	}
+
 	assert.ok(collectSessionOutput({ details: { stdout: 'out', stderr: 'err', response_text: 'last' } }).includes('STDOUT:\nout'));
 	assert.ok(collectSessionOutput({ details: { stdout: 'out', stderr: 'err', response_text: 'last' } }).includes('STDERR:\nerr'));
 	assert.ok(collectSessionOutput({ details: { stdout: 'out', stderr: 'err', response_text: 'last' } }).includes('RESPONSE_TEXT:\nlast'));

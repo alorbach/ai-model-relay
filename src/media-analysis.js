@@ -5,12 +5,15 @@ const fs = require('fs');
 const net = require('net');
 const os = require('os');
 const path = require('path');
-const { spawnSync } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
+const { attachProcessAbort, killProcessTree } = require('./cuda-torch-venv');
 const { resolveMaxTokens } = require('./token-policy');
 
 const MAX_FRAMES = 6;
 const MAX_FRAME_DATA_URL_CHARS = 2 * 1024 * 1024;
 const MAX_MEDIA_DOWNLOAD_BYTES = 50 * 1024 * 1024;
+const MEDIA_FETCH_TIMEOUT_MS = Number(process.env.AI_MODEL_RELAY_MEDIA_FETCH_TIMEOUT_MS || 60000);
+const FFMPEG_TIMEOUT_MS = Number(process.env.AI_MODEL_RELAY_FFMPEG_TIMEOUT_MS || 60000);
 const MAX_VIDEO_DATA_URL_CHARS = 10 * 1024 * 1024;
 const VIDEO_MIME_TYPES = new Map([
 	['video/mp4', 'mp4'],
@@ -103,7 +106,7 @@ function humanReadableAnalysis(structured, originalText) {
 }
 
 function capabilities() {
-	const ffmpeg = spawnSync('ffmpeg', ['-version'], { encoding: 'utf8', shell: false });
+	const ffmpeg = spawnSync('ffmpeg', ['-version'], { encoding: 'utf8', shell: false, timeout: 10000 });
 	return {
 		enabled: true,
 		provider: 'local-codex-vision',
@@ -215,46 +218,116 @@ function framesFromPayload(payload) {
 	return rawFrames.map(normalizeFrameDataUrl).filter(Boolean).slice(0, MAX_FRAMES);
 }
 
-async function downloadMedia(url, tempDir, fetchImpl = globalThis.fetch, lookupFn = dns.promises.lookup) {
-	let currentUrl = String(url || '');
-	let response;
-	for (let redirects = 0; redirects <= 3; redirects += 1) {
-		const parsed = new URL(currentUrl);
-		if (await hostnameHasPrivateAddress(parsed.hostname, lookupFn)) {
-			throw new Error('Localhost and private-network media URLs are not accepted.');
-		}
-		response = await fetchImpl(currentUrl, { redirect: 'manual' });
-		if (![301, 302, 303, 307, 308].includes(response.status)) break;
-		const location = response.headers.get('location');
-		const redirected = location ? new URL(location, currentUrl).toString() : '';
-		const validation = validateRemoteMediaUrl(redirected);
-		if (!validation.ok) throw new Error('Media download redirected to an invalid or private URL.');
-		currentUrl = validation.url;
-		response = null;
+function createPinnedDispatcher(lookupFn) {
+	try {
+		const { Agent } = require('undici');
+		return new Agent({
+			connect: {
+				lookup(hostname, options, callback) {
+					Promise.resolve(lookupFn(hostname, { all: true, verbatim: true }))
+						.then((records) => {
+							const addresses = Array.isArray(records) ? records : (records ? [records] : []);
+							if (!addresses.length || addresses.some((entry) => isPrivateIp(entry && entry.address ? entry.address : entry))) {
+								callback(new Error('Localhost and private-network media URLs are not accepted.'));
+								return;
+							}
+							const chosen = addresses[0];
+							const address = chosen.address || chosen;
+							callback(null, address, chosen.family || (net.isIP(address) === 6 ? 6 : 4));
+						})
+						.catch((error) => callback(error));
+				},
+			},
+		});
+	} catch (error) {
+		return null;
 	}
-	if (!response) throw new Error('Media download redirected too many times.');
-	if (!response.ok) {
-		throw new Error(`Media download failed with HTTP ${response.status}.`);
-	}
-	const mimeType = String(response.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
-	if (mimeType && !VIDEO_MIME_TYPES.has(mimeType) && !['application/octet-stream', 'binary/octet-stream'].includes(mimeType)) {
-		throw new Error('Media URL did not return a supported MP4, MOV, WebM, or AVI video.');
-	}
-	const contentLength = Number.parseInt(String(response.headers.get('content-length') || ''), 10);
-	if (Number.isFinite(contentLength) && contentLength > MAX_MEDIA_DOWNLOAD_BYTES) {
-		throw new Error('Media file is too large for local analysis.');
-	}
-	const arrayBuffer = await response.arrayBuffer();
-	const bytes = Buffer.from(arrayBuffer);
-	if (bytes.length > MAX_MEDIA_DOWNLOAD_BYTES) {
-		throw new Error('Media file is too large for local analysis.');
-	}
-	const mediaPath = path.join(tempDir, `input-media.${VIDEO_MIME_TYPES.get(mimeType) || 'bin'}`);
-	fs.writeFileSync(mediaPath, bytes);
-	return mediaPath;
 }
 
-async function materializeMedia(payload = {}, tempDir, fetchImpl = globalThis.fetch, lookupFn = dns.promises.lookup) {
+async function readBoundedMediaBytes(response, maxBytes = MAX_MEDIA_DOWNLOAD_BYTES) {
+	const length = Number(response && response.headers && typeof response.headers.get === 'function' ? response.headers.get('content-length') || 0 : 0);
+	if (Number.isFinite(length) && length > maxBytes) {
+		throw new Error('Media file is too large for local analysis.');
+	}
+	if (response && response.body && typeof response.body.getReader === 'function') {
+		const reader = response.body.getReader();
+		const chunks = [];
+		let size = 0;
+		while (true) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			const chunk = Buffer.from(value);
+			size += chunk.length;
+			if (size > maxBytes) {
+				try { await reader.cancel(); } catch (error) {}
+				throw new Error('Media file is too large for local analysis.');
+			}
+			chunks.push(chunk);
+		}
+		return chunks.length ? Buffer.concat(chunks) : Buffer.alloc(0);
+	}
+	if (response && typeof response.arrayBuffer === 'function') {
+		const bytes = Buffer.from(await response.arrayBuffer());
+		if (bytes.length > maxBytes) throw new Error('Media file is too large for local analysis.');
+		return bytes;
+	}
+	throw new Error('Media download did not provide a readable body.');
+}
+
+async function downloadMedia(url, tempDir, fetchImpl = globalThis.fetch, lookupFn = dns.promises.lookup, options = {}) {
+	let currentUrl = String(url || '');
+	let response;
+	const dispatcher = fetchImpl === globalThis.fetch ? createPinnedDispatcher(lookupFn) : null;
+	const timeoutMs = Number(options.timeoutMs || MEDIA_FETCH_TIMEOUT_MS);
+	const controller = new AbortController();
+	const abortFromCaller = () => {
+		try { controller.abort(); } catch (error) {}
+	};
+	if (options.signal) {
+		if (options.signal.aborted) abortFromCaller();
+		else options.signal.addEventListener('abort', abortFromCaller, { once: true });
+	}
+	const timer = setTimeout(abortFromCaller, timeoutMs);
+	try {
+		for (let redirects = 0; redirects <= 3; redirects += 1) {
+			const parsed = new URL(currentUrl);
+			if (await hostnameHasPrivateAddress(parsed.hostname, lookupFn)) {
+				throw new Error('Localhost and private-network media URLs are not accepted.');
+			}
+			response = await fetchImpl(currentUrl, {
+				redirect: 'manual',
+				signal: controller.signal,
+				...(dispatcher ? { dispatcher } : {}),
+			});
+			if (![301, 302, 303, 307, 308].includes(response.status)) break;
+			const location = response.headers.get('location');
+			const redirected = location ? new URL(location, currentUrl).toString() : '';
+			const validation = validateRemoteMediaUrl(redirected);
+			if (!validation.ok) throw new Error('Media download redirected to an invalid or private URL.');
+			currentUrl = validation.url;
+			response = null;
+		}
+		if (!response) throw new Error('Media download redirected too many times.');
+		if (!response.ok) {
+			throw new Error(`Media download failed with HTTP ${response.status}.`);
+		}
+		const mimeType = String(response.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+		if (mimeType && !VIDEO_MIME_TYPES.has(mimeType) && !['application/octet-stream', 'binary/octet-stream'].includes(mimeType)) {
+			throw new Error('Media URL did not return a supported MP4, MOV, WebM, or AVI video.');
+		}
+		const bytes = await readBoundedMediaBytes(response);
+		const mediaPath = path.join(tempDir, `input-media.${VIDEO_MIME_TYPES.get(mimeType) || 'bin'}`);
+		fs.writeFileSync(mediaPath, bytes);
+		return mediaPath;
+	} finally {
+		clearTimeout(timer);
+		if (options.signal && typeof options.signal.removeEventListener === 'function') {
+			options.signal.removeEventListener('abort', abortFromCaller);
+		}
+	}
+}
+
+async function materializeMedia(payload = {}, tempDir, fetchImpl = globalThis.fetch, lookupFn = dns.promises.lookup, options = {}) {
 	if (payload.media_data_url) {
 		const video = normalizeVideoDataUrl(payload.media_data_url);
 		if (!video) return { error: 'Provide a bounded MP4, MOV, WebM, or AVI data URL for media analysis.' };
@@ -265,41 +338,74 @@ async function materializeMedia(payload = {}, tempDir, fetchImpl = globalThis.fe
 	if (payload.media_url) {
 		const validation = validateRemoteMediaUrl(payload.media_url);
 		if (!validation.ok) return { error: validation.message };
-		return { path: await downloadMedia(validation.url, tempDir, fetchImpl, lookupFn), source: 'url' };
+		return { path: await downloadMedia(validation.url, tempDir, fetchImpl, lookupFn, options), source: 'url' };
 	}
 	return null;
 }
 
-function extractFrames(mediaPath, tempDir, frameCount) {
+function extractFrames(mediaPath, tempDir, frameCount, options = {}) {
 	const outputPattern = path.join(tempDir, 'frame-%03d.jpg');
-	const run = spawnSync('ffmpeg', [
-		'-hide_banner',
-		'-loglevel',
-		'error',
-		'-y',
-		'-i',
-		mediaPath,
-		'-vf',
-		`thumbnail,scale='min(1024,iw)':-2`,
-		'-frames:v',
-		String(frameCount),
-		outputPattern,
-	], { encoding: 'utf8', shell: false });
-	if (run.error) {
-		throw new Error(`ffmpeg could not extract media frames: ${run.error.message || String(run.error)}`);
-	}
-	if (run.status !== 0) {
-		throw new Error(`ffmpeg could not extract media frames: ${(run.stderr || '').trim() || 'unknown error'}`);
-	}
-	const frames = [];
-	for (const entry of fs.readdirSync(tempDir)) {
-		if (!/^frame-\d+\.jpg$/i.test(entry)) {
-			continue;
+	const timeoutMs = Number(options.timeoutMs || FFMPEG_TIMEOUT_MS);
+	const spawnImpl = options.spawn || spawn;
+	return new Promise((resolve, reject) => {
+		let child;
+		try {
+			child = spawnImpl('ffmpeg', [
+				'-hide_banner',
+				'-loglevel',
+				'error',
+				'-y',
+				'-i',
+				mediaPath,
+				'-vf',
+				`thumbnail,scale='min(1024,iw)':-2`,
+				'-frames:v',
+				String(frameCount),
+				outputPattern,
+			], { shell: false, windowsHide: true });
+		} catch (error) {
+			reject(new Error(`ffmpeg could not extract media frames: ${error.message || String(error)}`));
+			return;
 		}
-		const bytes = fs.readFileSync(path.join(tempDir, entry));
-		frames.push(`data:image/jpeg;base64,${bytes.toString('base64')}`);
-	}
-	return frames.slice(0, frameCount);
+		const stderr = [];
+		let settled = false;
+		let timedOut = false;
+		let detachAbort = () => {};
+		const finish = (error) => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
+			detachAbort();
+			if (error) reject(error);
+			else resolve();
+		};
+		const timer = setTimeout(() => {
+			timedOut = true;
+			killProcessTree(child);
+			finish(new Error(`ffmpeg could not extract media frames: timed out after ${Math.ceil(timeoutMs / 1000)} seconds.`));
+		}, timeoutMs);
+		detachAbort = attachProcessAbort(child, options.signal);
+		if (child.stderr) child.stderr.on('data', (chunk) => stderr.push(String(chunk || '')));
+		child.once('error', (error) => finish(new Error(`ffmpeg could not extract media frames: ${error.message || String(error)}`)));
+		child.once('close', (status) => {
+			if (timedOut) return;
+			if (status !== 0) {
+				finish(new Error(`ffmpeg could not extract media frames: ${stderr.join('').trim() || 'unknown error'}`));
+				return;
+			}
+			finish();
+		});
+	}).then(() => {
+		const frames = [];
+		for (const entry of fs.readdirSync(tempDir)) {
+			if (!/^frame-\d+\.jpg$/i.test(entry)) {
+				continue;
+			}
+			const bytes = fs.readFileSync(path.join(tempDir, entry));
+			frames.push(`data:image/jpeg;base64,${bytes.toString('base64')}`);
+		}
+		return frames.slice(0, frameCount);
+	});
 }
 
 function buildAnalysisMessages(payload, frames) {
@@ -321,14 +427,14 @@ async function analyze(payload = {}, codexAdapter, session = {}) {
 	try {
 		schemaPath = writeAnalysisSchema(tempDir);
 		if (!frames.length && (payload.media_url || payload.media_data_url)) {
-			const materialized = await materializeMedia(payload, tempDir);
+			const materialized = await materializeMedia(payload, tempDir, globalThis.fetch, dns.promises.lookup, { signal: session.signal });
 			if (materialized && materialized.error) {
 				return { success: false, code: 'media_input_invalid', category: 'validation', retryable: false, message: materialized.error };
 			}
 			if (!capabilities().ffmpeg_available) {
 				return { success: false, code: 'ffmpeg_unavailable', category: 'configuration', retryable: false, message: 'ffmpeg is required to extract frames from media URLs or video data URLs.' };
 			}
-			frames = extractFrames(materialized.path, tempDir, Math.min(MAX_FRAMES, Number.parseInt(String(payload.frame_count || MAX_FRAMES), 10) || MAX_FRAMES));
+			frames = await extractFrames(materialized.path, tempDir, Math.min(MAX_FRAMES, Number.parseInt(String(payload.frame_count || MAX_FRAMES), 10) || MAX_FRAMES), { signal: session.signal });
 		}
 		if (!frames.length) {
 			return { success: false, code: 'media_frames_required', category: 'validation', retryable: false, message: 'Provide bounded image frames, an HTTPS media URL, or a bounded video data URL for analysis.' };
@@ -372,6 +478,7 @@ async function analyze(payload = {}, codexAdapter, session = {}) {
 module.exports = {
 	analyze,
 	capabilities,
+	extractFrames,
 	framesFromPayload,
 	hostnameHasPrivateAddress,
 	isPrivateIp,

@@ -7,11 +7,17 @@ const { resolveMaxTokens } = require('../src/token-policy');
 
 const originalReadState = security.readState;
 const originalWriteState = security.writeState;
+const originalUpdateState = security.updateState;
 let state = {};
 
 try {
 	security.readState = () => JSON.parse(JSON.stringify(state));
 	security.writeState = (next) => { state = JSON.parse(JSON.stringify(next)); };
+	security.updateState = (mutator) => {
+		const next = mutator(JSON.parse(JSON.stringify(state)));
+		state = JSON.parse(JSON.stringify(next));
+		return state;
+	};
 
 	const initial = relaySettings.settings();
 	assert.deepStrictEqual(initial.cli_paths, {
@@ -80,4 +86,5 @@ try {
 } finally {
 	security.readState = originalReadState;
 	security.writeState = originalWriteState;
+	security.updateState = originalUpdateState;
 }

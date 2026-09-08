@@ -6,7 +6,7 @@ const path = require('path');
 const { randomUUID } = require('crypto');
 const { spawn } = require('child_process');
 const { createBoundedCollector } = require('./diagnostics');
-const { killProcessTree } = require('./cuda-torch-venv');
+const { attachProcessAbort, killProcessTree } = require('./cuda-torch-venv');
 const { detectCli, detectCliAsync, materializeChatImages, messagesToPromptJson, messagesToText, retainCliReadiness, runTextCommand, writePromptFile } = require('./local-cli');
 const { createLocalUpscaleDriver } = require('./local-upscale');
 const { resolveMaxTokens } = require('./token-policy');
@@ -20,6 +20,7 @@ const MAX_AUDIO_BASE64_LENGTH = 67108864;
 const MAX_CLI_PROMPT_JSON_ARG_CHARS = 8192;
 const PROVIDER_FETCH_TIMEOUT_MS = Number(process.env.AI_MODEL_RELAY_PROVIDER_FETCH_TIMEOUT_MS || 60000);
 const MAX_PROVIDER_DOWNLOAD_BYTES = 100 * 1024 * 1024;
+const MAX_PROVIDER_JSON_BYTES = 8 * 1024 * 1024;
 
 function withFetchTimeout(fetchImpl, timeoutMs = PROVIDER_FETCH_TIMEOUT_MS) {
 	if (typeof fetchImpl !== 'function') return fetchImpl;
@@ -46,8 +47,27 @@ async function readBoundedBytes(response, maxBytes = MAX_PROVIDER_DOWNLOAD_BYTES
 		}
 		return chunks.length ? Buffer.concat(chunks) : Buffer.alloc(0);
 	}
-	const bytes = Buffer.from(await response.arrayBuffer());
+	if (response && typeof response.arrayBuffer === 'function') {
+		const bytes = Buffer.from(await response.arrayBuffer());
+		if (bytes.length > maxBytes) throw new Error('Provider download exceeds the maximum size.');
+		return bytes;
+	}
+	const text = typeof response.text === 'function' ? await response.text() : '';
+	const bytes = Buffer.from(String(text || ''), 'utf8');
 	if (bytes.length > maxBytes) throw new Error('Provider download exceeds the maximum size.');
+	return bytes;
+}
+
+async function readBoundedText(response, maxBytes = MAX_PROVIDER_JSON_BYTES) {
+	const bytes = await readBoundedBytes(response, maxBytes);
+	return bytes.toString('utf8');
+}
+
+function decodeBoundedBase64(value, maxBytes) {
+	const encoded = String(value || '').replace(/\s+/g, '');
+	if (!encoded || encoded.length > Math.ceil(maxBytes / 3) * 4 + 8) return null;
+	const bytes = Buffer.from(encoded, 'base64');
+	if (!bytes.length || bytes.length > maxBytes) return null;
 	return bytes;
 }
 
@@ -688,7 +708,7 @@ function createNamedCliDriver(definition, options = {}) {
 				const prompt = messagesToText(payload, { imageReferences: materialized.references });
 				const promptPath = writePromptFile(workspace, prompt);
 				const request = { prompt, promptPath, workspace, imageReferences: materialized.references, promptJsonSupported: state.prompt_json_supported === true, promptJson: state.prompt_json_supported === true ? messagesToPromptJson(payload, materialized.references) : null };
-				const runWithModel = (nativeModel) => commandRunner(state.command, definition.requestArgs(nativeModel, promptPath, workspace, request), '', session, { ...options, cwd: workspace });
+				const runWithModel = (nativeModel) => commandRunner(state.command, definition.requestArgs(nativeModel, promptPath, workspace, request), '', session, { ...options, cwd: workspace, signal: session.signal });
 				let result = await runWithModel(model);
 				if (!result.success && definition.retryInvalidModel && isInvalidCliModelFailure(result)) {
 					const fallback = String((typeof definition.defaultNativeModel === 'function' && definition.defaultNativeModel(state)) || state.default_model || '').trim();
@@ -928,7 +948,7 @@ function createGrokCliDriver(options = {}) {
 				if (session.appendSessionInput) {
 					session.appendSessionInput('grok cli request', `Tool: ${toolName}\nWorkspace: ${workspace}\n\nPrompt (passed with --single; stdin is empty):\n${prompt}`);
 				}
-				const result = await runTextCommand(state.command, ['--single', prompt, '--output-format', 'json', '--cwd', workspace, '--tools', toolName, '--disallowed-tools', 'run_terminal_cmd', '--permission-mode', 'dontAsk', '--no-subagents', '--disable-web-search', '--max-turns', '2'], '', session, { ...options, timeoutMs: mediaTimeoutMs });
+				const result = await runTextCommand(state.command, ['--single', prompt, '--output-format', 'json', '--cwd', workspace, '--tools', toolName, '--disallowed-tools', 'run_terminal_cmd', '--permission-mode', 'dontAsk', '--no-subagents', '--disable-web-search', '--max-turns', '2'], '', session, { ...options, timeoutMs: mediaTimeoutMs, signal: session.signal });
 				if (result.success) {
 					const upstreamTimeout = upstreamGrokMediaTimeout(result.text, toolName);
 					if (upstreamTimeout) return upstreamTimeout;
@@ -1084,7 +1104,7 @@ function createAntigravityCliDriver(mediaAnalysis, options = {}) {
 		if (snapshot.print_json_supported) args.push('--output-format', 'json');
 		// Keep -p invocations free of --model/--effort until a concrete, verified
 		// Antigravity flag contract exists; prefer auto over risking a hanging job.
-		const result = await commandRunner(snapshot.command, args, '', session, { ...options, cwd: workspace, timeoutMs });
+		const result = await commandRunner(snapshot.command, args, '', session, { ...options, cwd: workspace, timeoutMs, signal: session && session.signal });
 		return resultFailure(result, operation) || result;
 	}
 
@@ -1354,9 +1374,14 @@ function createXaiApiDriver(options = {}) {
 		};
 	}
 	async function readJsonResponse(response) {
-		const text = typeof response.text === 'function' ? await response.text() : '';
+		let text = '';
+		try {
+			text = await readBoundedText(response);
+		} catch (error) {
+			return { text: '', parsed: null, error };
+		}
 		let parsed = null;
-		try { parsed = text ? JSON.parse(text) : {}; } catch (error) {}
+		try { parsed = text ? JSON.parse(text) : {}; } catch (parseError) {}
 		return { text, parsed };
 	}
 	return {
@@ -1404,11 +1429,10 @@ function createXaiApiDriver(options = {}) {
 				},
 				body: JSON.stringify(body),
 			});
-			const text = await response.text();
-			let parsed = null;
-			try {
-				parsed = text ? JSON.parse(text) : {};
-			} catch (error) {}
+			const { text, parsed, error } = await readJsonResponse(response);
+			if (error) {
+				return { success: false, category: 'api', code: 'xai_api_failed', message: 'xAI API response exceeded the maximum size.', details: { provider: 'xai-api' } };
+			}
 			if (!response.ok) {
 				const message = redactProviderSecret(parsed && parsed.error && parsed.error.message || `xAI API request failed with HTTP ${response.status}.`, apiKey);
 				return { success: false, category: response.status === 401 || response.status === 403 ? 'configuration' : 'api', code: 'xai_api_failed', message, details: { status: response.status, provider: 'xai-api' } };
@@ -1444,14 +1468,18 @@ function createXaiApiDriver(options = {}) {
 			if (typeof session.appendSessionOutput === 'function') session.appendSessionOutput('stdout', 'Uploading audio to xAI Speech-to-Text.\n');
 			let response;
 			let text;
+			let parsed;
 			try {
 				response = await fetchImpl(`${baseUrl}/stt`, { method: 'POST', headers: { Authorization: `Bearer ${apiKey}` }, body: form });
-				text = await response.text();
+				const body = await readJsonResponse(response);
+				if (body.error) {
+					return { success: false, category: 'api', code: 'xai_stt_failed', message: 'xAI Speech-to-Text response exceeded the maximum size.', details: { provider: 'xai-api' } };
+				}
+				text = body.text;
+				parsed = body.parsed;
 			} catch (error) {
 				return { success: false, category: 'api', code: 'xai_stt_request_failed', message: 'xAI Speech-to-Text could not be reached.', retryable: true, details: { provider: 'xai-api' } };
 			}
-			let parsed = null;
-			try { parsed = text ? JSON.parse(text) : {}; } catch (error) {}
 			if (!response.ok) {
 				const message = redactProviderSecret(parsed && parsed.error && parsed.error.message || `xAI Speech-to-Text request failed with HTTP ${response.status}.`, apiKey);
 				return {
@@ -1521,8 +1549,8 @@ function createXaiApiDriver(options = {}) {
 			const data = [];
 			for (const item of items.slice(0, n)) {
 				if (item && item.b64_json) {
-					const bytes = Buffer.from(String(item.b64_json).replace(/\s+/g, ''), 'base64');
-					if (!bytes.length) continue;
+					const bytes = decodeBoundedBase64(item.b64_json, MAX_IMAGE_REFERENCE_BYTES);
+					if (!bytes) continue;
 					data.push({ b64_json: bytes.toString('base64'), mime_type: mimeFromImageBytes(bytes) });
 					continue;
 				}
@@ -1609,7 +1637,11 @@ function createXaiApiDriver(options = {}) {
 			const video = result && result.video && typeof result.video === 'object' ? result.video : result;
 			const videoUrl = String(video && (video.url || video.video_url) || '').trim();
 			if (video && video.b64_video) {
-				return { success: true, response: { b64_video: String(video.b64_video).replace(/\s+/g, ''), mime_type: String(video.mime_type || 'video/mp4'), provider_details: { provider: 'xai-api', raw_model: model, request_id: requestId, cloud: true } } };
+				const bytes = decodeBoundedBase64(video.b64_video, MAX_PROVIDER_DOWNLOAD_BYTES);
+				if (!bytes) {
+					return { success: false, category: 'api', code: 'xai_video_artifact_missing', message: 'xAI Imagine video payload exceeded the maximum size.' };
+				}
+				return { success: true, response: { b64_video: bytes.toString('base64'), mime_type: String(video.mime_type || 'video/mp4'), provider_details: { provider: 'xai-api', raw_model: model, request_id: requestId, cloud: true } } };
 			}
 			if (!videoUrl || !/^https:\/\//i.test(videoUrl)) {
 				return { success: false, category: 'api', code: 'xai_video_artifact_missing', message: 'xAI Imagine completed without returning a video URL.' };
@@ -1682,7 +1714,12 @@ function createApiKeyChatDriver(options = {}) {
 				headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
 				body: JSON.stringify(body),
 			});
-			const text = await response.text();
+			let text;
+			try {
+				text = await readBoundedText(response);
+			} catch (error) {
+				return { success: false, category: 'api', code: 'api_key_chat_failed', message: 'API-key chat response exceeded the maximum size.', details: { provider: providerId } };
+			}
 			let parsed = null;
 			try {
 				parsed = text ? JSON.parse(text) : {};
@@ -1725,14 +1762,21 @@ function createCliProcessDriver(options = {}) {
 				const stderr = createBoundedCollector({ maxChars: Number(process.env.AI_MODEL_RELAY_CLI_OUTPUT_MAX_CHARS || 1024 * 1024) });
 				const child = spawn(command, args, { shell: false, windowsHide: true });
 				let settled = false;
-				const timer = setTimeout(() => {
-					if (settled) {
-						return;
-					}
-					killProcessTree(child);
+				let detachAbort = () => {};
+				const finish = (result) => {
+					if (settled) return;
 					settled = true;
-					resolve({ success: false, category: 'timeout', code: 'cli_process_timeout', message: 'CLI process timed out.', details: { timeout_ms: timeoutMs } });
+					clearTimeout(timer);
+					detachAbort();
+					resolve(result);
+				};
+				const timer = setTimeout(() => {
+					killProcessTree(child);
+					finish({ success: false, category: 'timeout', code: 'cli_process_timeout', message: 'CLI process timed out.', details: { timeout_ms: timeoutMs } });
 				}, timeoutMs);
+				detachAbort = attachProcessAbort(child, session.signal, () => {
+					finish({ success: false, category: 'cancelled', code: 'local_job_cancelled', message: 'The local Relay job was cancelled; source bytes were preserved.' });
+				});
 				child.stdout.on('data', (chunk) => {
 					stdout.append(chunk);
 					if (session.appendSessionOutput) {
@@ -1746,30 +1790,20 @@ function createCliProcessDriver(options = {}) {
 					}
 				});
 				child.on('error', (error) => {
-					if (settled) {
-						return;
-					}
-					settled = true;
-					clearTimeout(timer);
-					resolve({ success: false, category: 'configuration', code: 'cli_process_spawn_failed', message: 'CLI process could not be started.', details: { error: error.message || String(error) } });
+					finish({ success: false, category: 'configuration', code: 'cli_process_spawn_failed', message: 'CLI process could not be started.', details: { error: error.message || String(error) } });
 				});
 				child.on('close', (status, signal) => {
-					if (settled) {
-						return;
-					}
-					settled = true;
-					clearTimeout(timer);
 					const out = stdout.value().trim();
 					const err = stderr.value().trim();
 					if (status !== 0) {
-						resolve({ success: false, category: 'cli_process', code: 'cli_process_failed', message: 'CLI process request failed.', details: { status, signal, stdout: out, stderr: err } });
+						finish({ success: false, category: 'cli_process', code: 'cli_process_failed', message: 'CLI process request failed.', details: { status, signal, stdout: out, stderr: err } });
 						return;
 					}
 					let parsed = null;
 					try {
 						parsed = JSON.parse(out);
 					} catch (error) {}
-					resolve(normalizeChatResponse('cli', 'default', parsed, out));
+					finish(normalizeChatResponse('cli', 'default', parsed, out));
 				});
 				const input = payload.input || payload.prompt || textFromMessages(payload.messages);
 				if (child.stdin) {

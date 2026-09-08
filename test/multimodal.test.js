@@ -6,7 +6,8 @@ const http = require('http');
 const os = require('os');
 const path = require('path');
 const { createServer } = require('../src/server');
-const { framesFromPayload, hostnameHasPrivateAddress, materializeMedia, validateRemoteMediaUrl } = require('../src/media-analysis');
+const { extractFrames, framesFromPayload, hostnameHasPrivateAddress, materializeMedia, validateRemoteMediaUrl } = require('../src/media-analysis');
+const { EventEmitter } = require('events');
 
 const framePng = 'data:image/png;base64,iVBORw0KGgo=';
 
@@ -94,6 +95,7 @@ async function withServer(options, callback) {
 	assert.strictEqual(validateRemoteMediaUrl('https://example.com/video.mp4').ok, true);
 	assert.strictEqual(await hostnameHasPrivateAddress('rebind.example', async () => [{ address: '127.0.0.1', family: 4 }]), true);
 	assert.strictEqual(await hostnameHasPrivateAddress('rebind.example', async () => [{ address: '::ffff:169.254.169.254', family: 6 }]), true);
+	assert.strictEqual(await hostnameHasPrivateAddress('rebind.example', async () => [{ address: '8.8.8.8', family: 4 }, { address: '127.0.0.1', family: 4 }]), true);
 	const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-media-ssrf-'));
 	try {
 		await assert.rejects(
@@ -107,6 +109,68 @@ async function withServer(options, callback) {
 		);
 	} finally {
 		fs.rmSync(tmp, { recursive: true, force: true });
+	}
+
+	const downloadTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-media-download-'));
+	try {
+		let cancelled = false;
+		const oversizedChunk = Buffer.alloc(40 * 1024 * 1024, 1);
+		await assert.rejects(
+			() => materializeMedia(
+				{ media_url: 'https://cdn.example/video.mp4' },
+				downloadTmp,
+				async () => {
+					let index = 0;
+					const chunks = [oversizedChunk, oversizedChunk];
+					return {
+						ok: true,
+						status: 200,
+						headers: { get: (name) => String(name).toLowerCase() === 'content-type' ? 'video/mp4' : '' },
+						body: {
+							getReader() {
+								return {
+									read: async () => index >= chunks.length ? { done: true, value: undefined } : { done: false, value: chunks[index++] },
+									cancel: async () => { cancelled = true; },
+								};
+							},
+						},
+					};
+				},
+				async () => [{ address: '1.1.1.1', family: 4 }],
+			),
+			/too large/i,
+		);
+		assert.strictEqual(cancelled, true);
+		await assert.rejects(
+			() => materializeMedia(
+				{ media_url: 'https://cdn.example/video.mp4' },
+				downloadTmp,
+				async (url, options) => new Promise((_, reject) => {
+					options.signal.addEventListener('abort', () => {
+						const error = new Error('The operation was aborted');
+						error.name = 'AbortError';
+						reject(error);
+					});
+				}),
+				async () => [{ address: '1.1.1.1', family: 4 }],
+				{ timeoutMs: 20 },
+			),
+			/abort/i,
+		);
+		await assert.rejects(
+			() => extractFrames(path.join(downloadTmp, 'missing.mp4'), downloadTmp, 1, {
+				timeoutMs: 30,
+				spawn: () => {
+					const child = new EventEmitter();
+					child.stderr = new EventEmitter();
+					child.kill = () => child.emit('close', null, 'SIGKILL');
+					return child;
+				},
+			}),
+			/timed out/i,
+		);
+	} finally {
+		fs.rmSync(downloadTmp, { recursive: true, force: true });
 	}
 	assert.strictEqual(framesFromPayload({ frames: Array(10).fill(framePng) }).length, 6);
 

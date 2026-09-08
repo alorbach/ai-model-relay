@@ -76,20 +76,62 @@ function probeTorchStatus(python) {
 	}
 }
 
+function killPidTree(pid) {
+	const numericPid = Number(pid);
+	if (!Number.isInteger(numericPid) || numericPid <= 0) return;
+	if (process.platform === 'win32') {
+		try {
+			spawn('taskkill', ['/pid', String(numericPid), '/T', '/F'], { shell: false, windowsHide: true, stdio: 'ignore' });
+		} catch (error) {}
+		return;
+	}
+	try {
+		const listed = spawnSync('pgrep', ['-P', String(numericPid)], { encoding: 'utf8', windowsHide: true, timeout: 2000 });
+		const children = String(listed && listed.stdout || '')
+			.trim()
+			.split(/\s+/)
+			.map((value) => Number(value))
+			.filter((value) => Number.isInteger(value) && value > 0);
+		for (const childPid of children) killPidTree(childPid);
+	} catch (error) {}
+	try {
+		process.kill(numericPid, 'SIGKILL');
+	} catch (error) {}
+}
+
 function killProcessTree(child) {
 	if (!child) return;
-	try {
-		if (process.platform === 'win32' && child.pid) spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { shell: false, windowsHide: true, stdio: 'ignore' });
-		else if (typeof child.kill === 'function') child.kill('SIGKILL');
-	} catch (error) {}
+	if (child.pid) killPidTree(child.pid);
+	else if (typeof child.kill === 'function') {
+		try { child.kill('SIGKILL'); } catch (error) {}
+	}
+}
+
+function attachProcessAbort(child, signal, onAbort) {
+	if (!child) return () => {};
+	const abort = () => {
+		if (typeof onAbort === 'function') onAbort();
+		killProcessTree(child);
+	};
+	if (!signal || typeof signal.addEventListener !== 'function') return () => {};
+	if (signal.aborted) {
+		abort();
+		return () => {};
+	}
+	signal.addEventListener('abort', abort, { once: true });
+	return () => {
+		if (typeof signal.removeEventListener === 'function') signal.removeEventListener('abort', abort);
+	};
 }
 
 module.exports = {
 	TORCH_PROBE,
 	CUDA_TORCH_CONSTRAINT_FILENAME,
 	DEFAULT_TORCH_INDEX,
+	attachProcessAbort,
 	constraintPath,
 	evaluateCudaTorch,
+	killPidTree,
 	killProcessTree,
 	parseTorchProbe,
 	probeTorchStatus,

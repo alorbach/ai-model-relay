@@ -82,24 +82,25 @@ function settings() {
 }
 
 function saveSettings(next = {}) {
-	const state = security.readState();
-	const relay = state.relay && typeof state.relay === 'object' ? state.relay : {};
-	const hasCliPaths = Object.prototype.hasOwnProperty.call(next, 'cli_paths');
-	const hasDefaults = Object.prototype.hasOwnProperty.call(next, 'defaults');
-	const hasTokenDefaults = Object.prototype.hasOwnProperty.call(next, 'token_defaults');
-	const defaultsSource = hasDefaults
-		? next.defaults
-		: (hasCliPaths || hasTokenDefaults ? relay.defaults : next);
-	const tokenDefaultsSource = hasTokenDefaults ? next.token_defaults : relay.token_defaults;
-	state.relay = {
-		...relay,
-		defaults: normalizeDefaults(defaultsSource),
-		cli_paths: hasCliPaths
-			? normalizeCliPaths(next.cli_paths)
-			: normalizeCliPaths(relay.cli_paths),
-		token_defaults: normalizeSavedTokenDefaults(tokenDefaultsSource, relay.token_defaults),
-	};
-	security.writeState(state);
+	security.updateState((state) => {
+		const relay = state.relay && typeof state.relay === 'object' ? state.relay : {};
+		const hasCliPaths = Object.prototype.hasOwnProperty.call(next, 'cli_paths');
+		const hasDefaults = Object.prototype.hasOwnProperty.call(next, 'defaults');
+		const hasTokenDefaults = Object.prototype.hasOwnProperty.call(next, 'token_defaults');
+		const defaultsSource = hasDefaults
+			? next.defaults
+			: (hasCliPaths || hasTokenDefaults ? relay.defaults : next);
+		const tokenDefaultsSource = hasTokenDefaults ? next.token_defaults : relay.token_defaults;
+		state.relay = {
+			...relay,
+			defaults: normalizeDefaults(defaultsSource),
+			cli_paths: hasCliPaths
+				? normalizeCliPaths(next.cli_paths)
+				: normalizeCliPaths(relay.cli_paths),
+			token_defaults: normalizeSavedTokenDefaults(tokenDefaultsSource, relay.token_defaults),
+		};
+		return state;
+	});
 	return settings();
 }
 

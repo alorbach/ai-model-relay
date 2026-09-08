@@ -6,7 +6,7 @@ const os = require('os');
 const path = require('path');
 const { EventEmitter } = require('events');
 const { PassThrough } = require('stream');
-const { detectCli, detectCliAsync, expandWindowsEnvironmentVariables, materializeChatImages, parseCliDefaultModel, parseCliModelList, retainCliReadiness, safeDiagnostic, writePromptFile } = require('../src/local-cli');
+const { detectCli, detectCliAsync, expandWindowsEnvironmentVariables, materializeChatImages, parseCliDefaultModel, parseCliModelList, retainCliReadiness, runTextCommand, safeDiagnostic, writePromptFile } = require('../src/local-cli');
 
 const definition = { id: 'grok-cli', label: 'Grok CLI', candidates: ['grok'], versionArgs: ['--version'], authArgs: ['models'], jobTypes: ['chat'], models: ['auto'] };
 
@@ -164,7 +164,26 @@ try {
 	fs.rmSync(imageDir, { recursive: true, force: true });
 }
 
-oversizedProbeCheck.then(() => console.log('local cli tests passed'), (error) => {
+oversizedProbeCheck.then(async () => {
+	const controller = new AbortController();
+	const command = runTextCommand('hanging-cli', [], '', {}, {
+		timeoutMs: 5000,
+		signal: controller.signal,
+		spawn: () => {
+			const child = new EventEmitter();
+			child.stdout = new PassThrough();
+			child.stderr = new PassThrough();
+			child.stdin = new PassThrough();
+			child.kill = () => child.emit('close', null, 'SIGKILL');
+			return child;
+		},
+	});
+	controller.abort();
+	const result = await command;
+	assert.strictEqual(result.success, false);
+	assert.strictEqual(result.category, 'cancelled');
+	console.log('local cli tests passed');
+}, (error) => {
 	console.error(error);
 	process.exitCode = 1;
 });

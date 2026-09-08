@@ -6,7 +6,7 @@ const path = require('path');
 const { spawn, spawnSync } = require('child_process');
 const asr = require('./asr');
 const { appendLog, createBoundedCollector, safeError } = require('./diagnostics');
-const { killProcessTree } = require('./cuda-torch-venv');
+const { attachProcessAbort, killProcessTree } = require('./cuda-torch-venv');
 const { beginLocalModelDebugLog } = require('./temp-debug-logs');
 const { resolveMaxTokens } = require('./token-policy');
 
@@ -124,7 +124,7 @@ function execCapabilities() {
 }
 
 function runCodexAsync(args, options = {}) {
-	const { timeout, onOutput, input, ...spawnOptions } = options;
+	const { timeout, onOutput, input, signal, ...spawnOptions } = options;
 	const emitOutput = typeof onOutput === 'function' ? onOutput : () => {};
 	const stdinInput = typeof input === 'string' || Buffer.isBuffer(input) ? input : null;
 	return new Promise((resolve) => {
@@ -137,6 +137,8 @@ function runCodexAsync(args, options = {}) {
 		});
 		let spawnError = null;
 		let timedOut = false;
+		let cancelled = false;
+		let detachAbort = () => {};
 		try {
 			child = spawn(resolveCodexBinary(), args, {
 				shell: false,
@@ -170,6 +172,9 @@ function runCodexAsync(args, options = {}) {
 		if (timer && typeof timer.unref === 'function') {
 			timer.unref();
 		}
+		detachAbort = attachProcessAbort(child, signal, () => {
+			cancelled = true;
+		});
 		child.stdout.on('data', (chunk) => {
 			const text = String(chunk || '');
 			stdoutCollector.append(text);
@@ -183,10 +188,11 @@ function runCodexAsync(args, options = {}) {
 		child.once('error', (error) => {
 			spawnError = error;
 		});
-		child.once('close', (status, signal) => {
+		child.once('close', (status, closeSignal) => {
 			if (timer) {
 				clearTimeout(timer);
 			}
+			detachAbort();
 			const stdout = stdoutCollector.value();
 			const stderr = stderrCollector.value();
 			const stdoutStats = stdoutCollector.stats();
@@ -196,15 +202,15 @@ function runCodexAsync(args, options = {}) {
 					stdout: stdoutStats,
 					stderr: stderrStats,
 					status,
-					signal,
+					signal: closeSignal,
 				});
 			}
 			const result = {
 				stdout,
 				stderr,
 				status,
-				signal,
-				error: spawnError || (timedOut ? new Error('Codex CLI execution timed out.') : null),
+				signal: closeSignal,
+				error: spawnError || (timedOut ? new Error('Codex CLI execution timed out.') : null) || (cancelled ? new Error('Codex CLI execution was cancelled.') : null),
 			};
 			if (args.length === 2 && args[0] === 'exec' && args[1] === '--help') {
 				rememberExecHelp(result);
@@ -846,7 +852,7 @@ async function chat(payload, session = {}, internalOptions = {}) {
 		outputSchemaPath: schemaPath,
 	});
 	if (typeof session.appendSessionInput === 'function') session.appendSessionInput('stdin', prompt);
-	const runOptions = { cwd: tempDir, timeout: Number(process.env.ALORBACH_CODEX_CHAT_TIMEOUT_MS || 600000), onOutput: session.appendSessionOutput, input: prompt };
+	const runOptions = { cwd: tempDir, timeout: Number(process.env.ALORBACH_CODEX_CHAT_TIMEOUT_MS || 600000), onOutput: session.appendSessionOutput, input: prompt, signal: session.signal };
 	let run = await runCodexExec(makeArgs(model), runOptions);
 	if (schemaPath && codexOutputSchemaUnsupported(run)) {
 		schemaPath = '';
@@ -1158,7 +1164,7 @@ async function images(payload, session = {}) {
 			image_detection_initial_file_count: before.length,
 		});
 	}
-	const run = await runCodexExec(args, { cwd: tempDir, timeout: Number(process.env.ALORBACH_CODEX_IMAGE_TIMEOUT_MS || 1800000), onOutput: session.appendSessionOutput, input: promptText });
+	const run = await runCodexExec(args, { cwd: tempDir, timeout: Number(process.env.ALORBACH_CODEX_IMAGE_TIMEOUT_MS || 1800000), onOutput: session.appendSessionOutput, input: promptText, signal: session.signal });
 	const after = listGeneratedImages(generatedImagesDir);
 	const newImages = detectNewImage(before, after, {
 		startedAt: expectedStartTime,

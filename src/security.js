@@ -2,6 +2,7 @@
 
 const crypto = require('crypto');
 const fs = require('fs');
+const path = require('path');
 const statePaths = require('./state-paths');
 
 const MAX_BODY_BYTES = 12 * 1024 * 1024;
@@ -65,21 +66,87 @@ function sleepSync(milliseconds) {
 	Atomics.wait(waitBuffer, 0, 0, milliseconds);
 }
 
+function lockOwnerPath() {
+	return path.join(stateLockPath, 'owner.json');
+}
+
+function isProcessAlive(pid) {
+	const numericPid = Number(pid);
+	if (!Number.isInteger(numericPid) || numericPid <= 0) return false;
+	try {
+		process.kill(numericPid, 0);
+		return true;
+	} catch (error) {
+		return !!(error && error.code === 'EPERM');
+	}
+}
+
+function readLockOwner() {
+	try {
+		const owner = JSON.parse(fs.readFileSync(lockOwnerPath(), 'utf8'));
+		return owner && typeof owner === 'object' ? owner : null;
+	} catch (error) {
+		return null;
+	}
+}
+
+function writeLockOwner() {
+	fs.writeFileSync(lockOwnerPath(), JSON.stringify({ pid: process.pid, createdAt: Date.now() }), 'utf8');
+}
+
+function touchStateLock() {
+	try {
+		const now = new Date();
+		fs.utimesSync(stateLockPath, now, now);
+	} catch (error) {}
+}
+
+function canStealStateLock() {
+	const owner = readLockOwner();
+	if (owner && Number(owner.pid) === process.pid) {
+		return true;
+	}
+	if (owner && isProcessAlive(owner.pid)) {
+		return false;
+	}
+	try {
+		const lockStat = fs.statSync(stateLockPath);
+		if (owner && !isProcessAlive(owner.pid)) {
+			return true;
+		}
+		return Date.now() - lockStat.mtimeMs > STATE_LOCK_STALE_MS;
+	} catch (error) {
+		return error && error.code === 'ENOENT';
+	}
+}
+
+function removeStateLockDir() {
+	try {
+		fs.rmSync(stateLockPath, { recursive: true, force: true });
+	} catch (error) {
+		if (!error || error.code !== 'ENOENT') {
+			throw error;
+		}
+	}
+}
+
 function acquireStateLock() {
 	ensureStateDir();
 	const startedAt = Date.now();
 	for (;;) {
 		try {
 			fs.mkdirSync(stateLockPath);
-			return stateLockPath;
+			writeLockOwner();
+			const heartbeat = setInterval(touchStateLock, 5000);
+			if (typeof heartbeat.unref === 'function') heartbeat.unref();
+			return { path: stateLockPath, heartbeat };
 		} catch (error) {
 			if (!error || error.code !== 'EEXIST') {
 				throw error;
 			}
 			try {
-				const lockStat = fs.statSync(stateLockPath);
-				if (Date.now() - lockStat.mtimeMs > STATE_LOCK_STALE_MS) {
-					fs.rmdirSync(stateLockPath);
+				if (canStealStateLock()) {
+					removeStateLockDir();
 					continue;
 				}
 			} catch (statError) {
@@ -95,9 +162,14 @@ function acquireStateLock() {
 	}
 }
 
-function releaseStateLock(lockPath) {
+function releaseStateLock(lock) {
+	const lockPath = lock && typeof lock === 'object' ? lock.path : lock;
+	if (lock && lock.heartbeat) {
+		clearInterval(lock.heartbeat);
+	}
+	if (!lockPath) return;
 	try {
-		fs.rmdirSync(lockPath);
+		fs.rmSync(lockPath, { recursive: true, force: true });
 	} catch (error) {
 		if (!error || error.code !== 'ENOENT') {
 			throw error;
@@ -148,8 +220,8 @@ function replaceStateFile(tmpPath) {
 	}
 }
 
-function writeState(state) {
-	const lockPath = acquireStateLock();
+function persistStateUnlocked(state) {
+	touchStateLock();
 	const tmpPath = `${statePath}.${process.pid}.${Date.now().toString(36)}.${crypto.randomBytes(8).toString('hex')}.tmp`;
 	try {
 		const fileDescriptor = fs.openSync(tmpPath, 'wx');
@@ -159,6 +231,7 @@ function writeState(state) {
 		} finally {
 			fs.closeSync(fileDescriptor);
 		}
+		touchStateLock();
 		replaceStateFile(tmpPath);
 	} finally {
 		try {
@@ -168,7 +241,28 @@ function writeState(state) {
 				/* Preserve the original write error when cleanup cannot remove a temp file. */
 			}
 		}
-		releaseStateLock(lockPath);
+	}
+}
+
+function writeState(state) {
+	const lock = acquireStateLock();
+	try {
+		persistStateUnlocked(state);
+	} finally {
+		releaseStateLock(lock);
+	}
+}
+
+function updateState(mutator) {
+	const lock = acquireStateLock();
+	try {
+		const current = readState();
+		const next = typeof mutator === 'function' ? mutator(current) : current;
+		const resolved = next && typeof next === 'object' ? next : current;
+		persistStateUnlocked(resolved);
+		return resolved;
+	} finally {
+		releaseStateLock(lock);
 	}
 }
 
@@ -221,22 +315,25 @@ function savePairing(origin, token) {
 	if (!safeOrigin) {
 		throw new Error('Invalid WordPress origin.');
 	}
-	const state = readState();
-	state.pairings = state.pairings && typeof state.pairings === 'object' ? state.pairings : {};
-	state.pairings[safeOrigin] = {
-		token,
-		paired_at: new Date().toISOString(),
-	};
-	writeState(state);
+	updateState((state) => {
+		state.pairings = state.pairings && typeof state.pairings === 'object' ? state.pairings : {};
+		state.pairings[safeOrigin] = {
+			token,
+			paired_at: new Date().toISOString(),
+		};
+		return state;
+	});
 }
 
 function removePairing(origin) {
 	const safeOrigin = normalizeOrigin(origin);
-	const state = readState();
-	if (safeOrigin && state.pairings && state.pairings[safeOrigin]) {
-		delete state.pairings[safeOrigin];
-		writeState(state);
-	}
+	if (!safeOrigin) return;
+	updateState((state) => {
+		if (state.pairings && state.pairings[safeOrigin]) {
+			delete state.pairings[safeOrigin];
+		}
+		return state;
+	});
 }
 
 function getPairing(origin) {
@@ -284,5 +381,6 @@ module.exports = {
 	timingSafeEqual,
 	validateBridgeToken,
 	readState,
+	updateState,
 	writeState,
 };

@@ -28,7 +28,13 @@ class FakeResponse extends EventEmitter {
 			throw new Error('fake client socket closed');
 		}
 		this.writes.push(String(chunk));
-		return true;
+		this.writableLength = Number(this.writableLength || 0) + Buffer.byteLength(String(chunk));
+		return this.writeReturns !== false;
+	}
+
+	destroy() {
+		this.destroyed = true;
+		this.emit('close');
 	}
 }
 
@@ -105,6 +111,12 @@ class FakeResponse extends EventEmitter {
 	statusEvents.add(closedResponse, { events: ['jobs'] });
 	closedResponse.destroyed = true;
 	assert.doesNotThrow(() => statusEvents.broadcast('jobs', { running_count: 2 }));
+
+	const blocked = new FakeResponse();
+	statusEvents.add(blocked, { events: ['jobs'] });
+	blocked.writableLength = 3 * 1024 * 1024;
+	assert.doesNotThrow(() => statusEvents.broadcast('jobs', { running_count: 3 }));
+	assert.strictEqual(blocked.destroyed, true);
 
 	console.log('diagnostics tests passed');
 })();

@@ -67,9 +67,10 @@ function invalidateProbeCache() {
 }
 
 function saveSettings(nextSettings) {
-	const state = readState();
-	state.music_analysis = normalizeSettings(nextSettings);
-	writeState(state);
+	security.updateState((state) => {
+		state.music_analysis = normalizeSettings(nextSettings);
+		return state;
+	});
 	invalidateProbeCache();
 	return settings();
 }

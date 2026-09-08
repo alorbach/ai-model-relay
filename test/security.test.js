@@ -64,4 +64,27 @@ fs.renameSync = originalRenameSync;
 assert.deepStrictEqual(security.readState(), stateBeforeFailedWrite);
 assert.strictEqual(fs.readdirSync(testStateDir).some((entry) => entry.endsWith('.tmp')), false);
 
+security.writeState({ version: 4, pairings: { 'https://keep.test': { token: 'keep' } }, extra: 'preserved' });
+security.savePairing('https://new.test', 'new-token');
+assert.strictEqual(security.readState().extra, 'preserved');
+assert.strictEqual(security.readState().pairings['https://keep.test'].token, 'keep');
+assert.strictEqual(security.readState().pairings['https://new.test'].token, 'new-token');
+security.removePairing('https://new.test');
+assert.strictEqual(security.readState().pairings['https://new.test'], undefined);
+assert.strictEqual(security.readState().pairings['https://keep.test'].token, 'keep');
+
+const lockPath = `${security.statePath}.lock`;
+fs.mkdirSync(lockPath, { recursive: true });
+fs.writeFileSync(path.join(lockPath, 'owner.json'), JSON.stringify({ pid: process.pid, createdAt: Date.now() - 120000 }));
+const staleTime = new Date(Date.now() - 120000);
+fs.utimesSync(lockPath, staleTime, staleTime);
+security.writeState({ version: 5, recovered: true });
+assert.strictEqual(security.readState().version, 5);
+assert.strictEqual(security.readState().recovered, true);
+
+fs.mkdirSync(lockPath, { recursive: true });
+fs.writeFileSync(path.join(lockPath, 'owner.json'), JSON.stringify({ pid: 2147483646, createdAt: Date.now() }));
+security.writeState({ version: 6, dead_owner: true });
+assert.strictEqual(security.readState().version, 6);
+
 console.log('security tests passed');

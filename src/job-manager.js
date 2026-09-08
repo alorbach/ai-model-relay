@@ -10,6 +10,8 @@ function clampMaxConcurrent(value) {
 
 const DEFAULT_RECENT_RETENTION_MS = 15 * 60 * 1000;
 const DEFAULT_MAX_RECENT = 50;
+const DEFAULT_MAX_ARTIFACT_BYTES = 256 * 1024 * 1024;
+const DEFAULT_CANCEL_GRACE_MS = 5000;
 
 function clampPositiveInt(value, fallback) {
 	const parsed = Number.parseInt(String(value || ''), 10);
@@ -190,6 +192,8 @@ class JobManager {
 		this.maxConcurrent = clampMaxConcurrent(options.maxConcurrent);
 		this.retentionMs = clampPositiveInt(options.retentionMs, DEFAULT_RECENT_RETENTION_MS);
 		this.maxRecent = clampPositiveInt(options.maxRecent, DEFAULT_MAX_RECENT);
+		this.maxArtifactBytes = clampPositiveInt(options.maxArtifactBytes, DEFAULT_MAX_ARTIFACT_BYTES);
+		this.cancelGraceMs = clampPositiveInt(options.cancelGraceMs, DEFAULT_CANCEL_GRACE_MS);
 		this.now = typeof options.now === 'function' ? options.now : () => Date.now();
 		this.onChange = typeof options.onChange === 'function' ? options.onChange : () => {};
 		this.running = new Map();
@@ -223,6 +227,7 @@ class JobManager {
 			sessionInput: '',
 			abortController: new AbortController(),
 			cancelled: false,
+			finished: false,
 			runner,
 		};
 
@@ -280,6 +285,7 @@ class JobManager {
 				appendSessionOutput: (stream, chunk) => this.appendSessionOutput(job, stream, chunk),
 			}))
 			.then((result) => {
+				if (job.finished) return;
 				if (job.cancelled) {
 					const cancelled = result && result.category === 'cancelled'
 						? { ...result, success: false }
@@ -292,6 +298,7 @@ class JobManager {
 				job.resolve(result);
 			})
 			.catch((error) => {
+				if (job.finished) return;
 				if (job.cancelled) {
 					const result = { success: false, category: 'cancelled', code: 'local_job_cancelled', message: 'The local Relay job was cancelled; source bytes were preserved.' };
 					this.finish(job, 'cancelled', result);
@@ -321,6 +328,13 @@ class JobManager {
 		job.cancelled = true;
 		job.status = 'cancelling';
 		job.abortController.abort();
+		if (job.cancelTimer) clearTimeout(job.cancelTimer);
+		job.cancelTimer = setTimeout(() => {
+			if (job.finished || !this.running.has(job.id)) return;
+			const result = { success: false, category: 'cancelled', code: 'local_job_cancelled', message: 'The local Relay job was cancelled; source bytes were preserved.' };
+			this.finish(job, 'cancelled', result);
+			job.resolve(result);
+		}, this.cancelGraceMs);
 		this.emitChange();
 		return true;
 	}
@@ -367,6 +381,12 @@ class JobManager {
 	}
 
 	finish(job, status, failure) {
+		if (!job || job.finished) return;
+		job.finished = true;
+		if (job.cancelTimer) {
+			clearTimeout(job.cancelTimer);
+			job.cancelTimer = null;
+		}
 		this.running.delete(job.id);
 		job.status = status;
 		job.finishedAt = this.now();
@@ -420,6 +440,16 @@ class JobManager {
 		this.drain();
 	}
 
+	artifactBytes() {
+		let total = 0;
+		for (const artifacts of this.artifacts.values()) {
+			for (const artifact of Array.isArray(artifacts) ? artifacts : []) {
+				total += artifact && artifact.bytes && artifact.bytes.length ? artifact.bytes.length : 0;
+			}
+		}
+		return total;
+	}
+
 	pruneRecent() {
 		const now = this.now();
 		this.recent = this.recent.filter((job) => {
@@ -430,6 +460,11 @@ class JobManager {
 		const keepArtifacts = new Set(this.recent.map((recent) => String(recent.id)));
 		for (const id of this.artifacts.keys()) {
 			if (!keepArtifacts.has(id)) this.artifacts.delete(id);
+		}
+		for (let index = this.recent.length - 1; index >= 0 && this.artifactBytes() > this.maxArtifactBytes; index -= 1) {
+			const oldest = this.recent[index];
+			this.artifacts.delete(String(oldest.id));
+			if (Array.isArray(oldest.artifacts)) oldest.artifacts = [];
 		}
 	}
 
@@ -515,6 +550,8 @@ class JobManager {
 module.exports = {
 	JobManager,
 	clampMaxConcurrent,
+	DEFAULT_CANCEL_GRACE_MS,
+	DEFAULT_MAX_ARTIFACT_BYTES,
 	DEFAULT_MAX_RECENT,
 	DEFAULT_RECENT_RETENTION_MS,
 	collectDebugLogs,

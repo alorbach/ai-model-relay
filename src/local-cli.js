@@ -5,7 +5,7 @@ const path = require('path');
 const { fileURLToPath } = require('url');
 const { spawn, spawnSync } = require('child_process');
 const { createBoundedCollector } = require('./diagnostics');
-const { killProcessTree } = require('./cuda-torch-venv');
+const { attachProcessAbort, killProcessTree } = require('./cuda-torch-venv');
 
 const TIMEOUT_MS = 15000;
 const MAX_CLI_MODELS = 50;
@@ -317,15 +317,42 @@ function runTextCommand(command, args, input, session = {}, options = {}) {
 	return new Promise((resolve) => {
 		const out = createBoundedCollector({ maxChars: 1024 * 1024 });
 		const err = createBoundedCollector({ maxChars: 1024 * 1024 });
-		let child; let settled = false;
+		let child; let settled = false; let cancelled = false; let timedOut = false; let detachAbort = () => {};
 		try { const invocation = commandAndArgs(command, args); child = (options.spawn || spawn)(invocation.command, invocation.args, { shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], ...(options.cwd ? { cwd: options.cwd } : {}) }); } catch (error) { resolve({ success: false, category: 'configuration', code: 'cli_spawn_failed', message: safeDiagnostic(error.message) }); return; }
 		const timeoutMs = Number(options.timeoutMs || 600000);
 		const timeoutSeconds = Math.ceil(timeoutMs / 1000);
-		const timer = setTimeout(() => { if (!settled) { settled = true; killProcessTree(child); resolve({ success: false, category: 'timeout', code: 'cli_timeout', message: `CLI request timed out after ${timeoutSeconds} second${timeoutSeconds === 1 ? '' : 's'}.`, details: { timeout_ms: timeoutMs, stdout: out.value(), stderr: err.value() } }); } }, timeoutMs);
+		const finish = (result) => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
+			detachAbort();
+			resolve(result);
+		};
+		const timer = setTimeout(() => {
+			timedOut = true;
+			killProcessTree(child);
+			finish({ success: false, category: 'timeout', code: 'cli_timeout', message: `CLI request timed out after ${timeoutSeconds} second${timeoutSeconds === 1 ? '' : 's'}.`, details: { timeout_ms: timeoutMs, stdout: out.value(), stderr: err.value() } });
+		}, timeoutMs);
+		detachAbort = attachProcessAbort(child, options.signal || session.signal, () => {
+			cancelled = true;
+			finish({ success: false, category: 'cancelled', code: 'local_job_cancelled', message: 'The local Relay job was cancelled; source bytes were preserved.', details: { stdout: out.value(), stderr: err.value() } });
+		});
 		child.stdout.on('data', (chunk) => { out.append(chunk); session.appendSessionOutput && session.appendSessionOutput('stdout', String(chunk)); });
 		child.stderr.on('data', (chunk) => { err.append(chunk); session.appendSessionOutput && session.appendSessionOutput('stderr', String(chunk)); });
-		child.on('error', (error) => { if (!settled) { settled = true; clearTimeout(timer); resolve({ success: false, category: 'configuration', code: 'cli_spawn_failed', message: safeDiagnostic(error.message) }); } });
-		child.on('close', (status) => { if (settled) return; settled = true; clearTimeout(timer); if (status !== 0) { resolve({ success: false, category: 'cli_process', code: 'cli_request_failed', message: safeDiagnostic(err.value() || out.value()), details: { status } }); return; } resolve({ success: true, text: out.value().trim(), stderr: err.value().trim() }); });
+		child.on('error', (error) => { finish({ success: false, category: 'configuration', code: 'cli_spawn_failed', message: safeDiagnostic(error.message) }); });
+		child.on('close', (status) => {
+			if (settled) return;
+			if (cancelled) {
+				finish({ success: false, category: 'cancelled', code: 'local_job_cancelled', message: 'The local Relay job was cancelled; source bytes were preserved.', details: { status, stdout: out.value(), stderr: err.value() } });
+				return;
+			}
+			if (timedOut) {
+				finish({ success: false, category: 'timeout', code: 'cli_timeout', message: `CLI request timed out after ${timeoutSeconds} second${timeoutSeconds === 1 ? '' : 's'}.`, details: { timeout_ms: timeoutMs, stdout: out.value(), stderr: err.value() } });
+				return;
+			}
+			if (status !== 0) { finish({ success: false, category: 'cli_process', code: 'cli_request_failed', message: safeDiagnostic(err.value() || out.value()), details: { status } }); return; }
+			finish({ success: true, text: out.value().trim(), stderr: err.value().trim() });
+		});
 		if (child.stdin) {
 			if (typeof child.stdin.once === 'function') child.stdin.once('error', () => {});
 			child.stdin.end(String(input || ''));

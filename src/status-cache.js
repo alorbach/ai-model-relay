@@ -32,22 +32,46 @@ function createStatusCache(context, onUpdate = () => {}) {
 		onUpdate(status, capabilities);
 		return capabilities;
 	}
+	function publishFrom(backends) {
+		const codexDriver = backends.list ? backends.list().find((driver) => driver.id === 'codex-cli') : backends.getDriver('chat', { provider: 'codex-cli' });
+		if (!codexDriver) throw new Error('Codex CLI driver is unavailable.');
+		const codexStatus = codexDriver.checkStatus();
+		const codexCapabilities = codexDriver.capabilities();
+		const now = new Date().toISOString();
+		refreshState = { ...refreshState, active: false, completed_at: now };
+		status = { ...codexStatus, bridge: { ...bridgeMetadata(), ...(status.bridge || {}) }, asr: context.codex.asrStatus ? context.codex.asrStatus({ refresh: true }) : {}, music_analysis: context.musicAnalysis && context.musicAnalysis.capabilities ? context.musicAnalysis.capabilities() : {}, jobs: context.jobManager.snapshot(), checking: false, last_checked: now, refresh: refreshState };
+		capabilities = { ...capabilities, codex: codexCapabilities.details || {}, asr: context.codex.asrStatus ? context.codex.asrStatus({ refresh: true }) : {}, music_analysis: context.musicAnalysis && context.musicAnalysis.capabilities ? context.musicAnalysis.capabilities() : {}, features: codexCapabilities.features || {}, backends: backends.capabilities(), video: context.video.capabilities ? context.video.capabilities() : { enabled: false }, media_analysis: context.mediaAnalysis.capabilities ? context.mediaAnalysis.capabilities() : { enabled: false }, checking: false, last_checked: now, refresh: refreshState };
+		onUpdate(status, capabilities);
+	}
 	function refresh() {
-		if (refreshing) return refreshing;
+		const backends = context.backends;
+		if (refreshing) {
+			if (refreshing.backends === backends) return refreshing;
+			return refreshing.then(() => refresh());
+		}
 		refreshState = { active: true, id: ++refreshId, started_at: new Date().toISOString(), completed_at: null, error: null };
 		status = { ...status, checking: true, refresh: refreshState }; capabilities = { ...capabilities, checking: true, refresh: refreshState }; onUpdate(status, capabilities);
-		refreshing = Promise.resolve(context.backends.refresh ? context.backends.refresh() : context.backends.capabilities()).then(() => {
-			const codexDriver = context.backends.list ? context.backends.list().find((driver) => driver.id === 'codex-cli') : context.backends.getDriver('chat', { provider: 'codex-cli' });
-			if (!codexDriver) throw new Error('Codex CLI driver is unavailable.');
-			const codexStatus = codexDriver.checkStatus();
-			const codexCapabilities = codexDriver.capabilities();
+		const current = Promise.resolve(backends.refresh ? backends.refresh() : backends.capabilities()).then(() => {
+			if (context.backends !== backends) return 'stale';
+			publishFrom(backends);
+			return 'ok';
+		}).catch((error) => {
+			if (context.backends !== backends) return 'stale';
 			const now = new Date().toISOString();
-			refreshState = { ...refreshState, active: false, completed_at: now };
-			status = { ...codexStatus, bridge: { ...bridgeMetadata(), ...(status.bridge || {}) }, asr: context.codex.asrStatus ? context.codex.asrStatus({ refresh: true }) : {}, music_analysis: context.musicAnalysis && context.musicAnalysis.capabilities ? context.musicAnalysis.capabilities() : {}, jobs: context.jobManager.snapshot(), checking: false, last_checked: now, refresh: refreshState };
-			capabilities = { ...capabilities, codex: codexCapabilities.details || {}, asr: context.codex.asrStatus ? context.codex.asrStatus({ refresh: true }) : {}, music_analysis: context.musicAnalysis && context.musicAnalysis.capabilities ? context.musicAnalysis.capabilities() : {}, features: codexCapabilities.features || {}, backends: context.backends.capabilities(), video: context.video.capabilities ? context.video.capabilities() : { enabled: false }, media_analysis: context.mediaAnalysis.capabilities ? context.mediaAnalysis.capabilities() : { enabled: false }, checking: false, last_checked: now, refresh: refreshState };
+			refreshState = { ...refreshState, active: false, completed_at: now, error: error.message || 'Provider refresh failed.' };
+			status = { ...status, checking: false, message: refreshState.error, refresh: refreshState };
+			capabilities = { ...capabilities, checking: false, refresh: refreshState };
 			onUpdate(status, capabilities);
-		}).catch((error) => { const now = new Date().toISOString(); refreshState = { ...refreshState, active: false, completed_at: now, error: error.message || 'Provider refresh failed.' }; status = { ...status, checking: false, message: refreshState.error, refresh: refreshState }; capabilities = { ...capabilities, checking: false, refresh: refreshState }; onUpdate(status, capabilities); }).finally(() => { refreshing = null; });
-		return refreshing;
+			return 'error';
+		}).finally(() => {
+			if (refreshing === current) refreshing = null;
+		}).then((result) => {
+			if (result === 'stale') return refresh();
+			return result;
+		});
+		current.backends = backends;
+		refreshing = current;
+		return current;
 	}
 	return { capabilities: () => capabilities, refresh, sync, status: () => ({ ...status, jobs: context.jobManager.snapshot() }) };
 }

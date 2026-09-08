@@ -8,6 +8,7 @@ const packageInfo = require('../package.json');
 const codex = require('./codex');
 const { PRODUCT_NAME, SHORT_NAME, LEGACY_PRODUCT_NAME } = require('./brand');
 const { appendLog, safeError } = require('./diagnostics');
+const { killProcessTree } = require('./cuda-torch-venv');
 const security = require('./security');
 
 let buildInfo = {};
@@ -128,17 +129,25 @@ function stopBridge() {
 	const child = serverProcess;
 	serverProcess = null;
 	return new Promise((resolve) => {
-		const timeout = setTimeout(resolve, 2500);
+		const timeout = setTimeout(() => {
+			killProcessTree(child);
+			resolve();
+		}, 2500);
 		child.once('exit', () => {
 			clearTimeout(timeout);
 			resolve();
 		});
 		try {
-			child.kill();
+			killProcessTree(child);
 		} catch (error) {
 			appendLog('main', 'Bridge server kill failed during stop.', { error: safeError(error) });
-			clearTimeout(timeout);
-			resolve();
+			try {
+				child.kill();
+			} catch (killError) {
+				appendLog('main', 'Bridge server fallback kill failed during stop.', { error: safeError(killError) });
+				clearTimeout(timeout);
+				resolve();
+			}
 		}
 	});
 }
