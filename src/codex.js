@@ -9,6 +9,7 @@ const { appendLog, createBoundedCollector, safeError } = require('./diagnostics'
 const { attachProcessAbort, killProcessTree } = require('./cuda-torch-venv');
 const { beginLocalModelDebugLog } = require('./temp-debug-logs');
 const { resolveMaxTokens } = require('./token-policy');
+const relaySettings = require('./relay-settings');
 
 const defaultCodexBinary = process.env.ALORBACH_CODEX_BINARY || 'codex';
 let configuredCodexBinary = '';
@@ -85,11 +86,21 @@ function resolveCodexBinary() {
 	return codexBinary;
 }
 
+function codexTimeoutMs(kind, fallback) {
+	try {
+		const timeouts = relaySettings.resolved().runtime.timeouts;
+		if (kind === 'chat' && timeouts.codex_chat_ms) return timeouts.codex_chat_ms;
+		if (kind === 'image' && timeouts.codex_image_ms) return timeouts.codex_image_ms;
+		if (kind === 'status' && timeouts.codex_status_ms) return timeouts.codex_status_ms;
+	} catch (error) {}
+	return fallback;
+}
+
 function runCodex(args, options = {}) {
 	return spawnSync(resolveCodexBinary(), args, {
 		encoding: 'utf8',
 		shell: false,
-		timeout: Number(process.env.ALORBACH_CODEX_STATUS_TIMEOUT_MS || 15000),
+		timeout: Number(options.timeout || codexTimeoutMs('status', 15000)),
 		env: {
 			...process.env,
 			CODEX_HOME: codexHome,
@@ -254,7 +265,7 @@ function checkStatus() {
 }
 
 async function checkStatusAsync() {
-	const [version, login] = await Promise.all([runCodexAsync(['--version'], { timeout: Number(process.env.ALORBACH_CODEX_STATUS_TIMEOUT_MS || 15000) }), runCodexAsync(['login', 'status'], { timeout: Number(process.env.ALORBACH_CODEX_STATUS_TIMEOUT_MS || 15000) })]);
+	const [version, login] = await Promise.all([runCodexAsync(['--version'], { timeout: Number(codexTimeoutMs('status', 15000)) }), runCodexAsync(['login', 'status'], { timeout: Number(codexTimeoutMs('status', 15000)) })]);
 	if (version.error || version.status !== 0) return { success: false, message: 'Codex CLI is not installed or not on PATH.', details: { codex_binary: resolveCodexBinary(), error: version.error && version.error.message || (version.stderr || '').trim() } };
 	const loginText = `${login.stdout || ''}\n${login.stderr || ''}`;
 	const loggedIn = !login.error && login.status === 0 && /logged in/i.test(loginText) && fs.existsSync(authPath);
@@ -852,7 +863,7 @@ async function chat(payload, session = {}, internalOptions = {}) {
 		outputSchemaPath: schemaPath,
 	});
 	if (typeof session.appendSessionInput === 'function') session.appendSessionInput('stdin', prompt);
-	const runOptions = { cwd: tempDir, timeout: Number(process.env.ALORBACH_CODEX_CHAT_TIMEOUT_MS || 600000), onOutput: session.appendSessionOutput, input: prompt, signal: session.signal };
+	const runOptions = { cwd: tempDir, timeout: Number(codexTimeoutMs('chat', 600000)), onOutput: session.appendSessionOutput, input: prompt, signal: session.signal };
 	let run = await runCodexExec(makeArgs(model), runOptions);
 	if (schemaPath && codexOutputSchemaUnsupported(run)) {
 		schemaPath = '';
@@ -1164,7 +1175,7 @@ async function images(payload, session = {}) {
 			image_detection_initial_file_count: before.length,
 		});
 	}
-	const run = await runCodexExec(args, { cwd: tempDir, timeout: Number(process.env.ALORBACH_CODEX_IMAGE_TIMEOUT_MS || 1800000), onOutput: session.appendSessionOutput, input: promptText, signal: session.signal });
+	const run = await runCodexExec(args, { cwd: tempDir, timeout: Number(codexTimeoutMs('image', 1800000)), onOutput: session.appendSessionOutput, input: promptText, signal: session.signal });
 	const after = listGeneratedImages(generatedImagesDir);
 	const newImages = detectNewImage(before, after, {
 		startedAt: expectedStartTime,

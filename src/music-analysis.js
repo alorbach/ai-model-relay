@@ -5,7 +5,7 @@ const os = require('os');
 const path = require('path');
 const { spawn, spawnSync } = require('child_process');
 const { createBoundedCollector } = require('./diagnostics');
-const { killProcessTree } = require('./cuda-torch-venv');
+const { attachProcessAbort, killProcessTree } = require('./cuda-torch-venv');
 const security = require('./security');
 
 const MODEL_ID = 'model-relay:music-analysis:core';
@@ -44,6 +44,7 @@ function defaultSettings() {
 		venv_path: process.env.ALORBACH_MUSIC_ANALYSIS_VENV || DEFAULT_VENV_PATH,
 		sample_rate: Math.max(8000, Number(process.env.ALORBACH_MUSIC_ANALYSIS_SAMPLE_RATE || 22050) || 22050),
 		max_sections: Math.max(2, Math.min(24, Number(process.env.ALORBACH_MUSIC_ANALYSIS_MAX_SECTIONS || 12) || 12)),
+		timeout_ms: Math.max(1000, Number(process.env.ALORBACH_MUSIC_ANALYSIS_TIMEOUT_MS || 1800000) || 1800000),
 	};
 }
 
@@ -55,6 +56,7 @@ function normalizeSettings(raw) {
 		venv_path: String(source.venv_path || defaults.venv_path || '').trim() || defaults.venv_path,
 		sample_rate: Math.max(8000, Math.min(96000, Number(source.sample_rate || defaults.sample_rate) || defaults.sample_rate)),
 		max_sections: Math.max(2, Math.min(24, Number(source.max_sections || defaults.max_sections) || defaults.max_sections)),
+		timeout_ms: Math.max(1000, Number(source.timeout_ms || defaults.timeout_ms) || defaults.timeout_ms),
 	};
 }
 
@@ -212,12 +214,14 @@ function runAsync(command, args, options = {}) {
 			resolve({ status: null, signal: null, stdout: '', stderr: '', error: spawnError });
 			return;
 		}
-		const timer = setTimeout(() => { timedOut = true; killProcessTree(child); }, Math.max(1, Number(options.timeout || DEFAULT_TIMEOUT_MS) || DEFAULT_TIMEOUT_MS));
+		const timer = setTimeout(() => { timedOut = true; killProcessTree(child); }, Math.max(1, Number(options.timeout || (settings().timeout_ms) || DEFAULT_TIMEOUT_MS) || DEFAULT_TIMEOUT_MS));
 		if (typeof timer.unref === 'function') timer.unref();
+		const detachAbort = attachProcessAbort(child, options.signal);
 		child.stdout.on('data', (chunk) => { const text = String(chunk || ''); stdout.append(text); emitOutput('stdout', text); });
 		child.stderr.on('data', (chunk) => { const text = String(chunk || ''); stderr.append(text); emitOutput('stderr', text); });
 		child.once('error', (spawnError) => { error = spawnError; });
 		child.once('close', (status, signal) => {
+			detachAbort();
 			clearTimeout(timer);
 			resolve({ status, signal, stdout: stdout.value(), stderr: stderr.value(), error: error || (timedOut ? new Error('Music analysis timed out.') : null) });
 		});
@@ -322,9 +326,10 @@ async function analyze(payload = {}, session = {}) {
 		if (typeof session.appendSessionOutput === 'function') session.appendSessionOutput('stdout', 'Running local music analysis with librosa.\n');
 		const run = await runAsync(runtime.venv_python, [RUNNER_PATH], {
 			cwd: tempDir,
-			timeout: DEFAULT_TIMEOUT_MS,
+			timeout: Number(config.timeout_ms || DEFAULT_TIMEOUT_MS),
 			input: JSON.stringify({ audio_path: audioPath, sample_rate: config.sample_rate, max_sections: config.max_sections }),
 			onOutput: session.appendSessionOutput,
+			signal: session.signal,
 		});
 		if (run.error || run.status !== 0) {
 			return { success: false, category: 'music_analysis_runtime', code: 'music_analysis_failed', message: 'Local music analysis failed.', details: { status: run.status, stderr: run.stderr, stdout: run.stdout } };

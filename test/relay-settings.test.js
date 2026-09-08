@@ -82,6 +82,73 @@ try {
 		else process.env.AI_MODEL_RELAY_XAI_API_KEY = previousRelayXaiKey;
 	}
 
+	const previousConcurrent = process.env.ALORBACH_CODEX_MAX_CONCURRENT_JOBS;
+	const previousChatTimeout = process.env.ALORBACH_CODEX_CHAT_TIMEOUT_MS;
+	try {
+		delete process.env.XAI_API_KEY;
+		delete process.env.AI_MODEL_RELAY_XAI_API_KEY;
+		delete process.env.ALORBACH_CODEX_MAX_CONCURRENT_JOBS;
+		delete process.env.ALORBACH_CODEX_CHAT_TIMEOUT_MS;
+		state = {};
+		const secret = 'xai-super-secret-key-9999';
+		const savedProviders = relaySettings.saveSettings({
+			runtime: { max_concurrent_jobs: 4, timeouts: { codex_chat_ms: 120000 } },
+			providers: { xai: { api_key: secret, base_url: 'https://api.example.xai/v1', models: 'grok-4.6' } },
+		});
+		assert.strictEqual(savedProviders.runtime.max_concurrent_jobs, 4);
+		assert.strictEqual(savedProviders.runtime.timeouts.codex_chat_ms, 120000);
+		assert.strictEqual(savedProviders.providers.xai.api_key, secret);
+		assert.strictEqual(savedProviders.defaults.videos, 'model-relay:xai:imagine-video');
+		const published = relaySettings.publicSettings();
+		assert.deepStrictEqual(published.providers.xai.api_key, { configured: true, suffix: '9999' });
+		assert.strictEqual(published.providers.xai.base_url, 'https://api.example.xai/v1');
+		assert.ok(!JSON.stringify(published).includes(secret));
+		assert.strictEqual(relaySettings.resolved().runtime.max_concurrent_jobs, 4);
+		assert.strictEqual(relaySettings.resolved().runtime.timeouts.codex_chat_ms, 120000);
+		assert.strictEqual(relaySettings.driverOptions().xai.apiKey, secret);
+		relaySettings.saveSettings({
+			providers: {
+				grok: { imagine_skill: '%USERPROFILE%\\.grok\\skills\\imagine\\SKILL.md' },
+				antigravity: { state_dir: '%USERPROFILE%\\.gemini\\antigravity-cli' },
+			},
+		});
+		const expandedHome = process.env.USERPROFILE || process.env.HOME || '';
+		if (expandedHome) {
+			assert.ok(relaySettings.driverOptions().grok.imagineSkillPath.startsWith(expandedHome));
+			assert.ok(!relaySettings.driverOptions().grok.imagineSkillPath.includes('%USERPROFILE%'));
+			assert.ok(relaySettings.driverOptions().antigravity.stateRoot.startsWith(expandedHome));
+			assert.ok(!relaySettings.driverOptions().antigravity.stateRoot.includes('%USERPROFILE%'));
+		}
+
+		const kept = relaySettings.saveSettings({ providers: { xai: { api_key: '', base_url: 'https://api.example.xai/v1' } } });
+		assert.strictEqual(kept.providers.xai.api_key, secret);
+		const cleared = relaySettings.saveSettings({ providers: { xai: { clear_api_key: true } } });
+		assert.strictEqual(cleared.providers.xai.api_key, '');
+		assert.deepStrictEqual(relaySettings.publicSettings().providers.xai.api_key, { configured: false, suffix: '' });
+		assert.ok(!JSON.stringify(relaySettings.publicSettings()).includes(secret));
+
+		process.env.ALORBACH_CODEX_MAX_CONCURRENT_JOBS = '5';
+		process.env.ALORBACH_CODEX_CHAT_TIMEOUT_MS = '90000';
+		state = {};
+		assert.strictEqual(relaySettings.resolved().runtime.max_concurrent_jobs, 5);
+		assert.strictEqual(relaySettings.resolved().runtime.timeouts.codex_chat_ms, 90000);
+		relaySettings.saveSettings({ runtime: { max_concurrent_jobs: 3, timeouts: { codex_chat_ms: 111000 } } });
+		assert.strictEqual(relaySettings.resolved().runtime.max_concurrent_jobs, 3);
+		assert.strictEqual(relaySettings.resolved().runtime.timeouts.codex_chat_ms, 111000);
+		relaySettings.saveSettings({ runtime: { max_concurrent_jobs: '', timeouts: { codex_chat_ms: '' } } });
+		assert.strictEqual(relaySettings.resolved().runtime.max_concurrent_jobs, 5);
+		assert.strictEqual(relaySettings.resolved().runtime.timeouts.codex_chat_ms, 90000);
+	} finally {
+		if (previousXaiKey === undefined) delete process.env.XAI_API_KEY;
+		else process.env.XAI_API_KEY = previousXaiKey;
+		if (previousRelayXaiKey === undefined) delete process.env.AI_MODEL_RELAY_XAI_API_KEY;
+		else process.env.AI_MODEL_RELAY_XAI_API_KEY = previousRelayXaiKey;
+		if (previousConcurrent === undefined) delete process.env.ALORBACH_CODEX_MAX_CONCURRENT_JOBS;
+		else process.env.ALORBACH_CODEX_MAX_CONCURRENT_JOBS = previousConcurrent;
+		if (previousChatTimeout === undefined) delete process.env.ALORBACH_CODEX_CHAT_TIMEOUT_MS;
+		else process.env.ALORBACH_CODEX_CHAT_TIMEOUT_MS = previousChatTimeout;
+	}
+
 	console.log('relay settings tests passed');
 } finally {
 	security.readState = originalReadState;

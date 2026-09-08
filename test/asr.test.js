@@ -37,6 +37,21 @@ function createQwenSnapshot(snapshot) {
 	assert.strictEqual(config.allow_qwen_cpu_offload, true);
 	assert.strictEqual(config.qwen_chunk_seconds, 30);
 	assert.strictEqual(config.qwen_max_word_duration_seconds, 12);
+	assert.strictEqual(asr.normalizeSettings({ transcribe_timeout_ms: 90000, cuda_paths: ' C:\\cuda\\bin ', qwen_torch_index_url: 'https://download.pytorch.org/whl/cu128' }).transcribe_timeout_ms, 90000);
+	assert.strictEqual(asr.normalizeSettings({ cuda_paths: ' C:\\cuda\\bin ' }).cuda_paths, 'C:\\cuda\\bin');
+	assert.strictEqual(asr.normalizeSettings({ qwen_torch_index_url: ' https://download.pytorch.org/whl/cu128 ' }).qwen_torch_index_url, 'https://download.pytorch.org/whl/cu128');
+	const previousCudaPaths = process.env.ALORBACH_ASR_CUDA_PATHS;
+	try {
+		process.env.ALORBACH_ASR_CUDA_PATHS = 'C:\\env-cuda-bin';
+		const settingsOnly = asr.cudaRuntimeDirs(process.execPath, { cuda_paths: 'C:\\settings-cuda-bin' });
+		assert.ok(settingsOnly.includes('C:\\settings-cuda-bin'));
+		assert.ok(!settingsOnly.includes('C:\\env-cuda-bin'));
+		const probeDirs = asr.cudaRuntimeInfo(process.execPath, { cuda_paths: 'C:\\settings-cuda-bin' }).dirs;
+		assert.ok(probeDirs.includes('C:\\settings-cuda-bin'));
+	} finally {
+		if (previousCudaPaths === undefined) delete process.env.ALORBACH_ASR_CUDA_PATHS;
+		else process.env.ALORBACH_ASR_CUDA_PATHS = previousCudaPaths;
+	}
 	assert.ok(config.models.find((model) => model.id === 'whisper-medium'));
 	assert.strictEqual(config.models.find((model) => model.id === 'qwen3-asr-1.7b').provider, 'qwen-asr');
 	assert.strictEqual(config.models.find((model) => model.id === 'qwen3-asr-0.6b').provider, 'qwen-asr');

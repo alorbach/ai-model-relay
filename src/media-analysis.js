@@ -324,6 +324,9 @@ async function downloadMedia(url, tempDir, fetchImpl = globalThis.fetch, lookupF
 		if (options.signal && typeof options.signal.removeEventListener === 'function') {
 			options.signal.removeEventListener('abort', abortFromCaller);
 		}
+		if (dispatcher && typeof dispatcher.close === 'function') {
+			try { await dispatcher.close(); } catch (error) {}
+		}
 	}
 }
 

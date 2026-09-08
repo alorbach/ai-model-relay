@@ -24,7 +24,10 @@ const { appendLog, safeError, safeProcessSend } = require('./diagnostics');
 let pairingCode = security.createPairingCode();
 const faviconPath = path.join(__dirname, '..', 'assets', 'favicon.ico');
 
-function maxConcurrentJobs() {
+function maxConcurrentJobs(relay = relaySettings) {
+	if (relay && typeof relay.resolved === 'function') {
+		return clampMaxConcurrent(relay.resolved().runtime.max_concurrent_jobs);
+	}
 	return clampMaxConcurrent(process.env.ALORBACH_CODEX_MAX_CONCURRENT_JOBS || 2);
 }
 
@@ -744,7 +747,16 @@ async function route(req, res, context) {
 		return;
 	}
 	if (req.method === 'GET' && url.pathname === '/v1/relay/settings') {
-		sendJson(res, 200, { success: true, settings: context.relaySettings.settings(), models: context.backends.models(), backends: context.backends.capabilities() }, corsOrigin(req, bridgeSecurity));
+		const settings = context.relaySettings.publicSettings
+			? context.relaySettings.publicSettings()
+			: context.relaySettings.settings();
+		sendJson(res, 200, {
+			success: true,
+			settings,
+			listen_port: context.listenPort || Number(process.env.ALORBACH_CODEX_BRIDGE_PORT || 8765),
+			models: context.backends.models(),
+			backends: context.backends.capabilities(),
+		}, corsOrigin(req, bridgeSecurity));
 		return;
 	}
 
@@ -979,14 +991,17 @@ async function route(req, res, context) {
 	}
 	if (url.pathname === '/v1/relay/settings') {
 		const previous = context.relaySettings.settings();
-		const settings = context.relaySettings.saveSettings(body.settings || body || {});
+		context.relaySettings.saveSettings(body.settings || body || {});
+		const settings = context.relaySettings.publicSettings
+			? context.relaySettings.publicSettings()
+			: context.relaySettings.settings();
 		const cliPathsChanged = JSON.stringify(previous && previous.cli_paths || {}) !== JSON.stringify(settings && settings.cli_paths || {});
-		context.rebuildBackends();
+		context.rebuildBackends('settings');
 		context.statusCache.sync();
 		if (cliPathsChanged) context.statusCache.refresh();
 		context.statusEvents.broadcast('status', statusPayload(context, { includePairedOrigins: true }));
 		context.statusEvents.broadcast('capabilities', capabilitiesPayload(context));
-		sendJson(res, 200, { success: true, settings, models: context.backends.models(), backends: context.backends.capabilities(), refresh_started: cliPathsChanged, refresh: context.statusCache.status().refresh || null }, origin);
+		sendJson(res, 200, { success: true, settings, listen_port: context.listenPort || Number(process.env.ALORBACH_CODEX_BRIDGE_PORT || 8765), models: context.backends.models(), backends: context.backends.capabilities(), refresh_started: cliPathsChanged, refresh: context.statusCache.status().refresh || null }, origin);
 		return;
 	}
 	if (url.pathname === '/v1/relay/refresh') {
@@ -1212,22 +1227,33 @@ function createServer(options = {}) {
 		statusEvents,
 		relaySettings: options.relaySettings || relaySettings,
 		pairingLimiters: new Map(),
+		listenPort: Number(options.port || process.env.ALORBACH_CODEX_BRIDGE_PORT || 8765),
 	};
 	context.usesProvidedBackends = !!options.backends;
-	context.rebuildBackends = () => {
+	context.rebuildBackends = (reason) => {
 		const cliPaths = applyRelayCliPaths(context);
+		const driverOpts = context.relaySettings && typeof context.relaySettings.driverOptions === 'function'
+			? context.relaySettings.driverOptions()
+			: {};
+		if ((reason === 'settings' || options.maxConcurrent == null) && context.jobManager && typeof context.jobManager.setMaxConcurrent === 'function' && context.relaySettings && typeof context.relaySettings.resolved === 'function') {
+			context.jobManager.setMaxConcurrent(context.relaySettings.resolved().runtime.max_concurrent_jobs);
+		}
+		if (context.video && typeof context.video.configure === 'function' && driverOpts.video) {
+			context.video.configure(driverOpts.video);
+		}
 		if (context.usesProvidedBackends) return context.backends;
 		context.backends = createBackendRegistry({
 			codex: context.codex,
 			mediaAnalysis: context.mediaAnalysis,
 			video: context.video,
 			musicAnalysis: context.musicAnalysis,
-			grok: options.grok,
-			cursor: options.cursor,
-			antigravity: options.antigravity,
-			xai: options.xai,
-			cli: options.cli,
-			apiKeyChat: options.apiKeyChat,
+			grok: { ...(driverOpts.grok || {}), ...(options.grok || {}) },
+			cursor: { ...(driverOpts.cursor || {}), ...(options.cursor || {}) },
+			antigravity: { ...(driverOpts.antigravity || {}), ...(options.antigravity || {}) },
+			xai: { ...(driverOpts.xai || {}), ...(options.xai || {}) },
+			cli: { ...(driverOpts.cli || {}), ...(options.cli || {}) },
+			apiKeyChat: { ...(driverOpts.apiKeyChat || {}), ...(options.apiKeyChat || {}) },
+			fetchTimeoutMs: driverOpts.fetchTimeoutMs,
 			cliPaths,
 		});
 		if (context.statusCache && typeof context.statusCache.refresh === 'function') {
@@ -1259,6 +1285,10 @@ function createServer(options = {}) {
 		});
 	});
 	server.jobManager = context.jobManager;
+	server.on('listening', () => {
+		const address = server.address();
+		if (address && address.port) context.listenPort = address.port;
+	});
 	return server;
 }
 

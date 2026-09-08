@@ -1239,6 +1239,7 @@ function statusPageHtml() {
 			<div class="panel span-12 settings-layout">
 				<nav class="settings-nav" id="settings-nav" aria-label="Settings sections">
 					<button type="button" data-settings-section="providers" aria-current="page">Providers</button>
+					<button type="button" data-settings-section="runtime">Runtime</button>
 					<button type="button" data-settings-section="tests">Tests</button>
 					<button type="button" data-settings-section="upscale">CUDA Upscale</button>
 					<button type="button" data-settings-section="music">Music Analysis</button>
@@ -1253,8 +1254,15 @@ function statusPageHtml() {
 							<div class="settings-grid" id="relayCliPaths"></div>
 							<div class="settings-grid" id="relayDefaultSettings"></div>
 							<div class="settings-grid" id="relayTokenDefaults"></div>
+							<div class="settings-grid" id="relayProviderOptions"></div>
 							<div class="settings-actions"><span class="muted" id="relaySettingsMessage">Loading routing settings</span><button type="button" id="refreshRelayProviders">Refresh detection</button><button type="button" class="btn-primary" id="saveRelaySettings" disabled>Save paths &amp; routing</button></div>
 						</form>
+					</div>
+					<div class="settings-section" id="settings-section-runtime" data-settings-panel="runtime" hidden>
+						<div class="label">Runtime options</div>
+						<p class="muted">Blank timeout and concurrency fields keep the environment variable or code default. The listen port is set at process start and is not editable here.</p>
+						<div class="settings-grid" id="relayRuntimeSettings"></div>
+						<div class="settings-actions"><span class="muted" id="relayRuntimeMessage">Loading runtime settings</span><button type="button" class="btn-primary" id="saveRelayRuntimeSettings" disabled>Save runtime</button></div>
 					</div>
 					<div class="settings-section" id="settings-section-tests" data-settings-panel="tests" hidden>
 						<div class="label">Provider media and audio tests</div>
@@ -1406,8 +1414,8 @@ function statusPageHtml() {
 		const seenLiveRequestIds = new Set();
 		let settingsSection = 'providers';
 		let suppressHashChange = false;
-		const knownSettingsSections = ['providers', 'tests', 'upscale', 'music', 'asr'];
-		let formSnapshots = { relay: '', asr: '', music: '', upscale: '' };
+		const knownSettingsSections = ['providers', 'runtime', 'tests', 'upscale', 'music', 'asr'];
+		let formSnapshots = { relay: '', runtime: '', asr: '', music: '', upscale: '' };
 		const fields = {
 			tabButtons: Array.from(document.querySelectorAll('.app-shell nav.tabs[role="tablist"] [role="tab"]')),
 			tabPanels: Array.from(document.querySelectorAll('main > .tab-panel[role="tabpanel"]')),
@@ -1450,6 +1458,10 @@ function statusPageHtml() {
 			relayCliPaths: document.getElementById('relayCliPaths'),
 			relayDefaultSettings: document.getElementById('relayDefaultSettings'),
 			relayTokenDefaults: document.getElementById('relayTokenDefaults'),
+			relayProviderOptions: document.getElementById('relayProviderOptions'),
+			relayRuntimeSettings: document.getElementById('relayRuntimeSettings'),
+			relayRuntimeMessage: document.getElementById('relayRuntimeMessage'),
+			saveRelayRuntimeSettings: document.getElementById('saveRelayRuntimeSettings'),
 			relaySettingsMessage: document.getElementById('relaySettingsMessage'),
 			refreshRelayProviders: document.getElementById('refreshRelayProviders'),
 			saveRelaySettings: document.getElementById('saveRelaySettings'),
@@ -1532,7 +1544,18 @@ function statusPageHtml() {
 
 		function isFormDirty(key) {
 			if (key === 'relay') {
-				return formSnapshots.relay && serializeRelaySettingsSnapshot() !== formSnapshots.relay;
+				try {
+					return formSnapshots.relay && JSON.stringify(collectRelaySettingsPayload('relay')) !== formSnapshots.relay;
+				} catch (error) {
+					return true;
+				}
+			}
+			if (key === 'runtime') {
+				try {
+					return formSnapshots.runtime && JSON.stringify(collectRelaySettingsPayload('runtime')) !== formSnapshots.runtime;
+				} catch (error) {
+					return true;
+				}
 			}
 			if (key === 'asr') {
 				try {
@@ -1559,21 +1582,29 @@ function statusPageHtml() {
 		}
 
 		function updateSettingsDirtyState() {
-			const dirty = isFormDirty('relay') || isFormDirty('asr') || isFormDirty('music') || isFormDirty('upscale');
+			const dirty = isFormDirty('relay') || isFormDirty('runtime') || isFormDirty('asr') || isFormDirty('music') || isFormDirty('upscale');
 			fields.settingsTabBadge.hidden = !dirty;
 			if (fields.saveRelaySettings) fields.saveRelaySettings.disabled = !isFormDirty('relay');
+			if (fields.saveRelayRuntimeSettings) fields.saveRelayRuntimeSettings.disabled = !isFormDirty('runtime');
 			if (fields.saveAsrSettings) fields.saveAsrSettings.disabled = !isFormDirty('asr');
 			if (fields.saveMusicAnalysisSettings) fields.saveMusicAnalysisSettings.disabled = !isFormDirty('music');
 			if (fields.saveUpscaleSettings) fields.saveUpscaleSettings.disabled = !isFormDirty('upscale');
 		}
 
 		function captureFormSnapshots(keys) {
-			const targets = Array.isArray(keys) && keys.length ? keys : ['relay', 'asr', 'music', 'upscale'];
+			const targets = Array.isArray(keys) && keys.length ? keys : ['relay', 'runtime', 'asr', 'music', 'upscale'];
 			if (targets.includes('relay')) {
 				try {
-					formSnapshots.relay = serializeRelaySettingsSnapshot();
+					formSnapshots.relay = JSON.stringify(collectRelaySettingsPayload('relay'));
 				} catch (error) {
 					formSnapshots.relay = '';
+				}
+			}
+			if (targets.includes('runtime')) {
+				try {
+					formSnapshots.runtime = JSON.stringify(collectRelaySettingsPayload('runtime'));
+				} catch (error) {
+					formSnapshots.runtime = '';
 				}
 			}
 			if (targets.includes('asr')) {
@@ -1600,20 +1631,131 @@ function statusPageHtml() {
 			updateSettingsDirtyState();
 		}
 
-		function serializeRelaySettingsSnapshot() {
+		function collectRelaySettingsPayload(section) {
 			const defaults = {};
 			const cli_paths = {};
+			const token_defaults = {};
+			const timeouts = {};
 			fields.relayDefaultSettings.querySelectorAll('[data-relay-job]').forEach((select) => {
 				defaults[select.getAttribute('data-relay-job')] = select.value;
 			});
 			fields.relayCliPaths.querySelectorAll('[data-relay-cli-path]').forEach((input) => {
 				cli_paths[input.getAttribute('data-relay-cli-path')] = input.value.trim();
 			});
-			const token_defaults = {};
 			fields.relayTokenDefaults.querySelectorAll('[data-relay-token-default]').forEach((input) => {
 				token_defaults[input.getAttribute('data-relay-token-default')] = input.value.trim();
 			});
-			return JSON.stringify({ defaults, cli_paths, token_defaults });
+			(fields.relayRuntimeSettings ? fields.relayRuntimeSettings.querySelectorAll('[data-relay-timeout]') : []).forEach((input) => {
+				timeouts[input.getAttribute('data-relay-timeout')] = input.value.trim();
+			});
+			const maxConcurrent = document.getElementById('relayMaxConcurrent');
+			const enabledSelect = document.getElementById('relayOpenaiEnabled');
+			const enabledValue = enabledSelect ? enabledSelect.value : '';
+			const runtime = { timeouts };
+			if (maxConcurrent) runtime.max_concurrent_jobs = maxConcurrent.value.trim();
+			const payload = {
+				defaults,
+				cli_paths,
+				token_defaults,
+				runtime,
+				providers: {
+					xai: {
+						api_key: (document.getElementById('relayXaiApiKey') || {}).value || '',
+						clear_api_key: !!(document.getElementById('relayXaiApiKeyClear') && document.getElementById('relayXaiApiKeyClear').checked),
+						base_url: (document.getElementById('relayXaiBaseUrl') || {}).value || '',
+						models: (document.getElementById('relayXaiModels') || {}).value || '',
+					},
+					openai_videos: {
+						enabled: enabledValue === '' ? null : enabledValue === 'true',
+						api_key: (document.getElementById('relayOpenaiApiKey') || {}).value || '',
+						clear_api_key: !!(document.getElementById('relayOpenaiApiKeyClear') && document.getElementById('relayOpenaiApiKeyClear').checked),
+					},
+					api_key_chat: {
+						api_key: (document.getElementById('relayApiKeyChatKey') || {}).value || '',
+						clear_api_key: !!(document.getElementById('relayApiKeyChatKeyClear') && document.getElementById('relayApiKeyChatKeyClear').checked),
+						base_url: (document.getElementById('relayApiKeyChatBaseUrl') || {}).value || '',
+						provider_id: (document.getElementById('relayApiKeyChatProviderId') || {}).value || '',
+						model: (document.getElementById('relayApiKeyChatModel') || {}).value || '',
+					},
+					cli_process: {
+						args: (document.getElementById('relayCliProcessArgs') || {}).value || '',
+					},
+					grok: {
+						imagine_skill: (document.getElementById('relayGrokImagineSkill') || {}).value || '',
+					},
+					antigravity: {
+						state_dir: (document.getElementById('relayAntigravityStateDir') || {}).value || '',
+					},
+				},
+			};
+			if (section === 'runtime') return { runtime: payload.runtime };
+			if (section === 'relay') {
+				return {
+					defaults: payload.defaults,
+					cli_paths: payload.cli_paths,
+					token_defaults: payload.token_defaults,
+					providers: payload.providers,
+				};
+			}
+			return payload;
+		}
+
+		function restoreRelaySection(section, preserved) {
+			if (!preserved) return;
+			if (section === 'runtime') {
+				const runtime = preserved.runtime || {};
+				const maxConcurrent = document.getElementById('relayMaxConcurrent');
+				if (maxConcurrent && runtime.max_concurrent_jobs != null) maxConcurrent.value = runtime.max_concurrent_jobs;
+				const timeouts = runtime.timeouts || {};
+				(fields.relayRuntimeSettings ? fields.relayRuntimeSettings.querySelectorAll('[data-relay-timeout]') : []).forEach((input) => {
+					const key = input.getAttribute('data-relay-timeout');
+					if (key && Object.prototype.hasOwnProperty.call(timeouts, key)) input.value = timeouts[key];
+				});
+				return;
+			}
+			const defaults = preserved.defaults || {};
+			fields.relayDefaultSettings.querySelectorAll('[data-relay-job]').forEach((select) => {
+				const job = select.getAttribute('data-relay-job');
+				if (Object.prototype.hasOwnProperty.call(defaults, job)) select.value = defaults[job];
+			});
+			const cliPaths = preserved.cli_paths || {};
+			fields.relayCliPaths.querySelectorAll('[data-relay-cli-path]').forEach((input) => {
+				const key = input.getAttribute('data-relay-cli-path');
+				if (Object.prototype.hasOwnProperty.call(cliPaths, key)) input.value = cliPaths[key];
+			});
+			const tokenDefaults = preserved.token_defaults || {};
+			fields.relayTokenDefaults.querySelectorAll('[data-relay-token-default]').forEach((input) => {
+				const key = input.getAttribute('data-relay-token-default');
+				if (Object.prototype.hasOwnProperty.call(tokenDefaults, key)) input.value = tokenDefaults[key];
+			});
+			const providers = preserved.providers || {};
+			const xai = providers.xai || {};
+			const openai = providers.openai_videos || {};
+			const apiKeyChat = providers.api_key_chat || {};
+			const setValue = (id, value) => {
+				const el = document.getElementById(id);
+				if (el) el.value = value == null ? '' : value;
+			};
+			const setChecked = (id, value) => {
+				const el = document.getElementById(id);
+				if (el) el.checked = !!value;
+			};
+			setValue('relayXaiApiKey', xai.api_key);
+			setChecked('relayXaiApiKeyClear', xai.clear_api_key);
+			setValue('relayXaiBaseUrl', xai.base_url);
+			setValue('relayXaiModels', xai.models);
+			const enabledSelect = document.getElementById('relayOpenaiEnabled');
+			if (enabledSelect) enabledSelect.value = openai.enabled === true ? 'true' : (openai.enabled === false ? 'false' : '');
+			setValue('relayOpenaiApiKey', openai.api_key);
+			setChecked('relayOpenaiApiKeyClear', openai.clear_api_key);
+			setValue('relayApiKeyChatKey', apiKeyChat.api_key);
+			setChecked('relayApiKeyChatKeyClear', apiKeyChat.clear_api_key);
+			setValue('relayApiKeyChatBaseUrl', apiKeyChat.base_url);
+			setValue('relayApiKeyChatProviderId', apiKeyChat.provider_id);
+			setValue('relayApiKeyChatModel', apiKeyChat.model);
+			setValue('relayCliProcessArgs', (providers.cli_process && providers.cli_process.args) || '');
+			setValue('relayGrokImagineSkill', (providers.grok && providers.grok.imagine_skill) || '');
+			setValue('relayAntigravityStateDir', (providers.antigravity && providers.antigravity.state_dir) || '');
 		}
 
 		function normalizeSettingsSection(section) {
@@ -1627,7 +1769,7 @@ function statusPageHtml() {
 		}
 
 		function confirmUnsavedSettings() {
-			if (!isFormDirty('relay') && !isFormDirty('asr') && !isFormDirty('music') && !isFormDirty('upscale')) {
+			if (!isFormDirty('relay') && !isFormDirty('runtime') && !isFormDirty('asr') && !isFormDirty('music') && !isFormDirty('upscale')) {
 				return true;
 			}
 			return window.confirm('You have unsaved settings changes. Leave this section without saving?');
@@ -2535,6 +2677,60 @@ function statusPageHtml() {
 				{ jobType: 'media.analyze', label: 'Media analysis token default', codeDefault: 4096 },
 			];
 			fields.relayTokenDefaults.innerHTML = tokenFields.map((entry) => '<label class="field"><span>' + escapeHtml(entry.label) + '</span><input type="number" min="512" max="128000" step="1" inputmode="numeric" data-relay-token-default="' + escapeHtml(entry.jobType) + '" value="' + escapeHtml(tokenDefaults[entry.jobType] || '') + '" placeholder="Code default: ' + entry.codeDefault + '"><small class="muted">Leave blank to use the code default.</small></label>').join('');
+			const providers = settings.providers || {};
+			const xai = providers.xai || {};
+			const openai = providers.openai_videos || {};
+			const apiKeyChat = providers.api_key_chat || {};
+			const secretHint = (secret, envName) => {
+				if (secret && secret.configured) return 'Saved key ends with ' + escapeHtml(secret.suffix || '') + '. Leave blank to keep it.';
+				return 'Leave blank to use ' + envName + '.';
+			};
+			const secretInput = (id, label, secret, envName) => '<label class="field"><span>' + escapeHtml(label) + '</span><input type="password" autocomplete="new-password" spellcheck="false" id="' + id + '" placeholder="' + (secret && secret.configured ? '••••' + escapeHtml(secret.suffix || '') : '') + '"><small class="muted">' + secretHint(secret, envName) + '</small></label><label class="checkbox-row"><input type="checkbox" id="' + id + 'Clear"><span>Clear saved key</span></label>';
+			if (fields.relayProviderOptions) {
+				fields.relayProviderOptions.innerHTML = [
+					'<div class="label">Cloud APIs and extra CLI options</div>',
+					secretInput('relayXaiApiKey', 'xAI API key', xai.api_key, 'XAI_API_KEY'),
+					'<label class="field"><span>xAI base URL</span><input id="relayXaiBaseUrl" value="' + escapeHtml(xai.base_url || '') + '" placeholder="https://api.x.ai/v1" autocomplete="off" spellcheck="false"></label>',
+					'<label class="field"><span>xAI chat models</span><input id="relayXaiModels" value="' + escapeHtml(xai.models || '') + '" placeholder="grok-4.6,grok-4.5,grok-4.3,latest" autocomplete="off" spellcheck="false"><small class="muted">Comma-separated native model IDs.</small></label>',
+					'<label class="field"><span>OpenAI Videos</span><select id="relayOpenaiEnabled"><option value="">Use environment</option><option value="true"' + (openai.enabled === true ? ' selected' : '') + '>Enabled</option><option value="false"' + (openai.enabled === false ? ' selected' : '') + '>Disabled</option></select></label>',
+					secretInput('relayOpenaiApiKey', 'OpenAI API key', openai.api_key, 'OPENAI_API_KEY'),
+					secretInput('relayApiKeyChatKey', 'API-key chat key', apiKeyChat.api_key, 'AI_MODEL_RELAY_CHAT_API_KEY'),
+					'<label class="field"><span>API-key chat base URL</span><input id="relayApiKeyChatBaseUrl" value="' + escapeHtml(apiKeyChat.base_url || '') + '" placeholder="https://api.example.com/v1" autocomplete="off" spellcheck="false"></label>',
+					'<label class="field"><span>API-key chat provider id</span><input id="relayApiKeyChatProviderId" value="' + escapeHtml(apiKeyChat.provider_id || '') + '" placeholder="api-key-chat" autocomplete="off" spellcheck="false"></label>',
+					'<label class="field"><span>API-key chat model</span><input id="relayApiKeyChatModel" value="' + escapeHtml(apiKeyChat.model || '') + '" placeholder="default" autocomplete="off" spellcheck="false"></label>',
+					'<label class="field"><span>CLI process extra arguments</span><input id="relayCliProcessArgs" value="' + escapeHtml((providers.cli_process && providers.cli_process.args) || '') + '" placeholder="Optional argv after the executable" autocomplete="off" spellcheck="false"></label>',
+					'<label class="field"><span>Grok Imagine skill path</span><input id="relayGrokImagineSkill" value="' + escapeHtml((providers.grok && providers.grok.imagine_skill) || '') + '" placeholder="%USERPROFILE%\\.grok\\skills\\imagine\\SKILL.md" autocomplete="off" spellcheck="false"></label>',
+					'<label class="field"><span>Antigravity state directory</span><input id="relayAntigravityStateDir" value="' + escapeHtml((providers.antigravity && providers.antigravity.state_dir) || '') + '" placeholder="%USERPROFILE%\\.gemini\\antigravity-cli" autocomplete="off" spellcheck="false"></label>',
+				].join('');
+			}
+			const runtime = settings.runtime || {};
+			const runtimeTimeouts = runtime.timeouts || {};
+			const timeoutFields = [
+				{ key: 'codex_chat_ms', label: 'Codex chat timeout (ms)', placeholder: '600000' },
+				{ key: 'codex_image_ms', label: 'Codex image timeout (ms)', placeholder: '1800000' },
+				{ key: 'codex_status_ms', label: 'Codex status probe timeout (ms)', placeholder: '15000' },
+				{ key: 'named_cli_chat_ms', label: 'Grok/Cursor chat timeout (ms)', placeholder: '600000' },
+				{ key: 'grok_media_ms', label: 'Grok Imagine timeout (ms)', placeholder: '450000' },
+				{ key: 'antigravity_chat_ms', label: 'Antigravity chat timeout (ms)', placeholder: '600000' },
+				{ key: 'antigravity_image_ms', label: 'Antigravity image timeout (ms)', placeholder: '1800000' },
+				{ key: 'antigravity_media_ms', label: 'Antigravity media timeout (ms)', placeholder: '600000' },
+				{ key: 'cli_process_ms', label: 'CLI process timeout (ms)', placeholder: '600000' },
+				{ key: 'cli_probe_ms', label: 'CLI probe timeout (ms)', placeholder: '10000' },
+				{ key: 'provider_fetch_ms', label: 'HTTP provider fetch timeout (ms)', placeholder: '60000' },
+				{ key: 'xai_poll_timeout_ms', label: 'xAI video poll timeout (ms)', placeholder: '600000' },
+				{ key: 'xai_poll_interval_ms', label: 'xAI video poll interval (ms)', placeholder: '3000' },
+				{ key: 'openai_poll_timeout_ms', label: 'OpenAI Videos poll timeout (ms)', placeholder: '600000' },
+				{ key: 'openai_poll_interval_ms', label: 'OpenAI Videos poll interval (ms)', placeholder: '3000' },
+			];
+			if (fields.relayRuntimeSettings) {
+				fields.relayRuntimeSettings.innerHTML = [
+					'<label class="field"><span>Listen port</span><input value="' + escapeHtml(payload && payload.listen_port || '') + '" disabled><small class="muted">Set ALORBACH_CODEX_BRIDGE_PORT before starting the tray app.</small></label>',
+					'<label class="field"><span>Max concurrent jobs</span><input id="relayMaxConcurrent" type="number" min="1" max="32" step="1" inputmode="numeric" value="' + escapeHtml(runtime.max_concurrent_jobs || '') + '" placeholder="2"><small class="muted">Leave blank to use ALORBACH_CODEX_MAX_CONCURRENT_JOBS.</small></label>',
+				].concat(timeoutFields.map((entry) => '<label class="field"><span>' + escapeHtml(entry.label) + '</span><input type="number" min="1" step="1" inputmode="numeric" data-relay-timeout="' + escapeHtml(entry.key) + '" value="' + escapeHtml(runtimeTimeouts[entry.key] || '') + '" placeholder="' + entry.placeholder + '"><small class="muted">Leave blank for the environment or code default.</small></label>')).join('');
+			}
+			if (fields.relayRuntimeMessage && fields.refreshRelayProviders && !fields.refreshRelayProviders.disabled) {
+				fields.relayRuntimeMessage.textContent = 'Runtime settings loaded';
+			}
 			if (!document.querySelector('[data-provider-media-test][data-test-request-id]')) {
 				renderProviderMediaTests(models, backends);
 			}
@@ -2802,7 +2998,7 @@ function statusPageHtml() {
 		}
 
 		async function loadRelaySettings() {
-			try { const response = await fetch(relaySettingsUrl, { cache: 'no-store' }); const payload = await response.json(); if (!response.ok) throw new Error(payload.message || 'Routing settings unavailable'); renderRelaySettings(payload); captureFormSnapshots(['relay']); if (!fields.refreshRelayProviders.disabled) fields.relaySettingsMessage.textContent = 'Routing settings loaded'; } catch (error) { if (!fields.refreshRelayProviders.disabled) fields.relaySettingsMessage.textContent = error.message || 'Routing settings load failed'; }
+			try { const response = await fetch(relaySettingsUrl, { cache: 'no-store' }); const payload = await response.json(); if (!response.ok) throw new Error(payload.message || 'Routing settings unavailable'); renderRelaySettings(payload); captureFormSnapshots(['relay', 'runtime']); if (!fields.refreshRelayProviders.disabled) fields.relaySettingsMessage.textContent = 'Routing settings loaded'; } catch (error) { if (!fields.refreshRelayProviders.disabled) fields.relaySettingsMessage.textContent = error.message || 'Routing settings load failed'; }
 		}
 
 		function followProviderRefresh(refreshState) {
@@ -2818,24 +3014,33 @@ function statusPageHtml() {
 		}
 
 		async function saveRelaySettings(options = {}) {
-			const defaults = {};
-			const cli_paths = {};
-			const token_defaults = {};
-			fields.relayDefaultSettings.querySelectorAll('[data-relay-job]').forEach((select) => { defaults[select.getAttribute('data-relay-job')] = select.value; });
-			fields.relayCliPaths.querySelectorAll('[data-relay-cli-path]').forEach((input) => { cli_paths[input.getAttribute('data-relay-cli-path')] = input.value.trim(); });
-			fields.relayTokenDefaults.querySelectorAll('[data-relay-token-default]').forEach((input) => { token_defaults[input.getAttribute('data-relay-token-default')] = input.value.trim(); });
+			const section = options.section || 'relay';
+			const settings = collectRelaySettingsPayload(section);
+			const otherSection = section === 'runtime' ? 'relay' : 'runtime';
+			let preserved = null;
+			try { preserved = collectRelaySettingsPayload(otherSection); } catch (error) {}
 			try {
-				const response = await fetch(relaySettingsUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ settings: { defaults, cli_paths, token_defaults } }) });
+				const response = await fetch(relaySettingsUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ settings }) });
 				const payload = await response.json();
 				if (!response.ok) throw new Error(payload.message || 'Routing settings save failed');
 				renderRelaySettings(payload);
+				restoreRelaySection(otherSection, preserved);
 				const refreshStarted = payload.refresh_started === true && followProviderRefresh(payload.refresh);
-				if (!options.quiet && !refreshStarted) fields.relaySettingsMessage.textContent = 'CLI paths and routing saved';
-				captureFormSnapshots(['relay']);
+				if (!options.quiet && !refreshStarted) {
+					if (section === 'runtime') {
+						if (fields.relayRuntimeMessage) fields.relayRuntimeMessage.textContent = 'Runtime settings saved';
+					} else {
+						fields.relaySettingsMessage.textContent = 'CLI paths, APIs, and routing saved';
+					}
+				}
+				captureFormSnapshots([section]);
 				return { success: true, payload, refreshStarted };
 			} catch (error) {
 				const message = error.message || 'Routing settings save failed';
-				if (!options.quiet) fields.relaySettingsMessage.textContent = message;
+				if (!options.quiet) {
+					fields.relaySettingsMessage.textContent = message;
+					if (fields.relayRuntimeMessage) fields.relayRuntimeMessage.textContent = message;
+				}
 				return { success: false, message };
 			}
 		}
@@ -2847,6 +3052,7 @@ function statusPageHtml() {
 				'<label class="field"><span>Virtual environment path</span><input id="musicAnalysisVenvPath" value="' + escapeHtml(currentMusicAnalysisSettings.venv_path || '') + '"></label>',
 				'<label class="field"><span>Analysis sample rate</span><input id="musicAnalysisSampleRate" type="number" min="8000" max="96000" value="' + escapeHtml(currentMusicAnalysisSettings.sample_rate || 22050) + '"></label>',
 				'<label class="field"><span>Maximum sections</span><input id="musicAnalysisMaxSections" type="number" min="2" max="24" value="' + escapeHtml(currentMusicAnalysisSettings.max_sections || 12) + '"></label>',
+				'<label class="field"><span>Analysis timeout (ms)</span><input id="musicAnalysisTimeout" type="number" min="1000" step="1000" inputmode="numeric" value="' + escapeHtml(currentMusicAnalysisSettings.timeout_ms || 1800000) + '" placeholder="1800000"><small class="muted">Leave the field at the loaded value unless you need a longer analysis job.</small></label>',
 			].join('');
 		}
 
@@ -2856,6 +3062,7 @@ function statusPageHtml() {
 				venv_path: document.getElementById('musicAnalysisVenvPath').value.trim(),
 				sample_rate: numberValue(document.getElementById('musicAnalysisSampleRate').value, 22050),
 				max_sections: numberValue(document.getElementById('musicAnalysisMaxSections').value, 12),
+				timeout_ms: numberValue((document.getElementById('musicAnalysisTimeout') || {}).value, currentMusicAnalysisSettings.timeout_ms || 1800000),
 			};
 		}
 
@@ -2914,6 +3121,10 @@ function statusPageHtml() {
 			fields.upscaleSettings.innerHTML = [
 				'<label class="field"><span>Python path</span><input id="upscalePythonPath" value="' + escapeHtml(currentUpscaleSettings.python_path || '') + '" placeholder="Auto-detect CUDA-capable Python"></label>',
 				'<label class="field"><span>Virtual environment path</span><input id="upscaleVenvPath" value="' + escapeHtml(currentUpscaleSettings.venv_path || '') + '"></label>',
+				'<label class="field"><span>APISR virtual environment path</span><input id="upscaleApisrVenvPath" value="' + escapeHtml(currentUpscaleSettings.apisr_venv_path || '') + '" placeholder="Separate venv for APISR anime models"></label>',
+				'<label class="field"><span>Job timeout (ms)</span><input id="upscaleTimeout" type="number" min="1000" step="1000" inputmode="numeric" value="' + escapeHtml(currentUpscaleSettings.timeout_ms || 1800000) + '" placeholder="1800000"></label>',
+				'<label class="field"><span>Tile size</span><input id="upscaleTile" type="number" min="0" step="32" inputmode="numeric" value="' + escapeHtml(currentUpscaleSettings.tile === undefined || currentUpscaleSettings.tile === null ? 0 : currentUpscaleSettings.tile) + '" placeholder="0"><small class="muted">0 uses the model recommended tile.</small></label>',
+				'<label class="field"><span>Precision</span><select id="upscalePrecision"><option value="fp16"' + (currentUpscaleSettings.precision === 'fp32' ? '' : ' selected') + '>fp16</option><option value="fp32"' + (currentUpscaleSettings.precision === 'fp32' ? ' selected' : '') + '>fp32</option></select></label>',
 			].join('');
 			fields.upscaleModelStates.textContent = 'Models: ' + (Array.isArray(models) && models.length ? models.map((model) => String(model.label || model.id || 'model') + ' — ' + String(model.state || 'not checked')).join(' · ') : 'not checked');
 			fields.upscaleInstallActions.innerHTML = (Array.isArray(models) ? models : []).map((model) => {
@@ -2929,6 +3140,10 @@ function statusPageHtml() {
 			return {
 				python_path: document.getElementById('upscalePythonPath').value.trim(),
 				venv_path: document.getElementById('upscaleVenvPath').value.trim(),
+				apisr_venv_path: ((document.getElementById('upscaleApisrVenvPath') || {}).value || '').trim(),
+				timeout_ms: numberValue((document.getElementById('upscaleTimeout') || {}).value, currentUpscaleSettings.timeout_ms || 1800000),
+				tile: numberValue((document.getElementById('upscaleTile') || {}).value, currentUpscaleSettings.tile || 0),
+				precision: ((document.getElementById('upscalePrecision') || {}).value || currentUpscaleSettings.precision || 'fp16'),
 			};
 		}
 
@@ -3059,6 +3274,9 @@ function statusPageHtml() {
 				'<label class="field"><span>Workers</span><input id="asrNumWorkers" type="number" min="1" max="8" value="' + escapeHtml(currentAsrSettings.num_workers || 1) + '"></label>',
 				'<label class="field"><span>Beam size</span><input id="asrBeamSize" type="number" min="1" max="20" value="' + escapeHtml(currentAsrSettings.beam_size || 5) + '"></label>',
 				'<label class="field"><span>Best of</span><input id="asrBestOf" type="number" min="1" max="20" value="' + escapeHtml(currentAsrSettings.best_of || 5) + '"></label>',
+				'<label class="field"><span>Transcribe timeout (ms)</span><input id="asrTranscribeTimeout" type="number" min="1000" step="1000" inputmode="numeric" value="' + escapeHtml(currentAsrSettings.transcribe_timeout_ms || 1800000) + '" placeholder="1800000"></label>',
+				'<label class="field"><span>CUDA extra PATH</span><input id="asrCudaPaths" value="' + escapeHtml(currentAsrSettings.cuda_paths || '') + '" placeholder="Optional extra CUDA bin directories" autocomplete="off" spellcheck="false"><small class="muted">Leave blank to use ALORBACH_ASR_CUDA_PATHS.</small></label>',
+				'<label class="field"><span>Qwen torch index URL</span><input id="asrQwenTorchIndexUrl" value="' + escapeHtml(currentAsrSettings.qwen_torch_index_url || '') + '" placeholder="https://download.pytorch.org/whl/cu128" autocomplete="off" spellcheck="false"><small class="muted">Leave blank to use ALORBACH_QWEN_TORCH_INDEX_URL.</small></label>',
 			].join('');
 
 			fields.asrModelSettings.innerHTML = models.map((model, index) => (
@@ -3107,6 +3325,9 @@ function statusPageHtml() {
 				best_of: numberValue(document.getElementById('asrBestOf').value, 5),
 				vad_filter: !!document.getElementById('asrVadFilter').checked,
 				condition_on_previous_text: !!document.getElementById('asrConditionPrevious').checked,
+				transcribe_timeout_ms: numberValue((document.getElementById('asrTranscribeTimeout') || {}).value, currentAsrSettings.transcribe_timeout_ms || 1800000),
+				cuda_paths: ((document.getElementById('asrCudaPaths') || {}).value || '').trim(),
+				qwen_torch_index_url: ((document.getElementById('asrQwenTorchIndexUrl') || {}).value || '').trim(),
 				models: modelCards.map((card) => ({
 					id: (card.querySelector('[data-field="id"]') || {}).value || '',
 					label: (card.querySelector('[data-field="label"]') || {}).value || '',
@@ -3685,6 +3906,15 @@ function statusPageHtml() {
 		});
 		fields.relaySettingsForm.addEventListener('submit', (event) => { event.preventDefault(); saveRelaySettings(); });
 		fields.saveRelaySettings.addEventListener('click', saveRelaySettings);
+		if (fields.relayRuntimeSettings) {
+			fields.relayRuntimeSettings.addEventListener('input', () => {
+				if (fields.relayRuntimeMessage) fields.relayRuntimeMessage.textContent = 'Unsaved changes';
+				fields.relaySettingsMessage.textContent = 'Unsaved changes';
+				updateSettingsDirtyState();
+			});
+			fields.relayRuntimeSettings.addEventListener('change', updateSettingsDirtyState);
+		}
+		if (fields.saveRelayRuntimeSettings) fields.saveRelayRuntimeSettings.addEventListener('click', () => saveRelaySettings({ section: 'runtime' }));
 		fields.refreshRelayProviders.addEventListener('click', refreshProviderDetection);
 		refresh().then(connectJobEvents).catch(() => {
 			startFallbackPolling();

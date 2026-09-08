@@ -22,9 +22,43 @@ const PROVIDER_FETCH_TIMEOUT_MS = Number(process.env.AI_MODEL_RELAY_PROVIDER_FET
 const MAX_PROVIDER_DOWNLOAD_BYTES = 100 * 1024 * 1024;
 const MAX_PROVIDER_JSON_BYTES = 8 * 1024 * 1024;
 
+function combineAbortSignals(...signals) {
+	const active = signals.filter(Boolean);
+	if (!active.length) return undefined;
+	if (active.length === 1) return active[0];
+	return typeof AbortSignal.any === 'function' ? AbortSignal.any(active) : active[0];
+}
+
 function withFetchTimeout(fetchImpl, timeoutMs = PROVIDER_FETCH_TIMEOUT_MS) {
 	if (typeof fetchImpl !== 'function') return fetchImpl;
-	return (url, options = {}) => fetchImpl(url, { ...options, signal: options.signal || AbortSignal.timeout(timeoutMs) });
+	return (url, options = {}) => fetchImpl(url, {
+		...options,
+		signal: combineAbortSignals(options.signal, AbortSignal.timeout(Number(timeoutMs) || PROVIDER_FETCH_TIMEOUT_MS)),
+	});
+}
+
+function cancelledProviderResult() {
+	return {
+		success: false,
+		category: 'cancelled',
+		code: 'local_job_cancelled',
+		message: 'The local Relay job was cancelled; source bytes were preserved.',
+	};
+}
+
+async function fetchWithSession(fetchImpl, url, requestOptions, session) {
+	if (session && session.signal && session.signal.aborted) {
+		return { error: cancelledProviderResult() };
+	}
+	try {
+		const options = session && session.signal ? { ...requestOptions, signal: session.signal } : requestOptions;
+		return { response: await fetchImpl(url, options) };
+	} catch (error) {
+		if (session && session.signal && session.signal.aborted) {
+			return { error: cancelledProviderResult() };
+		}
+		throw error;
+	}
 }
 
 async function readBoundedBytes(response, maxBytes = MAX_PROVIDER_DOWNLOAD_BYTES) {
@@ -692,7 +726,7 @@ function createNamedCliDriver(definition, options = {}) {
 		},
 		refresh: async () => {
 			const previous = cached;
-			cached = retainCliReadiness(previous, await detector(definition, { ...options, timeoutMs: Number(options.timeoutMs || process.env.AI_MODEL_RELAY_CLI_PROBE_TIMEOUT_MS || 10000) }));
+			cached = retainCliReadiness(previous, await detector(definition, { ...options, timeoutMs: Number(options.probeTimeoutMs || process.env.AI_MODEL_RELAY_CLI_PROBE_TIMEOUT_MS || 10000) }));
 			return cached;
 		},
 		async chat(payload = {}, session = {}) {
@@ -708,7 +742,7 @@ function createNamedCliDriver(definition, options = {}) {
 				const prompt = messagesToText(payload, { imageReferences: materialized.references });
 				const promptPath = writePromptFile(workspace, prompt);
 				const request = { prompt, promptPath, workspace, imageReferences: materialized.references, promptJsonSupported: state.prompt_json_supported === true, promptJson: state.prompt_json_supported === true ? messagesToPromptJson(payload, materialized.references) : null };
-				const runWithModel = (nativeModel) => commandRunner(state.command, definition.requestArgs(nativeModel, promptPath, workspace, request), '', session, { ...options, cwd: workspace, signal: session.signal });
+				const runWithModel = (nativeModel) => commandRunner(state.command, definition.requestArgs(nativeModel, promptPath, workspace, request), '', session, { ...options, cwd: workspace, timeoutMs: Number(options.timeoutMs || 600000), signal: session.signal });
 				let result = await runWithModel(model);
 				if (!result.success && definition.retryInvalidModel && isInvalidCliModelFailure(result)) {
 					const fallback = String((typeof definition.defaultNativeModel === 'function' && definition.defaultNativeModel(state)) || state.default_model || '').trim();
@@ -1129,7 +1163,7 @@ function createAntigravityCliDriver(mediaAnalysis, options = {}) {
 			{ id: 'model-relay:antigravity-cli:media', type: 'text', backend: definition.id, ready: true, job_types: ['media.analyze'] },
 		] : [],
 		async refresh() {
-			const detected = await detector(definition, options);
+			const detected = await detector(definition, { ...options, timeoutMs: Number(options.probeTimeoutMs || process.env.AI_MODEL_RELAY_CLI_PROBE_TIMEOUT_MS || 10000) });
 			if (!detected || !detected.installed || !detected.command) {
 				snapshot = { ...snapshot, ...(detected || {}), ready: false, authenticated: null, state: 'unavailable', diagnostic: detected && detected.diagnostic || 'Antigravity CLI executable was not found.' };
 				return snapshot;
@@ -1215,7 +1249,7 @@ function createAntigravityCliDriver(mediaAnalysis, options = {}) {
 			const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-model-relay-antigravity-'));
 			try {
 				const materialized = mediaAnalysis && typeof mediaAnalysis.materializeMedia === 'function'
-					? await mediaAnalysis.materializeMedia(payload, workspace)
+					? await mediaAnalysis.materializeMedia(payload, workspace, undefined, undefined, { signal: session && session.signal })
 					: null;
 				if (materialized && materialized.error) return { success: false, category: 'validation', code: 'antigravity_media_invalid', message: materialized.error };
 				let attachments = materialized && materialized.path ? [`@${materialized.path}`] : [];
@@ -1355,7 +1389,7 @@ function createOpenAiVideosDriver(video) {
 }
 
 function createXaiApiDriver(options = {}) {
-	const fetchImpl = withFetchTimeout(options.fetch || globalThis.fetch);
+	const fetchImpl = withFetchTimeout(options.fetch || globalThis.fetch, Number(options.fetchTimeoutMs || process.env.AI_MODEL_RELAY_PROVIDER_FETCH_TIMEOUT_MS || 60000));
 	const apiKey = options.apiKey || process.env.XAI_API_KEY || process.env.AI_MODEL_RELAY_XAI_API_KEY || '';
 	const baseUrl = String(options.baseUrl || process.env.XAI_BASE_URL || process.env.AI_MODEL_RELAY_XAI_BASE_URL || 'https://api.x.ai/v1').replace(/\/+$/, '');
 	const defaultModels = String(options.models || process.env.AI_MODEL_RELAY_XAI_MODELS || DEFAULT_XAI_CHAT_MODELS).split(',').map((id) => id.trim()).filter(Boolean);
@@ -1408,7 +1442,7 @@ function createXaiApiDriver(options = {}) {
 			{ id: 'model-relay:xai:imagine-image', type: 'image', backend: 'xai-api', job_types: ['images'], ready: !!apiKey, test_options: XAI_IMAGE_TEST_OPTIONS, image_capabilities: XAI_IMAGE_CAPABILITIES },
 			{ id: 'model-relay:xai:imagine-video', type: 'video', backend: 'xai-api', job_types: ['videos'], ready: !!apiKey, test_options: XAI_VIDEO_TEST_OPTIONS },
 		],
-		async chat(payload = {}) {
+		async chat(payload = {}, session = {}) {
 			if (!apiKey) {
 				return { success: false, category: 'configuration', code: 'xai_api_key_missing', message: 'Grok/xAI API requires XAI_API_KEY or AI_MODEL_RELAY_XAI_API_KEY.' };
 			}
@@ -1421,14 +1455,16 @@ function createXaiApiDriver(options = {}) {
 				messages: Array.isArray(payload.messages) ? payload.messages : [{ role: 'user', content: String(payload.prompt || '') }],
 			};
 			assignChatSampling(body, payload);
-			const response = await fetchImpl(`${baseUrl}/chat/completions`, {
+			const fetched = await fetchWithSession(fetchImpl, `${baseUrl}/chat/completions`, {
 				method: 'POST',
 				headers: {
 					Authorization: `Bearer ${apiKey}`,
 					'Content-Type': 'application/json',
 				},
 				body: JSON.stringify(body),
-			});
+			}, session);
+			if (fetched.error) return fetched.error;
+			const response = fetched.response;
 			const { text, parsed, error } = await readJsonResponse(response);
 			if (error) {
 				return { success: false, category: 'api', code: 'xai_api_failed', message: 'xAI API response exceeded the maximum size.', details: { provider: 'xai-api' } };
@@ -1470,7 +1506,9 @@ function createXaiApiDriver(options = {}) {
 			let text;
 			let parsed;
 			try {
-				response = await fetchImpl(`${baseUrl}/stt`, { method: 'POST', headers: { Authorization: `Bearer ${apiKey}` }, body: form });
+				const fetched = await fetchWithSession(fetchImpl, `${baseUrl}/stt`, { method: 'POST', headers: { Authorization: `Bearer ${apiKey}` }, body: form }, session);
+				if (fetched.error) return fetched.error;
+				response = fetched.response;
 				const body = await readJsonResponse(response);
 				if (body.error) {
 					return { success: false, category: 'api', code: 'xai_stt_failed', message: 'xAI Speech-to-Text response exceeded the maximum size.', details: { provider: 'xai-api' } };
@@ -1535,11 +1573,13 @@ function createXaiApiDriver(options = {}) {
 			if (typeof session.appendSessionOutput === 'function') session.appendSessionOutput('stdout', 'Submitting xAI Imagine image request.\n');
 			let response;
 			try {
-				response = await fetchImpl(`${baseUrl}${imagePath}`, {
+				const fetched = await fetchWithSession(fetchImpl, `${baseUrl}${imagePath}`, {
 					method: 'POST',
 					headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
 					body: JSON.stringify(body),
-				});
+				}, session);
+				if (fetched.error) return fetched.error;
+				response = fetched.response;
 			} catch (error) {
 				return { success: false, category: 'api', code: 'xai_image_request_failed', message: 'xAI Imagine image generation could not be reached.', retryable: true, details: { provider: 'xai-api' } };
 			}
@@ -1557,7 +1597,9 @@ function createXaiApiDriver(options = {}) {
 				const url = String(item && (item.url || item.image_url) || '').trim();
 				if (!url || !/^https:\/\//i.test(url)) continue;
 				try {
-					const downloaded = await fetchImpl(url, { headers: { Authorization: `Bearer ${apiKey}` } });
+					const downloadedFetch = await fetchWithSession(fetchImpl, url, { headers: { Authorization: `Bearer ${apiKey}` } }, session);
+					if (downloadedFetch.error) return downloadedFetch.error;
+					const downloaded = downloadedFetch.response;
 					if (!downloaded.ok || typeof downloaded.arrayBuffer !== 'function') continue;
 					let bytes;
 					try { bytes = await readBoundedBytes(downloaded); } catch (error) { continue; }
@@ -1598,11 +1640,13 @@ function createXaiApiDriver(options = {}) {
 			if (typeof session.appendSessionOutput === 'function') session.appendSessionOutput('stdout', 'Submitting xAI Imagine video request.\n');
 			let created;
 			try {
-				created = await fetchImpl(`${baseUrl}/videos/generations`, {
+				const createdFetch = await fetchWithSession(fetchImpl, `${baseUrl}/videos/generations`, {
 					method: 'POST',
 					headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
 					body: JSON.stringify(body),
-				});
+				}, session);
+				if (createdFetch.error) return createdFetch.error;
+				created = createdFetch.response;
 			} catch (error) {
 				return { success: false, category: 'api', code: 'xai_video_request_failed', message: 'xAI Imagine video generation could not be reached.', retryable: true, details: { provider: 'xai-api' } };
 			}
@@ -1613,9 +1657,12 @@ function createXaiApiDriver(options = {}) {
 			if (requestId) {
 				const started = Date.now();
 				while (true) {
+					if (session && session.signal && session.signal.aborted) return cancelledProviderResult();
 					let polled;
 					try {
-						polled = await fetchImpl(`${baseUrl}/videos/${encodeURIComponent(requestId)}`, { headers: { Authorization: `Bearer ${apiKey}` } });
+						const polledFetch = await fetchWithSession(fetchImpl, `${baseUrl}/videos/${encodeURIComponent(requestId)}`, { headers: { Authorization: `Bearer ${apiKey}` } }, session);
+						if (polledFetch.error) return polledFetch.error;
+						polled = polledFetch.response;
 					} catch (error) {
 						return { success: false, category: 'api', code: 'xai_video_request_failed', message: 'xAI Imagine video polling could not be reached.', retryable: true, details: { provider: 'xai-api' } };
 					}
@@ -1648,7 +1695,9 @@ function createXaiApiDriver(options = {}) {
 			}
 			let downloaded;
 			try {
-				downloaded = await fetchImpl(videoUrl, { headers: { Authorization: `Bearer ${apiKey}` } });
+				const downloadedFetch = await fetchWithSession(fetchImpl, videoUrl, { headers: { Authorization: `Bearer ${apiKey}` } }, session);
+				if (downloadedFetch.error) return downloadedFetch.error;
+				downloaded = downloadedFetch.response;
 			} catch (error) {
 				return { success: false, category: 'api', code: 'xai_video_download_failed', message: 'xAI Imagine video could not be downloaded.', retryable: true, details: { provider: 'xai-api', request_id: requestId } };
 			}
@@ -1675,7 +1724,7 @@ function createXaiApiDriver(options = {}) {
 }
 
 function createApiKeyChatDriver(options = {}) {
-	const fetchImpl = withFetchTimeout(options.fetch || globalThis.fetch);
+	const fetchImpl = withFetchTimeout(options.fetch || globalThis.fetch, Number(options.fetchTimeoutMs || process.env.AI_MODEL_RELAY_PROVIDER_FETCH_TIMEOUT_MS || 60000));
 	const apiKey = options.apiKey || process.env.AI_MODEL_RELAY_CHAT_API_KEY || '';
 	const baseUrl = String(options.baseUrl || process.env.AI_MODEL_RELAY_CHAT_BASE_URL || '').replace(/\/+$/, '');
 	const providerId = String(options.providerId || process.env.AI_MODEL_RELAY_CHAT_PROVIDER_ID || 'api-key-chat').replace(/[^a-z0-9_.-]/gi, '-').toLowerCase();
@@ -1697,7 +1746,7 @@ function createApiKeyChatDriver(options = {}) {
 			requires: ['AI_MODEL_RELAY_CHAT_API_KEY', 'AI_MODEL_RELAY_CHAT_BASE_URL'],
 		}),
 		models: () => [{ id: relayModel('api-key-chat', model), type: 'text', backend: 'api-key-chat' }],
-		async chat(payload = {}) {
+		async chat(payload = {}, session = {}) {
 			if (!(apiKey && baseUrl)) {
 				return { success: false, category: 'configuration', code: 'api_key_chat_not_configured', message: 'API-key chat provider requires AI_MODEL_RELAY_CHAT_API_KEY and AI_MODEL_RELAY_CHAT_BASE_URL.' };
 			}
@@ -1709,11 +1758,13 @@ function createApiKeyChatDriver(options = {}) {
 				model: rawModel,
 				messages: payload.messages || [{ role: 'user', content: String(payload.prompt || '') }],
 			}, payload);
-			const response = await fetchImpl(`${baseUrl}/chat/completions`, {
+			const fetched = await fetchWithSession(fetchImpl, `${baseUrl}/chat/completions`, {
 				method: 'POST',
 				headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
 				body: JSON.stringify(body),
-			});
+			}, session);
+			if (fetched.error) return fetched.error;
+			const response = fetched.response;
 			let text;
 			try {
 				text = await readBoundedText(response);
@@ -1734,7 +1785,7 @@ function createApiKeyChatDriver(options = {}) {
 
 function createCliProcessDriver(options = {}) {
 	const command = options.command || process.env.AI_MODEL_RELAY_CLI_COMMAND || '';
-	const args = Array.isArray(options.args) ? options.args : splitArgs(process.env.AI_MODEL_RELAY_CLI_ARGS || '');
+	const args = Array.isArray(options.args) ? options.args : splitArgs(options.args || process.env.AI_MODEL_RELAY_CLI_ARGS || '');
 	const timeoutMs = Number(options.timeoutMs || process.env.AI_MODEL_RELAY_CLI_TIMEOUT_MS || 600000);
 	return {
 		id: 'cli-process',
@@ -1819,8 +1870,12 @@ function createBackendRegistry(options = {}) {
 	const cliPaths = options.cliPaths && typeof options.cliPaths === 'object' ? options.cliPaths : {};
 	const configuredCliOptions = (driverOptions, key) => {
 		const command = typeof cliPaths[key] === 'string' ? cliPaths[key].trim() : '';
-		return command ? { ...(driverOptions || {}), command } : (driverOptions || {});
+		const merged = { ...(driverOptions || {}) };
+		if (command) merged.command = command;
+		if (typeof merged.args === 'string') merged.args = splitArgs(merged.args);
+		return merged;
 	};
+	const fetchTimeoutMs = Number(options.fetchTimeoutMs || process.env.AI_MODEL_RELAY_PROVIDER_FETCH_TIMEOUT_MS || 60000);
 	const drivers = [
 		createCodexCliDriver(options.codex, options.mediaAnalysis),
 		createGrokCliDriver(configuredCliOptions(options.grok, 'grok-cli')),
@@ -1830,9 +1885,9 @@ function createBackendRegistry(options = {}) {
 		createLocalUpscaleDriver(options.upscale || {}),
 		createMusicAnalysisDriver(options.musicAnalysis),
 		createOpenAiVideosDriver(options.video),
-		createXaiApiDriver(options.xai || {}),
+		createXaiApiDriver({ fetchTimeoutMs, ...(options.xai || {}) }),
 		createCliProcessDriver(configuredCliOptions(options.cli, 'cli-process')),
-		createApiKeyChatDriver(options.apiKeyChat || {}),
+		createApiKeyChatDriver({ fetchTimeoutMs, ...(options.apiKeyChat || {}) }),
 	].filter(Boolean);
 	const byId = new Map(drivers.map((driver) => [driver.id, driver]));
 	const aliases = {

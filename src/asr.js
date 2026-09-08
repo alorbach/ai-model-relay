@@ -8,6 +8,7 @@ const { appendLog, createBoundedCollector, safeError } = require('./diagnostics'
 const {
 	constraintPath,
 	DEFAULT_TORCH_INDEX,
+	attachProcessAbort,
 	evaluateCudaTorch,
 	killProcessTree,
 	parseTorchProbe,
@@ -170,6 +171,9 @@ function defaultSettings() {
 		best_of: 5,
 		vad_filter: false,
 		condition_on_previous_text: true,
+		transcribe_timeout_ms: Math.max(1000, Number(process.env.ALORBACH_ASR_TRANSCRIBE_TIMEOUT_MS || 1800000) || 1800000),
+		cuda_paths: process.env.ALORBACH_ASR_CUDA_PATHS || '',
+		qwen_torch_index_url: process.env.ALORBACH_QWEN_TORCH_INDEX_URL || DEFAULT_TORCH_INDEX,
 		models: DEFAULT_MODELS.map((entry) => normalizeModelEntry(entry)),
 	};
 }
@@ -195,6 +199,9 @@ function normalizeSettings(raw) {
 		best_of: Math.max(1, Number(source.best_of || defaults.best_of) || defaults.best_of),
 		vad_filter: source.vad_filter === true,
 		condition_on_previous_text: source.condition_on_previous_text !== false,
+		transcribe_timeout_ms: Math.max(1000, Number(source.transcribe_timeout_ms || defaults.transcribe_timeout_ms) || defaults.transcribe_timeout_ms),
+		cuda_paths: String(source.cuda_paths || defaults.cuda_paths || '').trim(),
+		qwen_torch_index_url: String(source.qwen_torch_index_url || defaults.qwen_torch_index_url || '').trim() || defaults.qwen_torch_index_url,
 		models: [],
 	};
 	const seen = new Set();
@@ -225,6 +232,14 @@ function saveSettings(nextSettings) {
 	});
 	invalidateProbeCache();
 	return saved.asr;
+}
+
+function transcribeTimeoutMs(config = settings()) {
+	return Math.max(1000, Number(config.transcribe_timeout_ms || process.env.ALORBACH_ASR_TRANSCRIBE_TIMEOUT_MS || 1800000) || 1800000);
+}
+
+function qwenTorchIndexUrl(config = settings()) {
+	return String(config.qwen_torch_index_url || process.env.ALORBACH_QWEN_TORCH_INDEX_URL || DEFAULT_TORCH_INDEX).trim() || DEFAULT_TORCH_INDEX;
 }
 
 function audioExtensionForFormat(format) {
@@ -378,10 +393,11 @@ function pythonSitePackageDirs(pythonPath) {
 	return fallback.filter((entry) => fs.existsSync(entry));
 }
 
-function cudaRuntimeDirs(pythonPath) {
+function cudaRuntimeDirs(pythonPath, config = settings()) {
 	const dirs = [];
-	if (process.env.ALORBACH_ASR_CUDA_PATHS) {
-		dirs.push(...String(process.env.ALORBACH_ASR_CUDA_PATHS).split(path.delimiter).filter(Boolean));
+	const extra = String(config && config.cuda_paths || '').trim();
+	if (extra) {
+		dirs.push(...extra.split(path.delimiter).filter(Boolean));
 	}
 	for (const siteDir of pythonSitePackageDirs(pythonPath)) {
 		for (const pkg of ['cublas', 'cudnn', 'cuda_runtime']) {
@@ -405,11 +421,11 @@ function envWithPrependedPath(dirs) {
 	};
 }
 
-function cudaRuntimeInfo(pythonPath) {
+function cudaRuntimeInfo(pythonPath, config = settings()) {
 	if (!pythonPath || !fs.existsSync(pythonPath)) {
 		return { available: false, reason: 'venv_missing', dirs: [], missing: [] };
 	}
-	const dirs = cudaRuntimeDirs(pythonPath);
+	const dirs = cudaRuntimeDirs(pythonPath, config);
 	const env = envWithPrependedPath(dirs);
 	const dlls = process.platform === 'win32'
 		? ['cublas64_12.dll', 'cudnn64_9.dll']
@@ -506,7 +522,7 @@ function probe(config = settings()) {
 		ffmpeg_available: commandAvailable('ffmpeg.exe'),
 		ffprobe_available: commandAvailable('ffprobe.exe'),
 		gpu: gpuInfo(),
-		cuda_runtime: venvExists ? cudaRuntimeInfo(venvPython) : { available: false, reason: 'venv_missing', dirs: [], missing: [] },
+		cuda_runtime: venvExists ? cudaRuntimeInfo(venvPython, config) : { available: false, reason: 'venv_missing', dirs: [], missing: [] },
 	};
 }
 
@@ -516,7 +532,7 @@ function probeCacheKey(config) {
 		venv_path: config.venv_path || '',
 		qwen_python_path: config.qwen_python_path || '',
 		qwen_venv_path: config.qwen_venv_path || '',
-		cuda_paths: process.env.ALORBACH_ASR_CUDA_PATHS || '',
+		cuda_paths: config.cuda_paths || process.env.ALORBACH_ASR_CUDA_PATHS || '',
 	});
 }
 
@@ -928,10 +944,10 @@ function persistModelSnapshotPaths(config, modelId, downloaded) {
 
 async function qwenEvaluateCudaTorch(run, venvPython, emit, pythonVersion) {
 	const evaluated = await evaluateCudaTorch(run, venvPython, emit, {
-		indexUrl: DEFAULT_QWEN_TORCH_INDEX_URL,
+		indexUrl: qwenTorchIndexUrl(),
 		pythonVersion,
 		cpuTorchCode: 'qwen_asr_cpu_torch',
-		cpuTorchMessage: `pip installed a CPU PyTorch wheel instead of a CUDA build from ${DEFAULT_QWEN_TORCH_INDEX_URL}. Local Qwen ASR does not fall back to CPU.`,
+		cpuTorchMessage: `pip installed a CPU PyTorch wheel instead of a CUDA build from ${qwenTorchIndexUrl()}. Local Qwen ASR does not fall back to CPU.`,
 		cudaUnavailableCode: 'qwen_asr_torch_cuda_unavailable',
 		cudaUnavailableMessage: 'CUDA PyTorch is installed but torch.cuda is not usable for Local Qwen ASR.',
 	});
@@ -977,6 +993,7 @@ function runAsync(command, args, options = {}) {
 		if (timer && typeof timer.unref === 'function') {
 			timer.unref();
 		}
+		const detachAbort = attachProcessAbort(child, options.signal);
 		child.stdout.on('data', (chunk) => {
 			const text = String(chunk || '');
 			stdoutCollector.append(text);
@@ -991,6 +1008,7 @@ function runAsync(command, args, options = {}) {
 			spawnError = error;
 		});
 		child.once('close', (status, signal) => {
+			detachAbort();
 			if (timer) {
 				clearTimeout(timer);
 			}
@@ -1070,10 +1088,10 @@ async function installQwenCudaTorchStack(config, venvPython, session, run) {
 	const pythonVersion = String(versionResult.stdout || versionResult.stderr || '').trim();
 	emit('stdout', 'Removing any existing CPU PyTorch wheels so pip cannot keep 2.x+cpu.\n');
 	await run(venvPython, ['-m', 'pip', 'uninstall', '-y', 'torch', 'torchvision', 'torchaudio'], { timeout: 120000, onOutput: emit });
-	emit('stdout', `Installing CUDA PyTorch for Local Qwen ASR (${pythonVersion || venvPython}) from ${DEFAULT_QWEN_TORCH_INDEX_URL} only.\n`);
-	const torch = await run(venvPython, ['-m', 'pip', 'install', '--disable-pip-version-check', '--progress-bar', 'off', '--force-reinstall', '--no-cache-dir', 'torch', 'torchvision', '--index-url', DEFAULT_QWEN_TORCH_INDEX_URL], { timeout: SETUP_TIMEOUT_MS, onOutput: emit });
+	emit('stdout', `Installing CUDA PyTorch for Local Qwen ASR (${pythonVersion || venvPython}) from ${qwenTorchIndexUrl()} only.\n`);
+	const torch = await run(venvPython, ['-m', 'pip', 'install', '--disable-pip-version-check', '--progress-bar', 'off', '--force-reinstall', '--no-cache-dir', 'torch', 'torchvision', '--index-url', qwenTorchIndexUrl()], { timeout: SETUP_TIMEOUT_MS, onOutput: emit });
 	if (torch.error || torch.status !== 0) {
-		return setupFailure('qwen_asr_torch_cuda_install_failed', 'CUDA PyTorch could not be installed for Local Qwen ASR.', torch, { python: venvPython, python_version: pythonVersion, index_url: DEFAULT_QWEN_TORCH_INDEX_URL });
+		return setupFailure('qwen_asr_torch_cuda_install_failed', 'CUDA PyTorch could not be installed for Local Qwen ASR.', torch, { python: venvPython, python_version: pythonVersion, index_url: qwenTorchIndexUrl() });
 	}
 	const firstProbe = await qwenEvaluateCudaTorch(run, venvPython, emit, pythonVersion);
 	if (!firstProbe.success) return firstProbe;
@@ -1154,7 +1172,7 @@ async function ensureCudaRuntime(config = settings(), pythonPath, session = {}, 
 	const installPackages = options.installPackages === true;
 	const emit = typeof session.appendSessionOutput === 'function' ? session.appendSessionOutput : () => {};
 	const run = options.runAsync || runAsync;
-	let info = cudaRuntimeInfo(pythonPath);
+	let info = cudaRuntimeInfo(pythonPath, config);
 	if (info.available) {
 		return { success: true, installed: false, cuda_runtime: info };
 	}
@@ -1166,7 +1184,7 @@ async function ensureCudaRuntime(config = settings(), pythonPath, session = {}, 
 	if (installed.error || installed.status !== 0) {
 		return { success: false, installed: false, cuda_runtime: info, message: 'CUDA runtime packages could not be installed.', details: installed };
 	}
-	info = cudaRuntimeInfo(pythonPath);
+	info = cudaRuntimeInfo(pythonPath, config);
 	return { success: info.available, installed: true, cuda_runtime: info, message: info.available ? '' : `CUDA runtime packages are installed but unusable: ${info.reason || 'runtime unavailable'}` };
 }
 
@@ -1259,10 +1277,11 @@ async function transcribe(payload, session = {}) {
 		}
 		const run = await runAsync(runtime.python, [RUNNER_PATH], {
 			cwd: tempDir,
-			timeout: DEFAULT_TIMEOUT_MS,
+			timeout: transcribeTimeoutMs(),
 			input: JSON.stringify(request),
 			env: modelSelection.device === 'cuda' ? envWithPrependedPath((hardware.cuda_runtime || {}).dirs || []) : undefined,
 			onOutput: session.appendSessionOutput,
+			signal: session.signal,
 		});
 		if (debugLog) {
 			debugLog.writeOutput(run.stdout || '');
@@ -1418,13 +1437,14 @@ async function transcribeQwen(payload, audioBytes, selected, config, hardware, s
 	}
 	const run = await runAsync(runtime.python, [QWEN_RUNNER_PATH], {
 		cwd: tempDir,
-		timeout: DEFAULT_TIMEOUT_MS,
+			timeout: transcribeTimeoutMs(),
 		input: JSON.stringify(request),
 		env: selected.allow_download ? undefined : {
 			HF_HUB_OFFLINE: '1',
 			TRANSFORMERS_OFFLINE: '1',
 		},
 		onOutput: session.appendSessionOutput,
+		signal: session.signal,
 	});
 	if (debugLog) {
 		debugLog.writeOutput(run.stdout || '');
@@ -1551,13 +1571,14 @@ async function alignQwen(payload, audioBytes, selected, config, hardware, sessio
 	}
 	const run = await runAsync(runtime.python, [QWEN_RUNNER_PATH], {
 		cwd: tempDir,
-		timeout: DEFAULT_TIMEOUT_MS,
+			timeout: transcribeTimeoutMs(),
 		input: JSON.stringify(request),
 		env: selected.allow_download ? undefined : {
 			HF_HUB_OFFLINE: '1',
 			TRANSFORMERS_OFFLINE: '1',
 		},
 		onOutput: session.appendSessionOutput,
+		signal: session.signal,
 	});
 	if (debugLog) {
 		debugLog.writeOutput(run.stdout || '');
@@ -1681,7 +1702,7 @@ function capabilities(options = {}) {
 
 async function downloadHfSnapshot(pythonPath, repoId, run, emit) {
 	emit('stdout', `Downloading ${repoId}\n`);
-	const result = await run(pythonPath, ['-c', 'from huggingface_hub import snapshot_download; import sys; print(snapshot_download(sys.argv[1]))', repoId], { timeout: DEFAULT_TIMEOUT_MS, onOutput: emit });
+	const result = await run(pythonPath, ['-c', 'from huggingface_hub import snapshot_download; import sys; print(snapshot_download(sys.argv[1]))', repoId], { timeout: transcribeTimeoutMs(), onOutput: emit });
 	if (result.error || result.status !== 0) {
 		const stdout = String(result.stdout || '').trim();
 		const stderr = String(result.stderr || '').trim();

@@ -3,12 +3,28 @@
 const DEFAULT_MODELS = ['sora-2', 'sora-2-pro'];
 const TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled', 'expired']);
 
+let videoSettings = {};
+
+function configure(next = {}) {
+	videoSettings = next && typeof next === 'object' ? { ...next } : {};
+}
+
 function enabledFromEnv() {
+	if (videoSettings.enabled === true || videoSettings.enabled === false) return videoSettings.enabled;
 	return /^(1|true|yes|on)$/i.test(String(process.env.ALORBACH_CODEX_ENABLE_VIDEO || ''));
 }
 
 function apiKeyFromEnv() {
+	if (videoSettings.apiKey) return String(videoSettings.apiKey);
 	return process.env.ALORBACH_OPENAI_API_KEY || process.env.OPENAI_API_KEY || '';
+}
+
+function pollTimeoutMs() {
+	return Number(videoSettings.pollTimeoutMs || process.env.ALORBACH_VIDEO_POLL_TIMEOUT_MS || 600000);
+}
+
+function pollIntervalMs() {
+	return Number(videoSettings.pollIntervalMs || process.env.ALORBACH_VIDEO_POLL_INTERVAL_MS || 3000);
 }
 
 function resolveVideoModel(value) {
@@ -292,7 +308,7 @@ async function run(payload = {}, session = {}) {
 	let response = result.parsed;
 	let polled = false;
 	if ((action === 'create' || action === 'remix') && payload.poll && response && response.id) {
-		const pollResult = await pollVideo(response.id, Number(process.env.ALORBACH_VIDEO_POLL_TIMEOUT_MS || 600000), Number(process.env.ALORBACH_VIDEO_POLL_INTERVAL_MS || 3000), requestOptions);
+		const pollResult = await pollVideo(response.id, pollTimeoutMs(), pollIntervalMs(), requestOptions);
 		if (!pollResult.ok) {
 			return failurePayload(pollResult);
 		}
@@ -311,6 +327,7 @@ async function run(payload = {}, session = {}) {
 
 module.exports = {
 	capabilities,
+	configure,
 	disabledResult,
 	resolveVideoModel,
 	run,

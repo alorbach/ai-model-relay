@@ -164,6 +164,23 @@ function createMockSecurity() {
 		},
 	};
 	let savedRelaySettingsInput = null;
+	const maskSecret = (value) => {
+		const text = String(value || '');
+		return text ? { configured: true, suffix: text.slice(-4) } : { configured: false, suffix: '' };
+	};
+	const storedRelay = {
+		defaults: { chat: 'model-relay:codex:auto', images: 'model-relay:codex:image', videos: 'model-relay:openai-videos:sora-2', transcribe: 'model-relay:local-asr:auto', 'media.analyze': 'model-relay:codex:auto', 'music.analyze': 'model-relay:music-analysis:core' },
+		cli_paths: {},
+		token_defaults: { chat: '', 'media.analyze': '' },
+		runtime: { max_concurrent_jobs: '', timeouts: {} },
+		providers: { xai: { api_key: '', base_url: '', models: '' }, openai_videos: { enabled: null, api_key: '' }, api_key_chat: { api_key: '', base_url: '', provider_id: '', model: '' }, cli_process: { args: '' }, grok: { imagine_skill: '' }, antigravity: { state_dir: '' } },
+	};
+	function nextSecret(group, previous) {
+		const next = group && typeof group === 'object' ? group : {};
+		if (next.clear_api_key === true) return '';
+		const incoming = typeof next.api_key === 'string' ? next.api_key.trim() : '';
+		return incoming || previous || '';
+	}
 	const server = createServer({
 		backgroundRefresh: false,
 		codex,
@@ -191,10 +208,55 @@ function createMockSecurity() {
 			setup: (options) => Promise.resolve({ success: true, engine: options.engine || 'swinir', model: { id: 'model-relay:local-upscale:swinir-classical-x2', state: 'installed', manifest_valid: true } }),
 		},
 		relaySettings: {
-			settings: () => ({ defaults: { chat: 'model-relay:codex:auto', images: 'model-relay:codex:image', videos: 'model-relay:openai-videos:sora-2', transcribe: 'model-relay:local-asr:auto', 'media.analyze': 'model-relay:codex:auto', 'music.analyze': 'model-relay:music-analysis:core' } }),
+			settings: () => JSON.parse(JSON.stringify(storedRelay)),
+			publicSettings: () => {
+				const copy = JSON.parse(JSON.stringify(storedRelay));
+				copy.providers.xai.api_key = maskSecret(copy.providers.xai.api_key);
+				copy.providers.openai_videos.api_key = maskSecret(copy.providers.openai_videos.api_key);
+				copy.providers.api_key_chat.api_key = maskSecret(copy.providers.api_key_chat.api_key);
+				return copy;
+			},
+			resolved: () => ({
+				runtime: {
+					max_concurrent_jobs: Number.parseInt(String(storedRelay.runtime.max_concurrent_jobs || ''), 10) || 2,
+					timeouts: storedRelay.runtime.timeouts || {},
+				},
+				providers: JSON.parse(JSON.stringify(storedRelay.providers)),
+			}),
+			driverOptions: () => ({}),
 			saveSettings: (settings) => {
 				savedRelaySettingsInput = settings;
-				return { defaults: settings.defaults, cli_paths: settings.cli_paths || {} };
+				if (settings.cli_paths) storedRelay.cli_paths = { ...storedRelay.cli_paths, ...settings.cli_paths };
+				if (settings.token_defaults) storedRelay.token_defaults = { ...storedRelay.token_defaults, ...settings.token_defaults };
+				if (settings.runtime) {
+					storedRelay.runtime = {
+						...storedRelay.runtime,
+						...settings.runtime,
+						timeouts: { ...(storedRelay.runtime.timeouts || {}), ...((settings.runtime && settings.runtime.timeouts) || {}) },
+					};
+				}
+				if (settings.providers) {
+					const next = settings.providers;
+					storedRelay.providers.xai = {
+						...storedRelay.providers.xai,
+						...(next.xai || {}),
+						api_key: nextSecret(next.xai, storedRelay.providers.xai.api_key),
+					};
+					storedRelay.providers.openai_videos = {
+						...storedRelay.providers.openai_videos,
+						...(next.openai_videos || {}),
+						api_key: nextSecret(next.openai_videos, storedRelay.providers.openai_videos.api_key),
+					};
+					storedRelay.providers.api_key_chat = {
+						...storedRelay.providers.api_key_chat,
+						...(next.api_key_chat || {}),
+						api_key: nextSecret(next.api_key_chat, storedRelay.providers.api_key_chat.api_key),
+					};
+					if (next.cli_process) storedRelay.providers.cli_process = { ...storedRelay.providers.cli_process, ...next.cli_process };
+					if (next.grok) storedRelay.providers.grok = { ...storedRelay.providers.grok, ...next.grok };
+					if (next.antigravity) storedRelay.providers.antigravity = { ...storedRelay.providers.antigravity, ...next.antigravity };
+				}
+				return JSON.parse(JSON.stringify(storedRelay));
 			},
 		},
 	});
@@ -242,6 +304,8 @@ function createMockSecurity() {
 		const relaySettings = await requestJson(port, 'GET', '/v1/relay/settings');
 		assert.strictEqual(relaySettings.statusCode, 200);
 		assert.strictEqual(relaySettings.body.settings.defaults.chat, 'model-relay:codex:auto');
+		assert.strictEqual(typeof relaySettings.body.listen_port, 'number');
+		assert.deepStrictEqual(relaySettings.body.settings.providers.xai.api_key, { configured: false, suffix: '' });
 		const musicSettings = await requestJson(port, 'GET', '/v1/music-analysis/settings');
 		assert.strictEqual(musicSettings.statusCode, 200);
 		const pageOrigin = { Origin: `http://127.0.0.1:${port}` };
@@ -287,6 +351,17 @@ function createMockSecurity() {
 		assert.strictEqual(savedRelaySettings.statusCode, 200);
 		assert.strictEqual(savedRelaySettingsInput.cli_paths['antigravity-cli'], 'C:\\Tools\\agy.exe');
 		assert.strictEqual(savedRelaySettings.body.refresh_started, true);
+		const secret = 'xai-super-secret-key-9999';
+		const savedSecrets = await requestJson(port, 'POST', '/v1/relay/settings', { settings: { runtime: { max_concurrent_jobs: 4 }, providers: { xai: { api_key: secret } } } }, pageOrigin);
+		assert.strictEqual(savedSecrets.statusCode, 200);
+		assert.ok(!JSON.stringify(savedSecrets.body).includes(secret));
+		assert.strictEqual(savedSecrets.body.settings.providers.xai.api_key.configured, true);
+		assert.strictEqual(savedSecrets.body.settings.providers.xai.api_key.suffix, '9999');
+		assert.strictEqual(server.jobManager.maxConcurrent, 4);
+		const reloadedRelaySettings = await requestJson(port, 'GET', '/v1/relay/settings');
+		assert.ok(!JSON.stringify(reloadedRelaySettings.body).includes(secret));
+		assert.strictEqual(reloadedRelaySettings.body.settings.providers.xai.api_key.configured, true);
+		assert.strictEqual(reloadedRelaySettings.body.settings.runtime.max_concurrent_jobs, 4);
 		const refresh = await requestJson(port, 'POST', '/v1/relay/refresh', {}, pageOrigin);
 		assert.strictEqual(refresh.statusCode, 202);
 		assert.strictEqual(refresh.body.checking, true);

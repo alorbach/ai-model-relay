@@ -16,6 +16,7 @@ const packageInfo = require('../package.json');
 	assert.strictEqual(settings.sample_rate, 96000);
 	assert.strictEqual(settings.max_sections, 24);
 	assert.strictEqual(settings.venv_path, 'D:\\music-venv');
+	assert.strictEqual(musicAnalysis.normalizeSettings({ timeout_ms: 45000 }).timeout_ms, 45000);
 	assert.strictEqual(musicAnalysis.decodeAudio(Buffer.from('audio').toString('base64')).toString(), 'audio');
 	assert.strictEqual(musicAnalysis.decodeAudio('not base64%%%'), null);
 

@@ -203,6 +203,12 @@ class JobManager {
 		this.nextId = 1;
 	}
 
+	setMaxConcurrent(value) {
+		this.maxConcurrent = clampMaxConcurrent(value);
+		this.drain();
+		this.emitChange();
+	}
+
 	run(meta, runner) {
 		if (typeof runner !== 'function') {
 			return Promise.reject(new Error('A job runner function is required.'));

@@ -76,6 +76,32 @@ const { CHECKOUT_MARKER, INSTALL, MODELS, createLocalUpscaleDriver, modelConfig,
 		assert.strictEqual(apisr.experimental, true);
 		assert.strictEqual(apisr.academic_only, true);
 		assert.strictEqual(apisr.license.spdx, 'GPL-3.0-only');
+		{
+			const security = require('../src/security');
+			const originalReadState = security.readState;
+			const originalWriteState = security.writeState;
+			const originalUpdateState = security.updateState;
+			let state = {};
+			security.readState = () => JSON.parse(JSON.stringify(state));
+			security.writeState = (next) => { state = JSON.parse(JSON.stringify(next)); };
+			security.updateState = (mutator) => {
+				const next = mutator(JSON.parse(JSON.stringify(state)));
+				state = JSON.parse(JSON.stringify(next));
+				return state;
+			};
+			try {
+				const { saveSettings } = require('../src/local-upscale');
+				const savedUpscale = saveSettings({ timeout_ms: 90000, tile: 256, precision: 'fp32', apisr_venv_path: 'D:\\apisr-venv' });
+				assert.strictEqual(savedUpscale.timeout_ms, 90000);
+				assert.strictEqual(savedUpscale.tile, 256);
+				assert.strictEqual(savedUpscale.precision, 'fp32');
+				assert.strictEqual(savedUpscale.apisr_venv_path, 'D:\\apisr-venv');
+			} finally {
+				security.readState = originalReadState;
+				security.writeState = originalWriteState;
+				security.updateState = originalUpdateState;
+			}
+		}
 		const native4x = { scale: 4, output_policy: 'retain_native_x4', crop_pixels: { width: 320, height: 180 }, target_print: { width: 1000, height: 700 }, output_print: { width: 1280, height: 720 } };
 		assert.strictEqual(nativeContractValid(x4, native4x), true, 'native x4 must retain exactly four times the approved crop');
 		assert.strictEqual(nativeContractValid(x4, { ...native4x, scale: 2 }), false, 'x4 must reject a declared x2 scale');

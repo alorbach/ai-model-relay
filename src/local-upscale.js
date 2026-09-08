@@ -130,6 +130,9 @@ function defaultSettings() {
 		realesrgan_root: process.env.AI_MODEL_RELAY_REALESRGAN_ROOT || path.join(security.stateDir, 'upscale', 'realesrgan'),
 		realesrgan_model_path: process.env.AI_MODEL_RELAY_REALESRGAN_MODEL_PATH || '',
 		realesrgan_weight_sha256: String(process.env.AI_MODEL_RELAY_REALESRGAN_WEIGHT_SHA256 || '').toLowerCase(),
+		timeout_ms: Math.max(1000, Number(process.env.AI_MODEL_RELAY_UPSCALE_TIMEOUT_MS || 1800000) || 1800000),
+		tile: Math.max(0, Number(process.env.AI_MODEL_RELAY_UPSCALE_TILE || 0) || 0),
+		precision: /^(fp16|fp32)$/i.test(String(process.env.AI_MODEL_RELAY_UPSCALE_PRECISION || '')) ? String(process.env.AI_MODEL_RELAY_UPSCALE_PRECISION).toLowerCase() : 'fp16',
 		model_records: {},
 	};
 }
@@ -147,6 +150,9 @@ function normalizeSettings(raw) {
 		realesrgan_root: String(source.realesrgan_root || defaults.realesrgan_root || '').trim() || defaults.realesrgan_root,
 		realesrgan_model_path: String(source.realesrgan_model_path || defaults.realesrgan_model_path || '').trim(),
 		realesrgan_weight_sha256: String(source.realesrgan_weight_sha256 || defaults.realesrgan_weight_sha256 || '').trim().toLowerCase(),
+		timeout_ms: Math.max(1000, Number(source.timeout_ms || defaults.timeout_ms) || defaults.timeout_ms),
+		tile: Math.max(0, Number(source.tile === undefined || source.tile === '' ? defaults.tile : source.tile) || 0),
+		precision: /^(fp16|fp32)$/i.test(String(source.precision || defaults.precision || '')) ? String(source.precision || defaults.precision).toLowerCase() : 'fp16',
 		model_records: source.model_records && typeof source.model_records === 'object' ? source.model_records : {},
 	};
 }
@@ -599,7 +605,11 @@ function createLocalUpscaleDriver(options = {}) {
 			const sourcePath = path.join(workdir, 'source'); const outputPath = path.join(workdir, 'result.png'); const jobPath = path.join(workdir, 'job.json');
 			try {
 				fs.writeFileSync(sourcePath, source);
-				fs.writeFileSync(jobPath, JSON.stringify({ model, source_path: sourcePath, output_path: outputPath, source_mime_type: payload.source_mime_type, crop_pixels: cropPixels, target_print: payload.target_print, output_print: outputPrint, output_policy: payload.output_policy, scale, cuda_device: 0, tile: Number(env.AI_MODEL_RELAY_UPSCALE_TILE || model.preferred_tile), precision: String(env.AI_MODEL_RELAY_UPSCALE_PRECISION || 'fp16'), output_max_bytes: Number(model.max_output_bytes || MAX_BYTES), timeout_seconds: Math.max(1, Math.ceil(Number(env.AI_MODEL_RELAY_UPSCALE_TIMEOUT_MS || 1800000) / 1000)) }));
+				const config = env === process.env ? settings() : {};
+				const tile = Number(config.tile || env.AI_MODEL_RELAY_UPSCALE_TILE || model.preferred_tile);
+				const precision = /^(fp16|fp32)$/i.test(String(config.precision || env.AI_MODEL_RELAY_UPSCALE_PRECISION || '')) ? String(config.precision || env.AI_MODEL_RELAY_UPSCALE_PRECISION).toLowerCase() : 'fp16';
+				const timeoutMs = Number(config.timeout_ms || env.AI_MODEL_RELAY_UPSCALE_TIMEOUT_MS || 1800000);
+				fs.writeFileSync(jobPath, JSON.stringify({ model, source_path: sourcePath, output_path: outputPath, source_mime_type: payload.source_mime_type, crop_pixels: cropPixels, target_print: payload.target_print, output_print: outputPrint, output_policy: payload.output_policy, scale, cuda_device: 0, tile, precision, output_max_bytes: Number(model.max_output_bytes || MAX_BYTES), timeout_seconds: Math.max(1, Math.ceil(timeoutMs / 1000)) }));
 				const python = pythonCommand(env, model);
 				const result = await new Promise((resolve) => {
 					const stdoutCollector = createBoundedCollector({ maxChars: Number(process.env.AI_MODEL_RELAY_UPSCALE_OUTPUT_MAX_CHARS || 1024 * 1024) });
@@ -612,7 +622,7 @@ function createLocalUpscaleDriver(options = {}) {
 						stopReason = reason;
 						killProcessTree(child);
 					};
-					timeout = setTimeout(() => requestStop('timeout'), Number(env.AI_MODEL_RELAY_UPSCALE_TIMEOUT_MS || 1800000));
+					timeout = setTimeout(() => requestStop('timeout'), timeoutMs);
 					const onAbort = () => requestStop('cancelled');
 					if (session.signal) {
 						if (session.signal.aborted) onAbort();

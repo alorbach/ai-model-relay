@@ -326,6 +326,41 @@ function captureCliSpawn(calls) {
 	assert.strictEqual(apiKeyChatBody.temperature, 0.7);
 	assert.strictEqual(apiKeyChatBody.stream, undefined);
 
+	const abortingXaiController = new AbortController();
+	const abortingXai = createXaiApiDriver({
+		apiKey: 'secret-xai-key',
+		fetch: async (url, options) => {
+			assert.ok(options.signal);
+			abortingXaiController.abort();
+			const error = new Error('aborted');
+			error.name = 'AbortError';
+			throw error;
+		},
+	});
+	const abortedXaiChat = await abortingXai.chat({ messages: [{ role: 'user', content: 'hi' }] }, { signal: abortingXaiController.signal });
+	assert.strictEqual(abortedXaiChat.category, 'cancelled');
+	assert.strictEqual(abortedXaiChat.code, 'local_job_cancelled');
+	const abortedXaiStt = await abortingXai.transcribe({ audio_base64: Buffer.from('audio').toString('base64') }, { signal: abortingXaiController.signal });
+	assert.strictEqual(abortedXaiStt.category, 'cancelled');
+	const abortedXaiImage = await abortingXai.images({ prompt: 'a cat' }, { signal: abortingXaiController.signal });
+	assert.strictEqual(abortedXaiImage.category, 'cancelled');
+	const abortedXaiVideo = await abortingXai.videos({ prompt: 'animate' }, { signal: abortingXaiController.signal });
+	assert.strictEqual(abortedXaiVideo.category, 'cancelled');
+	const abortingApiKeyController = new AbortController();
+	const abortingApiKeyChat = createApiKeyChatDriver({
+		apiKey: 'secret-chat-key',
+		baseUrl: 'https://chat.example.test/v1/',
+		fetch: async (url, options) => {
+			assert.ok(options.signal);
+			abortingApiKeyController.abort();
+			const error = new Error('aborted');
+			error.name = 'AbortError';
+			throw error;
+		},
+	});
+	const abortedApiKeyChat = await abortingApiKeyChat.chat({ messages: [{ role: 'user', content: 'hi' }] }, { signal: abortingApiKeyController.signal });
+	assert.strictEqual(abortedApiKeyChat.category, 'cancelled');
+
 	const xaiStt = createXaiApiDriver({
 		apiKey: 'secret-xai-key',
 		fetch: async (url, options) => {

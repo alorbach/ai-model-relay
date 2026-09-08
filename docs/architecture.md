@@ -26,7 +26,7 @@ The bridge listens on `127.0.0.1` and defaults to port `8765`. It exposes a smal
 
 The bridge does not call WordPress directly. It receives a WordPress-created job envelope from the browser, routes it to a backend driver, and returns the normalized result to the browser. The browser then completes or fails the WordPress job with the original one-time token and request hash.
 
-Execution requests are scheduled through an in-memory queue. The default limit is two parallel jobs and can be changed with `ALORBACH_CODEX_MAX_CONCURRENT_JOBS`. Image generation jobs are limited to one running image job at a time when they use Codex image detection, because the installed Codex CLI contract exposes no supported per-job output-directory or last-image flag and detection therefore still watches the shared `CODEX_HOME/generated_images` directory; chat jobs may still run beside an image job up to the configured parallel limit.
+Execution requests are scheduled through an in-memory queue. The default limit is two parallel jobs. Operators set concurrency and timeouts on **Settings → Runtime**; environment variables such as `ALORBACH_CODEX_MAX_CONCURRENT_JOBS` apply only when the matching Settings field is blank. Image generation jobs are limited to one running image job at a time when they use Codex image detection, because the installed Codex CLI contract exposes no supported per-job output-directory or last-image flag and detection therefore still watches the shared `CODEX_HOME/generated_images` directory; chat jobs may still run beside an image job up to the configured parallel limit.
 
 ### Backend registry
 
@@ -52,13 +52,13 @@ Entry point: `src/codex.js`
 
 The adapter resolves and runs the local `codex` executable. On Windows, it prefers the real `codex.exe` from known installation locations before falling back to `where.exe codex`, which avoids common failures when the `codex.cmd` npm shim is not spawn-safe from a packaged app.
 
-Runtime configuration:
+Runtime configuration uses **Settings** first (Providers, Runtime, Local ASR, Music Analysis, CUDA Upscale). A stored non-empty value wins; a blank field falls back to the environment variable, then the code default. The listen port (`ALORBACH_CODEX_BRIDGE_PORT`) and state directory stay process-start environment settings and are not editable in Settings.
 
-- `ALORBACH_CODEX_BINARY`: explicit Codex executable path.
+- `ALORBACH_CODEX_BINARY`: explicit Codex executable path when Settings CLI path is blank.
 - `CODEX_HOME`: Codex profile directory. Defaults to `%USERPROFILE%\.codex`.
-- `ALORBACH_CODEX_MAX_CONCURRENT_JOBS`: maximum parallel local Codex jobs. Defaults to `2`.
-- `ALORBACH_CODEX_CHAT_TIMEOUT_MS`: chat timeout. Defaults to 600000.
-- `ALORBACH_CODEX_IMAGE_TIMEOUT_MS`: image timeout. Defaults to 1800000.
+- `ALORBACH_CODEX_MAX_CONCURRENT_JOBS`: maximum parallel local jobs when Settings Runtime concurrency is blank. Defaults to `2`.
+- `ALORBACH_CODEX_CHAT_TIMEOUT_MS`: chat timeout when the Runtime field is blank. Defaults to 600000.
+- `ALORBACH_CODEX_IMAGE_TIMEOUT_MS`: image timeout when the Runtime field is blank. Defaults to 1800000.
 
 Chat jobs run `codex exec` in an ephemeral temp directory and write the final assistant message to a temp output file. The bridge sends generated Codex instructions through stdin instead of a command-line prompt argument so large WordPress transcripts do not hit Windows process argument length limits. Relay catalog IDs such as `model-relay:codex:auto` are stripped to a native Codex model before `--model`; `auto` omits `--model`. If Codex rejects a requested model on a ChatGPT account, chat retries once with the account default. When `codex exec --help` lists `--sandbox`, chat also passes `--sandbox read-only`. Data URL image attachments in chat content are decoded into temp files and passed with `codex exec --image`, so base64 image payloads do not count as prompt text. Image jobs run `codex exec`, snapshot the shared `CODEX_HOME/generated_images` file set and expected launch time, prefer a validated image path named by a structured JSON event, and otherwise return the newest image created after that boundary as base64. The shared directory remains globally serialized by the job manager because no safe per-job output flag is advertised by the captured Codex help contract. When the installed CLI advertises `--output-schema`, media analysis also requests structured fields and exposes them additively under `response.provider_details.media_analysis.structured`; older or rejecting CLIs fall back to the existing human-readable message. Optional transcripts for media analysis are sliced to 32 000 characters.
 
@@ -68,7 +68,7 @@ Grok, Cursor, and Antigravity chat write the transcript to a temp `prompt.txt` (
 
 Legacy `/v1/chat`, `/v1/images`, `/v1/transcribe`, `/v1/videos`, and `/v1/media/analyze` routes remain backwards compatible. New aliases under `/v1/relay/jobs/*` accept the same signed envelope and may route by `payload.provider`, `payload.backend`, or provider-qualified model IDs such as `model-relay:xai:grok-4.6`.
 
-Relay-only defaults are persisted in the existing local state file for `chat`, `images`, `videos`, `transcribe`, and `media.analyze`. An explicit model, backend, or provider wins. Otherwise the saved operation default is inserted. Explicit and default selections receive the same validation: unknown, disabled, unauthenticated, or job-incompatible selections return a clear configuration error naming the choice. They never fall back to another driver. Legacy routes do not consult these routing defaults. Optional `token_defaults` for chat and media.analyze are also persisted there and apply on both legacy and relay chat/analysis routes.
+Relay-only defaults are persisted in the existing local state file for `chat`, `images`, `videos`, `transcribe`, and `media.analyze`, together with CLI paths, token defaults, runtime timeouts/concurrency, and provider API options. Secrets are stored there but GET `/v1/relay/settings` returns only `configured` plus a 4-character suffix. An explicit model, backend, or provider wins. Otherwise the saved operation default is inserted. Explicit and default selections receive the same validation: unknown, disabled, unauthenticated, or job-incompatible selections return a clear configuration error naming the choice. They never fall back to another driver. Legacy routes do not consult these routing defaults. Optional `token_defaults` for chat and media.analyze are also persisted there and apply on both legacy and relay chat/analysis routes.
 
 ### Job diagnostics and generated artifacts
 

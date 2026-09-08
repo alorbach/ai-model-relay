@@ -24,6 +24,8 @@ The Settings page shows every supported local/API driver with an installed, read
 
 The six selectors route only `/v1/relay/jobs/*`: chat, images, videos, transcription, media analysis, and music analysis. Explicit `payload.model`, `payload.provider`, or `payload.backend` always overrides the saved default. Legacy `/v1/chat`, `/v1/images`, `/v1/transcribe`, `/v1/videos`, and `/v1/media/analyze` remain unchanged for provider routing.
 
+Settings is the primary operator control. Open **Settings** and use **Providers** (CLI paths, routing, token defaults, API keys, extra CLI options), **Runtime** (concurrency and timeouts), **CUDA Upscale**, **Music Analysis**, and **Local ASR**. A non-empty Settings value wins; leave a field blank to keep the matching environment variable or code default. API keys are stored in the local state file, returned only as `configured` plus a 4-character suffix, and can be cleared so environment variables apply again. The listen port (`ALORBACH_CODEX_BRIDGE_PORT`) and state directory remain process-start environment settings and are shown read-only on the Runtime tab.
+
 Under **Model routing**, optional **Chat token default** (code default 8192) and **Media analysis token default** (code default 4096) override those floors when set to an integer from 512 to 128000. Leave them blank to keep the code defaults. Client `max_tokens` values of 512 or higher still win for that job. These token fields apply to legacy chat/analysis routes as well as relay jobs.
 
 The relay never silently falls back. If an explicit or saved model/provider is unknown, unavailable, unauthenticated, disabled, or incompatible with the job type, the request fails with a configuration error naming that choice. An unavailable saved selection remains visible but disabled in Settings so it can be corrected.
@@ -54,7 +56,7 @@ Run the tray app:
 npm start
 ```
 
-Limit local Codex parallelism for a development run:
+Limit local Codex parallelism for a development run. Prefer **Settings → Runtime → Max concurrent jobs**; the environment variable applies only when that field is blank:
 
 ```powershell
 $env:ALORBACH_CODEX_MAX_CONCURRENT_JOBS = '2'
@@ -153,7 +155,7 @@ codex login status
 npm run smoke
 ```
 
-If the app resolves the wrong Codex command on Windows, set:
+If the app resolves the wrong Codex command on Windows, set the Codex executable in **Settings → Providers**, or use the environment variable when that field is blank:
 
 ```powershell
 $env:ALORBACH_CODEX_BINARY = '<path-to-codex.exe>'
@@ -179,7 +181,7 @@ Default behavior:
 - Qwen timestamp output still requires `Qwen/Qwen3-ForcedAligner-0.6B` to be cached or explicitly downloadable, but the ForcedAligner is not exposed as a normal transcription model because it requires reference text.
 - Qwen timestamped transcription is pre-chunked locally before ASR and alignment. The default chunk size is 30 seconds to avoid long ASR omissions inside Qwen's larger timestamp chunks. The bridge also reports and caps implausibly stretched single-word timestamps.
 
-Useful environment overrides:
+Useful environment overrides (used when the matching Local ASR Settings field is blank):
 
 ```powershell
 $env:ALORBACH_ASR_PYTHON = 'C:\Users\AL\AppData\Local\Programs\Python\Python310\python.exe'
@@ -214,7 +216,7 @@ Open **Settings**, press **Refresh detection**, and read the provider card's saf
 
 Grok CLI media requires `%USERPROFILE%\.grok\skills\imagine\SKILL.md` or `%USERPROFILE%\.grok\bundled\skills\imagine\SKILL.md` to declare the relevant Imagine tools. Press **Refresh detection** after installing/updating Grok. Image/video jobs fail explicitly when the Imagine tools are unavailable, no output artifact is generated, the request is moderated, or the bounded Grok process times out. Video remains experimental until a local video request succeeds; if Grok confirms that a video tool is unavailable, refresh detection and update Grok before selecting it again.
 
-xAI Imagine HTTP image and video jobs (`model-relay:xai:imagine-image`, `model-relay:xai:imagine-video`) need `XAI_API_KEY` or `AI_MODEL_RELAY_XAI_API_KEY`. Native request fields include aspect ratio (including `21:9` and `5:2` for images), image resolution `1k`/`2k`, video resolution `480p`/`720p`/`1080p`, clip length 1–15 seconds, and `generate_audio`. These upload the prompt and any reference images to xAI. When that key is set and no video default has been saved, Settings defaults video routing to Imagine video.
+xAI Imagine HTTP image and video jobs (`model-relay:xai:imagine-image`, `model-relay:xai:imagine-video`) need an xAI API key in **Settings → Providers** or `XAI_API_KEY` / `AI_MODEL_RELAY_XAI_API_KEY` when that field is blank. Native request fields include aspect ratio (including `21:9` and `5:2` for images), image resolution `1k`/`2k`, video resolution `480p`/`720p`/`1080p`, clip length 1–15 seconds, and `generate_audio`. These upload the prompt and any reference images to xAI. When that key is set and no video default has been saved, Settings defaults video routing to Imagine video.
 
 ### Image resolution expectations on status-page tests
 
@@ -236,7 +238,7 @@ Clear the browser's stored token for the origin and pair again. Also check the t
 
 The bridge detects new files under `CODEX_HOME\generated_images`. Confirm Codex writes generated images there for the current `CODEX_HOME`.
 
-Only one image job runs at a time because image result detection uses the shared generated-images directory. Chat jobs may still run beside an image job up to `ALORBACH_CODEX_MAX_CONCURRENT_JOBS`.
+Only one image job runs at a time because image result detection uses the shared generated-images directory. Chat jobs may still run beside an image job up to the **Settings → Runtime** concurrency value, or `ALORBACH_CODEX_MAX_CONCURRENT_JOBS` when that field is blank.
 
 ### WordPress retry says duplicate request
 
