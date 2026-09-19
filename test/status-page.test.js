@@ -153,3 +153,9 @@ assert.ok(html.includes('data-open-live-job'));
 assert.ok(html.includes('--accent:'));
 
 console.log('status page tests passed');
+
+assert.ok(html.includes('data-settings-section="pairing"'));
+assert.ok(html.includes('id="persistentPairingCodeInput"'));
+assert.ok(html.includes('type="password"'));
+assert.ok(html.includes("const pairingCodeSettingsUrl = '/v1/relay/pairing-code'"));
+assert.ok(html.includes('The code is never returned to this page after saving.'));

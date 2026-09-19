@@ -88,9 +88,9 @@ Pairing state remains compatible with the legacy directory by default:
 
 If `%USERPROFILE%\.ai-model-relay` already exists, or `AI_MODEL_RELAY_STATE_DIR` / `ALORBACH_MODEL_RELAY_STATE_DIR` is set, the relay uses that directory instead. This keeps existing installs working while allowing a staged migration to the new product name.
 
-The state file contains per-origin bearer tokens and pairing timestamps. The tray diagnostics intentionally omit token values.
+The state file contains per-origin bearer tokens and pairing timestamps. The tray diagnostics intentionally omit token values. In the Electron desktop app, an optional fixed pairing code is encrypted through Electron `safeStorage` before it is saved in this state file. The six-digit value is never returned by the settings API.
 
-Pairing codes are six digit, short-lived process values. After a successful pairing, the bridge generates a new pairing code.
+Pairing codes rotate after successful pairing by default. The local status page can instead save a fixed six-digit code under Settings → Pairing; that code survives successful pairings and app restarts. Fixed codes are weaker than rotating codes, so pairing failures are rate-limited across origins and the failure window is persisted.
 
 ### WordPress Gateway driver
 

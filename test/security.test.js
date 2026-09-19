@@ -64,6 +64,18 @@ fs.renameSync = originalRenameSync;
 assert.deepStrictEqual(security.readState(), stateBeforeFailedWrite);
 assert.strictEqual(fs.readdirSync(testStateDir).some((entry) => entry.endsWith('.tmp')), false);
 
+let persistentNow = 10000;
+const persistentLimiterOne = security.createPairingLimiter({ persistent: true, maxFailures: 2, windowMs: 60000, now: () => persistentNow });
+assert.ok(persistentLimiterOne.allow());
+persistentLimiterOne.recordFailure();
+persistentLimiterOne.recordFailure();
+const persistentLimiterAfterRestart = security.createPairingLimiter({ persistent: true, maxFailures: 2, windowMs: 60000, now: () => persistentNow });
+assert.ok(!persistentLimiterAfterRestart.allow(), 'pairing lockouts persist across limiter instances and restarts');
+assert.ok(persistentLimiterAfterRestart.retryAfterMs() > 0);
+persistentNow += 60001;
+assert.ok(persistentLimiterAfterRestart.allow(), 'the persisted pairing lockout expires after its window');
+persistentLimiterAfterRestart.reset();
+
 security.writeState({ version: 4, pairings: { 'https://keep.test': { token: 'keep' } }, extra: 'preserved' });
 security.savePairing('https://new.test', 'new-token');
 assert.strictEqual(security.readState().extra, 'preserved');

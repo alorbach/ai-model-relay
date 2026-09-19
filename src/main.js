@@ -3,13 +3,14 @@
 const fs = require('fs');
 const path = require('path');
 const { fork } = require('child_process');
-const { app, clipboard, Menu, nativeImage, shell, Tray } = require('electron');
+const { app, clipboard, Menu, nativeImage, safeStorage, shell, Tray } = require('electron');
 const packageInfo = require('../package.json');
 const codex = require('./codex');
 const { PRODUCT_NAME, SHORT_NAME, LEGACY_PRODUCT_NAME } = require('./brand');
 const { appendLog, safeError } = require('./diagnostics');
 const { killProcessTree } = require('./cuda-torch-venv');
 const security = require('./security');
+const securePairingCode = require('./secure-pairing-code');
 
 let buildInfo = {};
 try {
@@ -22,6 +23,9 @@ let tray = null;
 let serverProcess = null;
 let serverPort = Number(process.env.ALORBACH_CODEX_BRIDGE_PORT || 8765);
 let currentPairingCode = '';
+let currentPairingCodePersistent = false;
+let configuredPersistentPairingCode = '';
+let pairingCodePersistenceAvailable = false;
 let bridgeState = 'Starting';
 let lastServerError = '';
 let cachedCodexStatus = { success: false, message: 'Checking Codex status...', details: {} };
@@ -122,6 +126,72 @@ function copyDiagnostics(status, pairedOrigins) {
 	}, null, 2));
 }
 
+async function loadPersistentPairingCode() {
+	pairingCodePersistenceAvailable = await securePairingCode.isSecureStorageAvailable(safeStorage, process.platform);
+	const ciphertext = String(security.readState().persistent_pairing_code_ciphertext || '');
+	if (!ciphertext || !pairingCodePersistenceAvailable) return '';
+	try {
+		const result = await securePairingCode.decryptPairingCode(ciphertext, safeStorage, process.platform);
+		if (result.ciphertext && result.ciphertext !== ciphertext) {
+			security.updateState((state) => {
+				state.persistent_pairing_code_ciphertext = result.ciphertext;
+				return state;
+			});
+		}
+		return result.pairingCode;
+	} catch (error) {
+		appendLog('main', 'Saved fixed pairing code could not be loaded; Relay will use a rotating code.');
+		return '';
+	}
+}
+
+async function savePersistentPairingCode(code) {
+	const normalized = String(code || '');
+	let ciphertext = '';
+	if (normalized) {
+		ciphertext = await securePairingCode.encryptPairingCode(normalized, safeStorage, process.platform);
+	}
+	security.updateState((state) => {
+		if (ciphertext) state.persistent_pairing_code_ciphertext = ciphertext;
+		else delete state.persistent_pairing_code_ciphertext;
+		return state;
+	});
+	configuredPersistentPairingCode = normalized;
+}
+
+function replyToServer(child, message) {
+	try {
+		if (child && child.connected) child.send(message);
+	} catch (error) {
+		appendLog('main', 'Relay pairing settings response could not be delivered.');
+	}
+}
+
+async function handlePairingCodeSaveRequest(child, message) {
+	const requestId = String(message.requestId || '');
+	const code = String(message.pairingCode || '');
+	try {
+		if (code && !securePairingCode.isValidPairingCode(code)) {
+			throw new Error('Pairing code must contain exactly six digits.');
+		}
+		if (code && !(await securePairingCode.isSecureStorageAvailable(safeStorage, process.platform))) {
+			throw new Error('OS-backed secure storage is unavailable.');
+		}
+		await savePersistentPairingCode(code);
+		replyToServer(child, { type: 'pairing-code-save-result', requestId, success: true });
+	} catch (error) {
+		appendLog('main', 'Fixed pairing code could not be saved securely.');
+		replyToServer(child, {
+			type: 'pairing-code-save-result',
+			requestId,
+			success: false,
+			message: error && error.message === 'OS-backed secure storage is unavailable.'
+				? 'OS-backed secure storage is unavailable.'
+				: 'The pairing code could not be saved securely.',
+		});
+	}
+}
+
 function stopBridge() {
 	if (!serverProcess) {
 		return Promise.resolve();
@@ -191,6 +261,16 @@ function startBridge() {
 				appendLog('main', 'Bridge server stdout.', { output: text.slice(-4000) });
 			}
 		});
+		try {
+			child.send({
+				type: 'initialize-pairing-code',
+				pairingCode: configuredPersistentPairingCode,
+				pairingCodePersistenceAvailable,
+			});
+		} catch (error) {
+			appendLog('main', 'Relay pairing-code initialization could not be sent.');
+		}
+
 		if (child.stderr) child.stderr.on('data', (chunk) => {
 			const text = String(chunk || '').trim();
 			if (text) {
@@ -202,14 +282,21 @@ function startBridge() {
 			if (!message || typeof message !== 'object') {
 				return;
 			}
+			if (message.type === 'save-persistent-pairing-code') {
+				void handlePairingCodeSaveRequest(child, message);
+				return;
+			}
 			if (message.type === 'ready') {
 				serverPort = Number(message.port || serverPort);
 				currentPairingCode = String(message.pairingCode || currentPairingCode || '');
+				currentPairingCodePersistent = message.persistentPairingCode === true;
 				bridgeState = 'Running';
 				refreshTray();
 				finish();
 			} else if (message.type === 'pairing-code') {
 				currentPairingCode = String(message.pairingCode || currentPairingCode || '');
+				currentPairingCodePersistent = message.persistent === true;
+				configuredPersistentPairingCode = currentPairingCodePersistent ? currentPairingCode : '';
 				refreshTray();
 			} else if (message.type === 'error') {
 				lastServerError = String(message.message || '');
@@ -319,7 +406,7 @@ function buildMenu() {
 		{ label: status.message || 'Status unavailable', enabled: false },
 		...buildJobMenuItems(),
 		{ type: 'separator' },
-		{ label: `Pairing code: ${currentPairingCode || 'starting'}`, enabled: false },
+		{ label: 'Pairing code' + (currentPairingCodePersistent ? ' (fixed)' : '') + ': ' + (currentPairingCode || 'starting'), enabled: false },
 		{
 			label: 'Copy pairing code',
 			enabled: !!currentPairingCode,
@@ -420,7 +507,7 @@ function refreshTray() {
 		`Codex: ${cachedCodexStatus.success ? 'Ready' : 'Needs attention'}`,
 		`Running: ${jobState.running_count || 0} / Queued: ${jobState.queued_count || 0}`,
 		...activeJobs,
-		`Pairing code: ${currentPairingCode || 'starting'}`,
+		'Pairing code' + (currentPairingCodePersistent ? ' (fixed)' : '') + ': ' + (currentPairingCode || 'starting'),
 	].join('\n');
 	tray.setToolTip(tooltip);
 	tray.setContextMenu(buildMenu());
@@ -429,6 +516,7 @@ function refreshTray() {
 async function boot() {
 	try {
 		tray = new Tray(trayIcon('idle'));
+		configuredPersistentPairingCode = await loadPersistentPairingCode();
 		tray.on('double-click', () => openStatusPage());
 		refreshTray();
 		await startBridge();

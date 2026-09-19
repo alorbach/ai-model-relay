@@ -1244,6 +1244,7 @@ function statusPageHtml() {
 					<button type="button" data-settings-section="upscale">CUDA Upscale</button>
 					<button type="button" data-settings-section="music">Music Analysis</button>
 					<button type="button" data-settings-section="asr">Local ASR</button>
+					<button type="button" data-settings-section="pairing">Pairing</button>
 				</nav>
 				<div class="settings-panels">
 					<div class="settings-section" id="settings-section-providers" data-settings-panel="providers">
@@ -1263,6 +1264,19 @@ function statusPageHtml() {
 						<p class="muted">Blank timeout and concurrency fields keep the environment variable or code default. The listen port is set at process start and is not editable here.</p>
 						<div class="settings-grid" id="relayRuntimeSettings"></div>
 						<div class="settings-actions"><span class="muted" id="relayRuntimeMessage">Loading runtime settings</span><button type="button" class="btn-primary" id="saveRelayRuntimeSettings" disabled>Save runtime</button></div>
+					</div>
+					<div class="settings-section" id="settings-section-pairing" data-settings-panel="pairing" hidden>
+						<div class="label">Pairing code</div>
+						<p class="muted">Use a fixed six-digit code when you need the same code after Relay restarts and successful pairings. It is encrypted with the operating-system secure storage. A fixed numeric code is weaker than a one-time code; pairing attempts are rate-limited across origins and survive restarts.</p>
+						<form class="settings-editor" id="persistentPairingCodeForm">
+							<label class="field"><span>Fixed pairing code</span><input id="persistentPairingCodeInput" type="password" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="new-password" placeholder="Enter six digits" aria-describedby="pairingCodeStatus pairingCodeMessage"></label>
+							<div class="settings-actions">
+								<span class="muted" id="pairingCodeStatus">Loading pairing status</span>
+								<button type="submit" class="btn-primary" id="saveFixedPairingCode">Save fixed code</button>
+								<button type="button" id="disableFixedPairingCode">Use rotating code</button>
+							</div>
+							<p class="muted" id="pairingCodeMessage" aria-live="polite"></p>
+						</form>
 					</div>
 					<div class="settings-section" id="settings-section-tests" data-settings-panel="tests" hidden>
 						<div class="label">Provider media and audio tests</div>
@@ -1396,6 +1410,7 @@ function statusPageHtml() {
 		const upscaleSettingsUrl = '/v1/upscale/settings';
 		const upscaleSetupUrl = '/v1/upscale/setup';
 		const relaySettingsUrl = '/v1/relay/settings';
+		const pairingCodeSettingsUrl = '/v1/relay/pairing-code';
 		const relayTestUrl = '/v1/relay/test';
 		const jobEventsUrl = '/v1/status/events';
 		let currentStatus = {};
@@ -1414,7 +1429,7 @@ function statusPageHtml() {
 		const seenLiveRequestIds = new Set();
 		let settingsSection = 'providers';
 		let suppressHashChange = false;
-		const knownSettingsSections = ['providers', 'runtime', 'tests', 'upscale', 'music', 'asr'];
+		const knownSettingsSections = ['providers', 'runtime', 'tests', 'upscale', 'music', 'asr', 'pairing'];
 		let formSnapshots = { relay: '', runtime: '', asr: '', music: '', upscale: '' };
 		const fields = {
 			tabButtons: Array.from(document.querySelectorAll('.app-shell nav.tabs[role="tablist"] [role="tab"]')),
@@ -1438,6 +1453,12 @@ function statusPageHtml() {
 			liveDetailCopyId: document.getElementById('liveDetailCopyId'),
 			settingsNavButtons: Array.from(document.querySelectorAll('#settings-nav [data-settings-section]')),
 			settingsPanels: Array.from(document.querySelectorAll('[data-settings-panel]')),
+			persistentPairingCodeForm: document.getElementById('persistentPairingCodeForm'),
+			persistentPairingCodeInput: document.getElementById('persistentPairingCodeInput'),
+			pairingCodeStatus: document.getElementById('pairingCodeStatus'),
+			pairingCodeMessage: document.getElementById('pairingCodeMessage'),
+			saveFixedPairingCode: document.getElementById('saveFixedPairingCode'),
+			disableFixedPairingCode: document.getElementById('disableFixedPairingCode'),
 			debugHealthList: document.getElementById('debugHealthList'),
 			debugFailureList: document.getElementById('debugFailureList'),
 			rawStatusFilter: document.getElementById('rawStatusFilter'),
@@ -1791,6 +1812,7 @@ function statusPageHtml() {
 			if (!options.skipHash) {
 				setHash('settings/' + next);
 			}
+			if (next === 'pairing') loadPairingSettings();
 			return true;
 		}
 
@@ -2997,6 +3019,71 @@ function statusPageHtml() {
 			}
 		}
 
+		async function loadPairingSettings() {
+			try {
+				const response = await fetch(pairingCodeSettingsUrl, { cache: 'no-store' });
+				const payload = await response.json();
+				if (!response.ok || payload.success === false) throw new Error(payload.message || 'Pairing settings unavailable');
+				fields.persistentPairingCodeInput.value = '';
+				fields.pairingCodeStatus.textContent = payload.persistent ? 'A fixed pairing code is active.' : 'Relay is using a rotating code.';
+				fields.saveFixedPairingCode.disabled = payload.persistence_available !== true;
+				fields.disableFixedPairingCode.disabled = payload.persistent !== true;
+				fields.pairingCodeMessage.textContent = payload.persistence_available
+					? 'The code is never returned to this page after saving.'
+					: 'Fixed-code storage requires the AI Model Relay desktop app and available OS secure storage.';
+			} catch (error) {
+				fields.pairingCodeStatus.textContent = error.message || 'Pairing settings unavailable';
+				fields.saveFixedPairingCode.disabled = true;
+				fields.disableFixedPairingCode.disabled = true;
+			}
+		}
+
+		async function saveFixedPairingCode() {
+			const pairingCode = String(fields.persistentPairingCodeInput.value || '');
+			if (!/^[0-9]{6}$/.test(pairingCode)) {
+				fields.pairingCodeMessage.textContent = 'Enter exactly six digits.';
+				return;
+			}
+			fields.saveFixedPairingCode.disabled = true;
+			fields.pairingCodeMessage.textContent = 'Saving encrypted pairing code…';
+			try {
+				const response = await fetch(pairingCodeSettingsUrl, {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ pairing_code: pairingCode }),
+					cache: 'no-store',
+				});
+				const payload = await response.json();
+				if (!response.ok || payload.success === false) throw new Error(payload.message || 'Pairing code save failed');
+				fields.persistentPairingCodeInput.value = '';
+				await loadPairingSettings();
+				fields.pairingCodeMessage.textContent = 'Fixed pairing code saved securely on this device.';
+			} catch (error) {
+				fields.pairingCodeMessage.textContent = error.message || 'Pairing code save failed';
+				fields.saveFixedPairingCode.disabled = false;
+			}
+		}
+
+		async function disableFixedPairingCode() {
+			fields.disableFixedPairingCode.disabled = true;
+			fields.pairingCodeMessage.textContent = 'Switching back to rotating codes…';
+			try {
+				const response = await fetch(pairingCodeSettingsUrl, {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ enabled: false }),
+					cache: 'no-store',
+				});
+				const payload = await response.json();
+				if (!response.ok || payload.success === false) throw new Error(payload.message || 'Fixed pairing code could not be disabled');
+				await loadPairingSettings();
+				fields.pairingCodeMessage.textContent = 'Relay will use a new rotating pairing code.';
+			} catch (error) {
+				fields.pairingCodeMessage.textContent = error.message || 'Fixed pairing code could not be disabled';
+				fields.disableFixedPairingCode.disabled = false;
+			}
+		}
+
 		async function loadRelaySettings() {
 			try { const response = await fetch(relaySettingsUrl, { cache: 'no-store' }); const payload = await response.json(); if (!response.ok) throw new Error(payload.message || 'Routing settings unavailable'); renderRelaySettings(payload); captureFormSnapshots(['relay', 'runtime']); if (!fields.refreshRelayProviders.disabled) fields.relaySettingsMessage.textContent = 'Routing settings loaded'; } catch (error) { if (!fields.refreshRelayProviders.disabled) fields.relaySettingsMessage.textContent = error.message || 'Routing settings load failed'; }
 		}
@@ -3904,6 +3991,11 @@ function statusPageHtml() {
 			}
 			setupUpscale(modelId, button, !!(restricted && restricted.checked));
 		});
+		fields.persistentPairingCodeForm.addEventListener('submit', (event) => {
+			event.preventDefault();
+			saveFixedPairingCode();
+		});
+		fields.disableFixedPairingCode.addEventListener('click', disableFixedPairingCode);
 		fields.relaySettingsForm.addEventListener('submit', (event) => { event.preventDefault(); saveRelaySettings(); });
 		fields.saveRelaySettings.addEventListener('click', saveRelaySettings);
 		if (fields.relayRuntimeSettings) {

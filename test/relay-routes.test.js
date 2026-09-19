@@ -1,8 +1,13 @@
 'use strict';
 
 const assert = require('assert');
+const fs = require('fs');
 const http = require('http');
-const { createServer, getPairingCode, publicStatusProjection } = require('../src/server');
+const os = require('os');
+const path = require('path');
+const testStateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-model-relay-routes-test-'));
+process.env.AI_MODEL_RELAY_STATE_DIR = testStateDir;
+const { createServer, getPairingCode, isPersistentPairingCode, publicStatusProjection } = require('../src/server');
 const { GROK_IMAGE_CAPABILITIES, isCompleteImageCapabilityContract, findRelayImageModel, relayCatalogEntrySupportsImages } = require('../src/backend-registry');
 
 function requestJson(port, method, pathname, body, headers = {}) {
@@ -89,6 +94,7 @@ function createMockSecurity() {
 	assert.strictEqual(publicStatus.details, undefined);
 	assert.strictEqual(publicStatus.message, 'ready');
 	const calls = [];
+	let savedPersistentPairingCode = '';
 	let backendRefreshes = 0;
 	let localUpscaleRefreshes = 0;
 	const codex = {
@@ -186,6 +192,9 @@ function createMockSecurity() {
 		codex,
 		backends,
 		security: createMockSecurity(),
+		persistPairingFailures: true,
+		pairingCodePersistenceAvailable: true,
+		savePersistentPairingCode: async (code) => { savedPersistentPairingCode = code; },
 		maxConcurrent: 2,
 		video: {
 			capabilities: () => ({ enabled: false, configured: false, models: ['sora-2'] }),
@@ -500,10 +509,32 @@ function createMockSecurity() {
 		assert.strictEqual(relayMedia.body.response.id, 'relay-media.analyze');
 		assert.strictEqual(calls[calls.length - 1].route, 'relay-media.analyze');
 
+		const pairingPageStatus = await requestJson(port, 'GET', '/v1/relay/pairing-code', null, pageOrigin);
+		assert.strictEqual(pairingPageStatus.statusCode, 200);
+		assert.strictEqual(pairingPageStatus.body.persistent, false);
+		assert.strictEqual(pairingPageStatus.body.persistence_available, true);
+		const fixedPairingCode = '864209';
+		const fixedPairingSave = await requestJson(port, 'POST', '/v1/relay/pairing-code', { pairing_code: fixedPairingCode }, pageOrigin);
+		assert.strictEqual(fixedPairingSave.statusCode, 200);
+		assert.strictEqual(fixedPairingSave.body.persistent, true);
+		assert.strictEqual(savedPersistentPairingCode, fixedPairingCode);
+		assert.ok(!JSON.stringify(fixedPairingSave.body).includes(fixedPairingCode), 'the secret is never returned by the settings API');
+		assert.strictEqual(getPairingCode(), fixedPairingCode);
+		assert.ok(isPersistentPairingCode());
+
 		const pairOk = await requestJson(port, 'POST', '/v1/pair', { origin: 'https://wp.example', pairing_code: getPairingCode() }, { Origin: 'https://wp.example', 'X-Alorbach-Bridge-Token': '' });
 		assert.strictEqual(pairOk.statusCode, 200);
 		assert.strictEqual(pairOk.body.success, true);
 		assert.strictEqual(pairOk.headers['access-control-allow-origin'], 'https://wp.example');
+		assert.strictEqual(getPairingCode(), fixedPairingCode, 'a fixed code stays stable after successful pairing');
+
+		const disableFixedPairing = await requestJson(port, 'POST', '/v1/relay/pairing-code', { enabled: false }, pageOrigin);
+		assert.strictEqual(disableFixedPairing.statusCode, 200);
+		assert.strictEqual(disableFixedPairing.body.persistent, false);
+		assert.strictEqual(savedPersistentPairingCode, '');
+		assert.ok(!isPersistentPairingCode());
+		assert.notStrictEqual(getPairingCode(), fixedPairingCode);
+
 		const pairMismatch = await requestJson(port, 'POST', '/v1/pair', { origin: 'https://wp.example', pairing_code: '000000' }, { Origin: 'https://evil.example', 'X-Alorbach-Bridge-Token': '' });
 		assert.strictEqual(pairMismatch.statusCode, 403);
 		assert.ok(!pairMismatch.headers['access-control-allow-origin']);
@@ -512,12 +543,13 @@ function createMockSecurity() {
 			assert.strictEqual(fail.statusCode, 403);
 		}
 		const otherOriginFail = await requestJson(port, 'POST', '/v1/pair', { origin: 'https://other.example', pairing_code: '000000' }, { Origin: 'https://other.example', 'X-Alorbach-Bridge-Token': '' });
-		assert.strictEqual(otherOriginFail.statusCode, 403, 'pairing failures are scoped to the requesting origin');
+		assert.strictEqual(otherOriginFail.statusCode, 429, 'pairing failures share a persistent IP-wide limit');
 		const limited = await requestJson(port, 'POST', '/v1/pair', { origin: 'https://wp.example', pairing_code: '000000' }, { Origin: 'https://wp.example', 'X-Alorbach-Bridge-Token': '' });
 		assert.strictEqual(limited.statusCode, 429);
 		assert.strictEqual(limited.body.code, 'pairing_rate_limited');
 	} finally {
 		await new Promise((resolve) => server.close(resolve));
+		fs.rmSync(testStateDir, { recursive: true, force: true });
 	}
 
 	console.log('relay route tests passed');

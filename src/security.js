@@ -273,34 +273,57 @@ function createPairingLimiter(options = {}) {
 	const maxFailures = Number(options.maxFailures || PAIRING_MAX_FAILURES) || PAIRING_MAX_FAILURES;
 	const windowMs = Number(options.windowMs || PAIRING_WINDOW_MS) || PAIRING_WINDOW_MS;
 	const now = typeof options.now === 'function' ? options.now : () => Date.now();
+	const persistent = options.persistent === true;
 	const failures = [];
-	function prune(at) {
+
+	function recentFailures(at) {
 		const cutoff = at - windowMs;
-		while (failures.length && failures[0] < cutoff) {
-			failures.shift();
+		if (persistent) {
+			const stored = readState().pairing_failures;
+			return (Array.isArray(stored) ? stored : [])
+				.map(Number)
+				.filter((timestamp) => Number.isFinite(timestamp) && timestamp >= cutoff && timestamp <= at)
+				.sort((left, right) => left - right);
 		}
+		while (failures.length && failures[0] < cutoff) failures.shift();
+		return failures;
 	}
+
 	return {
 		allow() {
-			const at = now();
-			prune(at);
-			return failures.length < maxFailures;
+			return recentFailures(now()).length < maxFailures;
 		},
 		recordFailure() {
 			const at = now();
-			prune(at);
-			failures.push(at);
+			if (persistent) {
+				updateState((state) => {
+					const cutoff = at - windowMs;
+					const recent = (Array.isArray(state.pairing_failures) ? state.pairing_failures : [])
+						.map(Number)
+						.filter((timestamp) => Number.isFinite(timestamp) && timestamp >= cutoff && timestamp <= at);
+					recent.push(at);
+					state.pairing_failures = recent;
+					return state;
+				});
+				return;
+			}
+			recentFailures(at).push(at);
 		},
 		reset() {
+			if (persistent) {
+				updateState((state) => {
+					state.pairing_failures = [];
+					return state;
+				});
+				return;
+			}
 			failures.length = 0;
 		},
 		retryAfterMs() {
 			const at = now();
-			prune(at);
-			if (failures.length < maxFailures || !failures.length) {
-				return 0;
-			}
-			return Math.max(0, (failures[0] + windowMs) - at);
+			const recent = recentFailures(at);
+			if (recent.length < maxFailures) return 0;
+			return Math.max(0, (recent[0] + windowMs) - at);
 		},
 	};
 }

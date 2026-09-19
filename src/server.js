@@ -1,6 +1,7 @@
 'use strict';
 
 const http = require('http');
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const codex = require('./codex');
@@ -22,6 +23,80 @@ const packageInfo = require('../package.json');
 const { appendLog, safeError, safeProcessSend } = require('./diagnostics');
 
 let pairingCode = security.createPairingCode();
+let persistentPairingCode = false;
+let pairingCodePersistenceAvailable = false;
+const pendingPairingCodeSaves = new Map();
+let pairingCodeInitializationResolve = null;
+const pairingCodeInitialization = typeof process.send === 'function'
+	? new Promise((resolve) => { pairingCodeInitializationResolve = resolve; })
+	: Promise.resolve();
+
+function handleParentMessage(message) {
+	if (!message || typeof message !== 'object') return;
+	if (message.type === 'initialize-pairing-code') {
+		const configuredCode = String(message.pairingCode || '');
+		persistentPairingCode = /^\d{6}$/.test(configuredCode);
+		pairingCode = persistentPairingCode ? configuredCode : security.createPairingCode();
+		pairingCodePersistenceAvailable = message.pairingCodePersistenceAvailable === true;
+		if (pairingCodeInitializationResolve) {
+			pairingCodeInitializationResolve();
+			pairingCodeInitializationResolve = null;
+		}
+		return;
+	}
+	if (message.type === 'pairing-code-save-result') {
+		const requestId = String(message.requestId || '');
+		const pending = pendingPairingCodeSaves.get(requestId);
+		if (!pending) return;
+		pendingPairingCodeSaves.delete(requestId);
+		clearTimeout(pending.timer);
+		if (message.success === true) pending.resolve();
+		else pending.reject(new Error(String(message.message || 'The pairing code could not be saved securely.')));
+	}
+}
+
+if (typeof process.send === 'function') process.on('message', handleParentMessage);
+
+function requestPersistentPairingCodeSave(code) {
+	if (typeof process.send !== 'function' || !process.connected) {
+		return Promise.reject(new Error('Persistent pairing codes require the AI Model Relay desktop app.'));
+	}
+	const requestId = crypto.randomUUID();
+	return new Promise((resolve, reject) => {
+		const timer = setTimeout(() => {
+			pendingPairingCodeSaves.delete(requestId);
+			reject(new Error('Secure pairing-code storage did not respond.'));
+		}, 10000);
+		if (typeof timer.unref === 'function') timer.unref();
+		pendingPairingCodeSaves.set(requestId, { resolve, reject, timer });
+		try {
+			process.send({ type: 'save-persistent-pairing-code', requestId, pairingCode: code }, (error) => {
+				if (!error) return;
+				pendingPairingCodeSaves.delete(requestId);
+				clearTimeout(timer);
+				reject(new Error('Secure pairing-code storage could not be reached.'));
+			});
+		} catch (error) {
+			pendingPairingCodeSaves.delete(requestId);
+			clearTimeout(timer);
+			reject(new Error('Secure pairing-code storage could not be reached.'));
+		}
+	});
+}
+
+async function waitForPairingCodeInitialization() {
+	if (typeof process.send !== 'function') return;
+	let timer;
+	await Promise.race([
+		pairingCodeInitialization,
+		new Promise((resolve) => {
+			timer = setTimeout(resolve, 10000);
+			if (typeof timer.unref === 'function') timer.unref();
+		}),
+	]);
+	if (timer) clearTimeout(timer);
+}
+
 const faviconPath = path.join(__dirname, '..', 'assets', 'favicon.ico');
 
 function maxConcurrentJobs(relay = relaySettings) {
@@ -570,6 +645,7 @@ const STATUS_PAGE_MUTATORS = new Set([
 	'/v1/relay/settings',
 	'/v1/relay/refresh',
 	'/v1/relay/test',
+	'/v1/relay/pairing-code',
 ]);
 const STATUS_BOOTSTRAP_PATHS = new Set([
 	'/v1/status',
@@ -604,7 +680,7 @@ function requireLocalPageOrigin(req, res, origin) {
 
 function pairingLimiterFor(context, req, requesterOrigin, targetOrigin) {
 	const address = String(req.socket && req.socket.remoteAddress || '').trim() || 'unknown';
-	const key = `${address}|${requesterOrigin || '-'}|${targetOrigin || '-'}`;
+	const key = context.persistPairingFailures ? address : [address, requesterOrigin || '-', targetOrigin || '-'].join('|');
 	if (!context.pairingLimiters) {
 		context.pairingLimiters = new Map();
 	}
@@ -620,7 +696,7 @@ function pairingLimiterFor(context, req, requesterOrigin, targetOrigin) {
 	const createLimiter = context.security && typeof context.security.createPairingLimiter === 'function'
 		? context.security.createPairingLimiter
 		: security.createPairingLimiter;
-	const limiter = createLimiter();
+	const limiter = createLimiter({ persistent: context.persistPairingFailures === true });
 	context.pairingLimiters.set(key, limiter);
 	return limiter;
 }
@@ -712,6 +788,19 @@ async function route(req, res, context) {
 			return;
 		}
 		sendArtifact(res, artifact, pairedOrigin);
+		return;
+	}
+
+	if (req.method === 'GET' && url.pathname === '/v1/relay/pairing-code') {
+		if (!isLocalStatusViewer(req, bridgeSecurity)) {
+			sendErrorJson(req, res, 403, { success: false, message: 'Pairing settings are only available to the local Relay user.' });
+			return;
+		}
+		sendJson(res, 200, {
+			success: true,
+			persistent: persistentPairingCode,
+			persistence_available: context.pairingCodePersistenceAvailable,
+		});
 		return;
 	}
 
@@ -860,11 +949,40 @@ async function route(req, res, context) {
 		return;
 	}
 
+	if (req.method === 'POST' && url.pathname === '/v1/relay/pairing-code') {
+		if (!requireLocalPageOrigin(req, res, origin)) return;
+		const disable = body.enabled === false;
+		if ((!context.pairingCodePersistenceAvailable && !disable) || typeof context.savePersistentPairingCode !== 'function') {
+			sendErrorJson(req, res, 503, { success: false, message: 'OS-backed pairing-code storage is unavailable in this Relay process.' }, origin);
+			return;
+		}
+		const requestedCode = disable ? '' : String(body.pairing_code || '');
+		if (!disable && !/^\d{6}$/.test(requestedCode)) {
+			sendErrorJson(req, res, 400, { success: false, message: 'Enter exactly six digits, or disable fixed-code mode.' }, origin);
+			return;
+		}
+		try {
+			await context.savePersistentPairingCode(requestedCode);
+		} catch (error) {
+			sendErrorJson(req, res, 503, { success: false, message: error && error.message ? error.message : 'Pairing code could not be saved securely.' }, origin);
+			return;
+		}
+		persistentPairingCode = !!requestedCode;
+		pairingCode = requestedCode || security.createPairingCode();
+		safeProcessSend({ type: 'pairing-code', pairingCode, persistent: persistentPairingCode }, { logName: 'server' });
+		sendJson(res, 200, { success: true, persistent: persistentPairingCode }, origin);
+		return;
+	}
+
 	if (url.pathname === '/v1/pair') {
 		const safeOrigin = bridgeSecurity.normalizeOrigin(body.origin || origin);
 		const pairCors = safeOrigin && origin === safeOrigin ? safeOrigin : '';
 		if (!safeOrigin) {
 			sendErrorJson(req, res, 400, { success: false, message: 'A valid WordPress origin is required.' }, pairCors);
+			return;
+		}
+		if (origin !== safeOrigin) {
+			sendErrorJson(req, res, 403, { success: false, message: 'The requesting browser origin must match the site being paired.' });
 			return;
 		}
 		const limiter = pairingLimiterFor(context, req, origin, safeOrigin);
@@ -881,8 +999,10 @@ async function route(req, res, context) {
 		if (limiter) limiter.reset();
 		const token = bridgeSecurity.createToken();
 		bridgeSecurity.savePairing(safeOrigin, token);
-		pairingCode = bridgeSecurity.createPairingCode();
-		safeProcessSend({ type: 'pairing-code', pairingCode }, { logName: 'server' });
+		if (!persistentPairingCode) {
+			pairingCode = bridgeSecurity.createPairingCode();
+			safeProcessSend({ type: 'pairing-code', pairingCode, persistent: false }, { logName: 'server' });
+		}
 		sendJson(res, 200, { success: true, origin: safeOrigin, token }, safeOrigin);
 		return;
 	}
@@ -1227,6 +1347,9 @@ function createServer(options = {}) {
 		statusEvents,
 		relaySettings: options.relaySettings || relaySettings,
 		pairingLimiters: new Map(),
+		persistPairingFailures: options.persistPairingFailures === true,
+		pairingCodePersistenceAvailable: options.pairingCodePersistenceAvailable === true || pairingCodePersistenceAvailable,
+		savePersistentPairingCode: options.savePersistentPairingCode || requestPersistentPairingCodeSave,
 		listenPort: Number(options.port || process.env.ALORBACH_CODEX_BRIDGE_PORT || 8765),
 	};
 	context.usesProvidedBackends = !!options.backends;
@@ -1295,13 +1418,16 @@ function createServer(options = {}) {
 function startServer(options = {}) {
 	const requestedPort = Number(options.port || process.env.ALORBACH_CODEX_BRIDGE_PORT || 8765);
 	resetTempDebugLogs();
-	const server = createServer(options);
+	const server = createServer({
+		...options,
+		persistPairingFailures: options.persistPairingFailures !== false,
+	});
 	return new Promise((resolve, reject) => {
 		server.once('error', reject);
 		server.listen(requestedPort, '127.0.0.1', () => {
 			server.off('error', reject);
 			sendJobState(server.jobManager);
-			resolve({ server, port: server.address().port, pairingCode });
+			resolve({ server, port: server.address().port, pairingCode, persistentPairingCode });
 		});
 	});
 }
@@ -1314,10 +1440,13 @@ function startServer(options = {}) {
 	}
 	const portArg = process.argv.find((arg) => arg.indexOf('--port=') === 0);
 	const port = portArg ? Number(portArg.replace('--port=', '')) : undefined;
-	startServer({ port }).then((result) => {
-		safeProcessSend({ type: 'ready', port: result.port, pairingCode }, { logName: 'server' });
-		process.stdout.write(`${PRODUCT_NAME} listening on http://127.0.0.1:${result.port}\n`);
-		process.stdout.write(`Pairing code: ${pairingCode}\n`);
+	(async () => {
+		await waitForPairingCodeInitialization();
+		return startServer({ port });
+	})().then((result) => {
+		safeProcessSend({ type: 'ready', port: result.port, pairingCode, persistentPairingCode }, { logName: 'server' });
+		process.stdout.write(PRODUCT_NAME + ' listening on http://127.0.0.1:' + result.port + '\n');
+		if (!persistentPairingCode) process.stdout.write('Pairing code: ' + pairingCode + '\n');
 	}).catch((error) => {
 		appendLog('server', 'Server failed to start.', { error: safeError(error) });
 		safeProcessSend({ type: 'error', message: error && error.message ? error.message : String(error) }, { logName: 'server' });
@@ -1331,6 +1460,7 @@ module.exports = {
 	createStatusEvents,
 	createJobManager,
 	getPairingCode: () => pairingCode,
+	isPersistentPairingCode: () => persistentPairingCode,
 	publicStatusProjection,
 	startServer,
 };

@@ -424,6 +424,10 @@ Returns settings and cached readiness for the separate local music-analysis runt
 
 `POST /v1/music-analysis/settings` saves the same settings object. `POST /v1/music-analysis/setup` is the explicit opt-in setup action: it creates the dedicated virtual environment and installs `numpy`, `scipy`, `soundfile`, `librosa`, and `pyloudnorm`. It never runs automatically. The runtime also requires `ffmpeg` and `ffprobe` on PATH.
 
+## `GET/POST /v1/relay/pairing-code`
+
+Local status-page settings for the desktop app pairing code. Requests are restricted to the local Relay status page. The GET response reports only whether a fixed code is active and whether OS-backed storage is available; it never returns the code. POST accepts `{"pairing_code":"123456"}` to enable a fixed six-digit code or `{"enabled":false}` to return to rotating codes. Saving requires the Electron desktop app and OS-backed secure storage. Fixed codes survive successful pairings and restarts.
+
 ## `POST /v1/pair`
 
 Pairs a browser origin with the bridge.
@@ -447,7 +451,7 @@ Response:
 }
 ```
 
-Store the token in browser storage scoped to the origin. Treat it as a bearer secret. If pairing succeeds, the bridge rotates the tray pairing code.
+Store the token in browser storage scoped to the origin. Treat it as a bearer secret. Pairing success rotates the code by default; when the local user enabled a fixed code in Settings → Pairing, the code remains active. Pairing failures share a persistent IP-wide rate limit.
 
 ## `POST /v1/unpair`
 

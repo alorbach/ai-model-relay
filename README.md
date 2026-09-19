@@ -16,7 +16,7 @@ Windows tray companion for Alorbach AI Subscription Gateway. It exposes a secure
 
 - Runs as a tray app in the logged-in Windows user's session.
 - Starts a local HTTP bridge bound to `127.0.0.1`.
-- Pairs trusted browser origins using a six digit tray-displayed pairing code.
+- Pairs trusted browser origins using a rotating tray code by default; the local status page can save a fixed code for persistent pairing.
 - Stores a per-origin bearer token in the user's bridge state directory.
 - Executes signed Gateway chat jobs through local `codex exec`.
 - Executes signed Gateway image jobs and returns normalized base64 image data.
@@ -68,7 +68,7 @@ codex login
 5. In WordPress, enable `AI Gateway -> Settings -> Providers / Import -> User-owned local Codex`.
 6. Keep the bridge URL as `http://127.0.0.1:8765` unless a custom port is required.
 7. Choose a Local Codex model such as `codex-local:auto` or `codex-local:image`.
-8. Enter the pairing code shown in the tray app when WordPress prompts for it.
+8. Enter the pairing code shown in the tray app when WordPress prompts for it. To keep the same code across restarts and successful pairings, open the local status page → Settings → Pairing and save a fixed six-digit code.
 
 For local audio transcription, open the bridge status page after installation and review `Local ASR Settings`. Use each model's **Install model** button to create the private Python environment, install packages, and download that Hugging Face snapshot onto this computer. That action is explicit; transcription jobs do not pip-install packages. Jobs stay offline unless you also enable **Allow ASR model downloads**. Qwen setup matches Local CUDA Upscale: it uninstalls any CPU PyTorch wheel, installs CUDA PyTorch from the official cu128 index only, pins it before `qwen-asr`, and verifies the downloaded snapshot. Whisper setup installs `faster-whisper`, `huggingface_hub`, and Whisper CUDA runtime packages during Install. Default venvs: `%USERPROFILE%\.alorbach-codex-bridge\asr-venv` (faster-whisper) and `%USERPROFILE%\.alorbach-codex-bridge\qwen-asr-venv` (Qwen3 ASR/ForcedAligner).
 
@@ -162,7 +162,8 @@ Routes:
 - `GET /v1/music-analysis/settings`: local music-analysis settings and cached runtime metadata. Add `?refresh=1` to run its Python/ffmpeg probe.
 - `POST /v1/music-analysis/settings`, `/v1/music-analysis/setup`: save local music settings or deliberately create/install its private Python environment.
 - `GET /v1/upscale/settings`, `POST /v1/upscale/settings`, `POST /v1/upscale/setup`: dynamic, explicit installation for local CUDA upscale model profiles. `POST /v1/upscale/setup` accepts `model` and requires `accept_restricted: true` for APISR. Jobs never download weights.
-- `POST /v1/pair`: exchange tray pairing code for an origin token.
+- `GET/POST /v1/relay/pairing-code`: read local pairing settings or save/disable a fixed code from the desktop status page. The code is never returned by the API.
+- `POST /v1/pair`: exchange the active tray pairing code for an origin token.
 - `POST /v1/unpair`: remove the pairing for the request origin.
 - `GET /v1/models`: list paired local model IDs.
 - `GET /v1/relay/models`: list provider-neutral `model-relay:*` model IDs in addition to legacy IDs.
