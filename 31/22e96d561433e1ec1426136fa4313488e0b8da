@@ -1,0 +1,78 @@
+src/server.js
+  s_65faff205c672e::t_fc6289078d617b 34,36-38
+  s_1f38774d9ada8c::t_2252623d2cd9c0 26-33,35,40-99,683,796-797,800,954-955,958,962-963,973,987
+  s_c1b12db8b09c8c::t_d25959f587247c 4,39,648,699,794-795,798-799,801-806,952-953,956-957,959-961,964-972,974-976,984-986,1002-1005,1350-1352,1421-1424,1430,1443-1449,1463
+test/relay-routes.test.js
+  s_d6e76276c9603a::t_39e11f3cd71bd3 4,6-10
+  s_6feee54b80743c::t_2e68704ec19377 97,195-197,512-524,529-537,546,552
+README.md
+  s_c1b12db8b09c8c::t_022f98ad5752f9 19,71,165-166
+docs/architecture.md
+  s_c1b12db8b09c8c::t_5bb0f7fe66c60c 91,93
+docs/local-bridge-api.md
+  s_c1b12db8b09c8c::t_3c42fea0718ff0 427-430,454
+package.json
+  s_c1b12db8b09c8c::t_0ab1ea413847e7 12-13
+src/main.js
+  s_6feee54b80743c::t_86fe79c3356d23 6,13,26-28,129-194,264-273,285-288,292,298-299,409,510,519
+src/secure-pairing-code.js
+  s_6feee54b80743c::t_7d5f66b8e28eb1 1-61
+src/security.js
+  s_c1b12db8b09c8c::t_7831c022089164 276,278-279,281-286,288-289,291,294,298-310,313-319,324-326
+src/status-page.js
+  s_c1b12db8b09c8c::t_0963942872aa61 1247,1268-1280,1413,1432,1456-1461,1815,3022-3086,3994-3998
+test/secure-pairing-code.test.js
+  s_c1b12db8b09c8c::t_6026afb463e279 1-51
+test/security.test.js
+  s_6feee54b80743c::t_bbd2a9ae78284e 67-78
+test/status-page.test.js
+  s_6feee54b80743c::t_7d7bafef2b5f4d 156-161
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "3122e96d561433e1ec1426136fa4313488e0b8da",
+  "prompts": {},
+  "sessions": {
+    "s_1f38774d9ada8c": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "401e17c9-5fec-4247-9bb4-04f063f9f7e8",
+        "model": "grok-4.6"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_65faff205c672e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a07126-118c-77a3-8f25-212b48bb7c6a",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_6feee54b80743c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a08676-05e2-7e12-be81-e5ee422ee4d6",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_c1b12db8b09c8c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0b4e4-4c05-73e3-b51b-383185d7b73c",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_d6e76276c9603a": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "7acee15c-33f5-4b94-a912-1cadaff85696",
+        "model": "grok-4.6"
+      },
+      "human_author": null
+    }
+  }
+}
