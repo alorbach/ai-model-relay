@@ -1,0 +1,101 @@
+test/local-image.test.js
+  s_e1bf2f4f3091bb::t_595331811bc984 1-11,13-15,17-46,57-133,135-163,190,192-223,226-231
+  s_28a7cd112a84ae::t_314388395bf857 134,164-189,191
+  s_28a7cd112a84ae::t_a321d11bed4d02 47-55
+  s_28a7cd112a84ae::t_643417d7cc7bbc 224-225
+  s_28a7cd112a84ae::t_315ad8df8bc1b0 56
+  s_28a7cd112a84ae::t_3eae028f1e0bbc 12,16
+test/status-page.test.js
+  s_28a7cd112a84ae::t_e5b9e416fd4dc0 94-104
+src/image-qwen-runner.py
+  s_c1b12db8b09c8c::t_fd6a95c682539b 1-164,166-267
+  s_28a7cd112a84ae::t_592930bb2db859 165
+src/status-page.js
+  s_28a7cd112a84ae::t_091aa7964ad509 1245,1319-1334,1429-1430,1440,1452-1453,1530-1538,1631-1637,1642,1649,1653,1689-1695,1837,1880,2718-2722,3369-3407,3409-3422,3424-3437,3439-3487,4116-4120,4167-4175
+  s_28a7cd112a84ae::t_42e9d716d04e1d 3423,3438
+  s_28a7cd112a84ae::t_dad241ad7111e3 3408
+src/server.js
+  s_007fde6878d3e2::t_17083a9c8d466e 13,599,645-646,842-846,1121-1153,1386,1416-1417
+src/backend-registry.js
+  s_2cc19a5bda57cd::t_1019e2ab050b27 12,170-172,1890,1910-1911,2020
+src/local-image.js
+  s_28a7cd112a84ae::t_32fd4bd4e0d70e 301,318,385-388,398-424,468
+  s_28a7cd112a84ae::t_a5d50800b2d4dc 190-192
+  s_28a7cd112a84ae::t_b898be85b3486d 692-693,697,700,705
+  s_28a7cd112a84ae::t_f9e344573aa1cf 193,243,251,254,280,330-339,342,354,366,381,470
+  s_28a7cd112a84ae::t_d9087d3229ed3a 255-257,277-279
+  s_28a7cd112a84ae::t_28b8aa9835b419 367-369,378-380
+  s_28a7cd112a84ae::t_eb0a1c31d30e05 343-345,351-353
+  s_28a7cd112a84ae::t_aab26f1f3be3c0 54-91,103,122-155
+  s_28a7cd112a84ae::t_1a6d081fccf12f 252-253
+  s_28a7cd112a84ae::t_30ed0395150183 173
+  s_28a7cd112a84ae::t_3c7c05576f7e9e 389
+  s_28a7cd112a84ae::t_1f855ef5aeaa73 425-427,465-467
+  s_28a7cd112a84ae::t_836789d2be8a2e 194-196,240-242
+  s_28a7cd112a84ae::t_c370d3f34352de 1-53,92-102,104-121,156-172,174-189,197-221,223-239,247,258-276,284-297,305-314,322-326,346-350,358-362,370-377,428-464,474-528,531-550,553-558,566-691,694-696,698-699,701-704,706
+  s_28a7cd112a84ae::t_009618ef74601b 244-246,248-250
+  s_28a7cd112a84ae::t_bcc16aa9d3b056 471-473,559-561
+  s_28a7cd112a84ae::t_53698b4e0767aa 469
+  s_28a7cd112a84ae::t_7d5f89663ae3fc 382-384
+  s_28a7cd112a84ae::t_6a2daa5ea72a98 394-397
+  s_28a7cd112a84ae::t_b056ea56353dee 302-304,315-317
+  s_28a7cd112a84ae::t_68a9d9b860774c 222
+  s_28a7cd112a84ae::t_fc18f42004c69c 355-357,363-365
+  s_28a7cd112a84ae::t_3e899e323c7243 319-321,327-329
+  s_28a7cd112a84ae::t_b7510bc9431a1d 529-530,551-552
+  s_28a7cd112a84ae::t_218c242a0a177f 281-283,298-300
+  s_28a7cd112a84ae::t_2181e3b7d01f8f 562
+  s_28a7cd112a84ae::t_e93e8e1aca2d0b 563-565
+  s_28a7cd112a84ae::t_24f23962f813b8 340-341
+  s_28a7cd112a84ae::t_3e78c246a010e3 390-393
+package.json
+  s_c1b12db8b09c8c::t_a4ca1e9285de29 12-13,40-41
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "3b0d2bf3a66b9439d15d67dd92ba41abccbe37dc",
+  "prompts": {},
+  "sessions": {
+    "s_007fde6878d3e2": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "7c51f9c3-2546-4734-afed-e77099a644d6",
+        "model": "default"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_28a7cd112a84ae": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "0a5fb3ce-b715-4ce1-9e8d-a3adbe1a24f5",
+        "model": "default"
+      },
+      "human_author": null
+    },
+    "s_2cc19a5bda57cd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0c3ff-8bb9-7a60-af92-b789be8d81a8",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_c1b12db8b09c8c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0b4e4-4c05-73e3-b51b-383185d7b73c",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_e1bf2f4f3091bb": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "205979ae-d3f9-49a7-8b7d-368faee11a81",
+        "model": "default"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
