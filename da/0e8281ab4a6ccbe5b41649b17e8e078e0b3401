@@ -1,0 +1,104 @@
+src/image-qwen-runner.py
+  s_28a7cd112a84ae::t_592930bb2db859 165
+  s_c1b12db8b09c8c::t_fd6a95c682539b 1-164,166-267
+test/local-image.test.js
+  s_28a7cd112a84ae::t_314388395bf857 124,154-179,181
+  s_28a7cd112a84ae::t_643417d7cc7bbc 214-215
+  s_e1bf2f4f3091bb::t_595331811bc984 1-123,125-153,180,182-213,216-221
+src/local-image.js
+  s_28a7cd112a84ae::t_32fd4bd4e0d70e 231,248,315-318,328-354,398
+  s_28a7cd112a84ae::t_2181e3b7d01f8f 491
+  s_28a7cd112a84ae::t_3e78c246a010e3 320-323
+  s_28a7cd112a84ae::t_f9e344573aa1cf 124,173,181,184,210,260-269,272,284,296,311,400
+  s_28a7cd112a84ae::t_a5d50800b2d4dc 121-123
+  s_28a7cd112a84ae::t_836789d2be8a2e 125-127,170-172
+  s_28a7cd112a84ae::t_009618ef74601b 174-176,178-180
+  s_28a7cd112a84ae::t_1a6d081fccf12f 182-183
+  s_28a7cd112a84ae::t_d9087d3229ed3a 185-187,207-209
+  s_28a7cd112a84ae::t_218c242a0a177f 211-213,228-230
+  s_28a7cd112a84ae::t_b056ea56353dee 232-234,245-247
+  s_28a7cd112a84ae::t_3e899e323c7243 249-251,257-259
+  s_28a7cd112a84ae::t_24f23962f813b8 270-271
+  s_28a7cd112a84ae::t_eb0a1c31d30e05 273-275,281-283
+  s_28a7cd112a84ae::t_fc18f42004c69c 285-287,293-295
+  s_28a7cd112a84ae::t_28b8aa9835b419 297-299,308-310
+  s_28a7cd112a84ae::t_7d5f89663ae3fc 312-314
+  s_28a7cd112a84ae::t_3c7c05576f7e9e 319
+  s_28a7cd112a84ae::t_6a2daa5ea72a98 324-327
+  s_28a7cd112a84ae::t_1f855ef5aeaa73 355-357,395-397
+  s_28a7cd112a84ae::t_53698b4e0767aa 399
+  s_28a7cd112a84ae::t_bcc16aa9d3b056 401-403,488-490
+  s_28a7cd112a84ae::t_e93e8e1aca2d0b 492-494
+  s_28a7cd112a84ae::t_c370d3f34352de 1-120,128-169,177,188-206,214-227,235-244,252-256,276-280,288-292,300-307,358-394,404-487,495-630
+src/status-page.js
+  s_28a7cd112a84ae::t_2e943be561f6a5 4156-4164
+  s_28a7cd112a84ae::t_5e342da7251d49 1837
+  s_28a7cd112a84ae::t_8cf174f2d94c36 1631-1637,1642,1649,1653
+  s_28a7cd112a84ae::t_fb4aaab0bee43f 1440
+  s_28a7cd112a84ae::t_2bbb29b0e917e4 1530-1538
+  s_28a7cd112a84ae::t_322ca8902af0da 1429-1430
+  s_28a7cd112a84ae::t_5fd08c130e466c 1319-1334
+  s_28a7cd112a84ae::t_35a4cfd4eab6d5 1245
+  s_28a7cd112a84ae::t_409b1dd202de7b 1880
+  s_28a7cd112a84ae::t_6aa08109102b6b 2718-2722
+  s_28a7cd112a84ae::t_41b7c0d4ed9148 3369-3476
+  s_28a7cd112a84ae::t_bcc9950394a76a 1689-1695
+  s_28a7cd112a84ae::t_bfed01b9851333 1452-1453
+  s_28a7cd112a84ae::t_46c6eaede1eb0b 4105-4109
+test/status-page.test.js
+  s_28a7cd112a84ae::t_2b464dcceff43f 94-102
+package.json
+  s_c1b12db8b09c8c::t_a4ca1e9285de29 12-13,40-41
+src/backend-registry.js
+  s_2cc19a5bda57cd::t_1019e2ab050b27 12,170-172,1890,1910-1911,2020
+src/server.js
+  s_007fde6878d3e2::t_17083a9c8d466e 13,599,645-646,842-846,1121-1153,1386,1416-1417
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "da0e8281ab4a6ccbe5b41649b17e8e078e0b3401",
+  "prompts": {},
+  "sessions": {
+    "s_007fde6878d3e2": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "7c51f9c3-2546-4734-afed-e77099a644d6",
+        "model": "default"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_28a7cd112a84ae": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "0a5fb3ce-b715-4ce1-9e8d-a3adbe1a24f5",
+        "model": "default"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_2cc19a5bda57cd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0c3ff-8bb9-7a60-af92-b789be8d81a8",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_c1b12db8b09c8c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0b4e4-4c05-73e3-b51b-383185d7b73c",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_e1bf2f4f3091bb": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "205979ae-d3f9-49a7-8b7d-368faee11a81",
+        "model": "default"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
