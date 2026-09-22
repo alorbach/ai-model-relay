@@ -1242,6 +1242,7 @@ function statusPageHtml() {
 					<button type="button" data-settings-section="runtime">Runtime</button>
 					<button type="button" data-settings-section="tests">Tests</button>
 					<button type="button" data-settings-section="upscale">CUDA Upscale</button>
+					<button type="button" data-settings-section="image">Local Image</button>
 					<button type="button" data-settings-section="music">Music Analysis</button>
 					<button type="button" data-settings-section="asr">Local ASR</button>
 					<button type="button" data-settings-section="pairing">Pairing</button>
@@ -1313,6 +1314,22 @@ function statusPageHtml() {
 								<button type="button" class="btn-primary" id="saveUpscaleSettings" disabled>Save settings</button>
 							</div>
 							<pre class="setup-log" id="upscaleSetupLog" hidden></pre>
+						</form>
+					</div>
+					<div class="settings-section" id="settings-section-image" data-settings-panel="image" hidden>
+						<div class="label">Local Image Generation (Qwen-Image-2.1)</div>
+						<p class="muted">Sets up a CUDA Diffusers runtime for Qwen-Image-2.1 with CPU offload and VAE tiling. Use Setup Environment for the venv and packages; Install Model downloads weights only when you press the button.</p>
+						<form class="settings-editor" id="imageSettingsForm">
+							<div class="settings-grid" id="imageSettings"></div>
+							<div class="muted" id="imageModelStates">Models: not checked</div>
+							<div class="settings-grid" id="imageInstallActions"></div>
+							<div class="settings-actions">
+								<span class="muted" id="imageSettingsMessage">Loading settings</span>
+								<button type="button" id="reloadImageSettings">Reload</button>
+								<button type="button" id="setupImageEnvironment">Setup Environment</button>
+								<button type="button" class="btn-primary" id="saveImageSettings" disabled>Save settings</button>
+							</div>
+							<pre class="setup-log" id="imageSetupLog" hidden></pre>
 						</form>
 					</div>
 					<div class="settings-section" id="settings-section-music" data-settings-panel="music" hidden>
@@ -1409,6 +1426,8 @@ function statusPageHtml() {
 		const musicAnalysisSetupUrl = '/v1/music-analysis/setup';
 		const upscaleSettingsUrl = '/v1/upscale/settings';
 		const upscaleSetupUrl = '/v1/upscale/setup';
+		const imageSettingsUrl = '/v1/image/settings';
+		const imageSetupUrl = '/v1/image/setup';
 		const relaySettingsUrl = '/v1/relay/settings';
 		const pairingCodeSettingsUrl = '/v1/relay/pairing-code';
 		const relayTestUrl = '/v1/relay/test';
@@ -1418,6 +1437,7 @@ function statusPageHtml() {
 		let currentAsrSettings = null;
 		let currentMusicAnalysisSettings = null;
 		let currentUpscaleSettings = null;
+		let currentImageSettings = null;
 		let settingsLoaded = false;
 		let fallbackPollTimer = null;
 		let providerRefreshPollTimer = null;
@@ -1429,8 +1449,8 @@ function statusPageHtml() {
 		const seenLiveRequestIds = new Set();
 		let settingsSection = 'providers';
 		let suppressHashChange = false;
-		const knownSettingsSections = ['providers', 'runtime', 'tests', 'upscale', 'music', 'asr', 'pairing'];
-		let formSnapshots = { relay: '', runtime: '', asr: '', music: '', upscale: '' };
+		const knownSettingsSections = ['providers', 'runtime', 'tests', 'upscale', 'image', 'music', 'asr', 'pairing'];
+		let formSnapshots = { relay: '', runtime: '', asr: '', music: '', upscale: '', image: '' };
 		const fields = {
 			tabButtons: Array.from(document.querySelectorAll('.app-shell nav.tabs[role="tablist"] [role="tab"]')),
 			tabPanels: Array.from(document.querySelectorAll('main > .tab-panel[role="tabpanel"]')),
@@ -1507,6 +1527,15 @@ function statusPageHtml() {
 			upscaleInstallActions: document.getElementById('upscaleInstallActions'),
 			saveUpscaleSettings: document.getElementById('saveUpscaleSettings'),
 			upscaleSetupLog: document.getElementById('upscaleSetupLog'),
+			imageSettingsForm: document.getElementById('imageSettingsForm'),
+			imageSettings: document.getElementById('imageSettings'),
+			imageModelStates: document.getElementById('imageModelStates'),
+			imageSettingsMessage: document.getElementById('imageSettingsMessage'),
+			reloadImageSettings: document.getElementById('reloadImageSettings'),
+			imageInstallActions: document.getElementById('imageInstallActions'),
+			setupImageEnvironment: document.getElementById('setupImageEnvironment'),
+			saveImageSettings: document.getElementById('saveImageSettings'),
+			imageSetupLog: document.getElementById('imageSetupLog'),
 			asrDetails: document.getElementById('asrDetails'),
 			asrSettingsForm: document.getElementById('asrSettingsForm'),
 			asrGeneralSettings: document.getElementById('asrGeneralSettings'),
@@ -1599,21 +1628,29 @@ function statusPageHtml() {
 					return false;
 				}
 			}
+			if (key === 'image') {
+				try {
+					return formSnapshots.image && JSON.stringify(serializeImageSettings()) !== formSnapshots.image;
+				} catch (error) {
+					return false;
+				}
+			}
 			return false;
 		}
 
 		function updateSettingsDirtyState() {
-			const dirty = isFormDirty('relay') || isFormDirty('runtime') || isFormDirty('asr') || isFormDirty('music') || isFormDirty('upscale');
+			const dirty = isFormDirty('relay') || isFormDirty('runtime') || isFormDirty('asr') || isFormDirty('music') || isFormDirty('upscale') || isFormDirty('image');
 			fields.settingsTabBadge.hidden = !dirty;
 			if (fields.saveRelaySettings) fields.saveRelaySettings.disabled = !isFormDirty('relay');
 			if (fields.saveRelayRuntimeSettings) fields.saveRelayRuntimeSettings.disabled = !isFormDirty('runtime');
 			if (fields.saveAsrSettings) fields.saveAsrSettings.disabled = !isFormDirty('asr');
 			if (fields.saveMusicAnalysisSettings) fields.saveMusicAnalysisSettings.disabled = !isFormDirty('music');
 			if (fields.saveUpscaleSettings) fields.saveUpscaleSettings.disabled = !isFormDirty('upscale');
+			if (fields.saveImageSettings) fields.saveImageSettings.disabled = !isFormDirty('image');
 		}
 
 		function captureFormSnapshots(keys) {
-			const targets = Array.isArray(keys) && keys.length ? keys : ['relay', 'runtime', 'asr', 'music', 'upscale'];
+			const targets = Array.isArray(keys) && keys.length ? keys : ['relay', 'runtime', 'asr', 'music', 'upscale', 'image'];
 			if (targets.includes('relay')) {
 				try {
 					formSnapshots.relay = JSON.stringify(collectRelaySettingsPayload('relay'));
@@ -1647,6 +1684,13 @@ function statusPageHtml() {
 					formSnapshots.upscale = JSON.stringify(serializeUpscaleSettings());
 				} catch (error) {
 					formSnapshots.upscale = '';
+				}
+			}
+			if (targets.includes('image')) {
+				try {
+					formSnapshots.image = JSON.stringify(serializeImageSettings());
+				} catch (error) {
+					formSnapshots.image = '';
 				}
 			}
 			updateSettingsDirtyState();
@@ -1790,7 +1834,7 @@ function statusPageHtml() {
 		}
 
 		function confirmUnsavedSettings() {
-			if (!isFormDirty('relay') && !isFormDirty('runtime') && !isFormDirty('asr') && !isFormDirty('music') && !isFormDirty('upscale')) {
+			if (!isFormDirty('relay') && !isFormDirty('runtime') && !isFormDirty('asr') && !isFormDirty('music') && !isFormDirty('upscale') && !isFormDirty('image')) {
 				return true;
 			}
 			return window.confirm('You have unsaved settings changes. Leave this section without saving?');
@@ -1833,6 +1877,7 @@ function statusPageHtml() {
 				loadAsrSettings();
 				loadMusicAnalysisSettings();
 				loadUpscaleSettings();
+				loadImageSettings();
 				loadRelaySettings();
 			}
 		}
@@ -2670,7 +2715,11 @@ function statusPageHtml() {
 				const features = Object.keys(backend.features || {}).filter((key) => backend.features[key]).join(', ') || (backend.job_types || []).join(', ') || 'No supported jobs';
 				const detail = backend.version || backend.command || features;
 				const diagnostic = backend.diagnostic && backend.diagnostic !== 'Ready.' && backend.diagnostic !== 'Authentication not checked yet.' ? '<br><small class="muted">' + escapeHtml(backend.diagnostic) + '</small>' : '';
-				const installation = backend.id === 'local-upscale' ? '<br><small class="muted">Use Settings → Local CUDA Upscale to install an available pinned model. Jobs never download a model, downsample native output, or fall back to CPU.</small><br><small class="muted">Models: ' + (Array.isArray(backend.models) ? backend.models.map((model) => escapeHtml(String(model.label || model.id || 'model') + ' — ' + String(model.state || 'not checked'))).join(' · ') : 'not checked') + '</small>' : '';
+				const installation = backend.id === 'local-upscale'
+					? '<br><small class="muted">Use Settings → Local CUDA Upscale to install an available pinned model. Jobs never download a model, downsample native output, or fall back to CPU.</small><br><small class="muted">Models: ' + (Array.isArray(backend.models) ? backend.models.map((model) => escapeHtml(String(model.label || model.id || 'model') + ' — ' + String(model.state || 'not checked'))).join(' · ') : 'not checked') + '</small>'
+					: (backend.id === 'local-image'
+						? '<br><small class="muted">Use Settings → Local Image to set up the Qwen-Image-2.1 Diffusers runtime. Setup Environment installs packages; Install Model downloads weights explicitly.</small><br><small class="muted">Models: ' + (Array.isArray(backend.models) ? backend.models.map((model) => escapeHtml(String(model.label || model.id || 'model') + ' — ' + String(model.state || (model.ready ? 'ready' : 'not ready')))).join(' · ') : 'not checked') + '</small>'
+						: '');
 				return '<div class="feature-pill ' + (backend.ready ? 'enabled' : 'disabled') + '"><span class="name"><strong>' + escapeHtml(backend.label || backend.id) + '</strong><br><small class="muted">' + escapeHtml(detail) + '</small>' + diagnostic + installation + '</span><span class="state">' + escapeHtml(status) + '</span></div>';
 			}).join('') || '<div class="muted">No provider metadata reported</div>';
 			const cliPathFields = [
@@ -3317,6 +3366,128 @@ function statusPageHtml() {
 			}
 		}
 
+		function renderImageSettings(settings, models, resolutionChoices) {
+			currentImageSettings = settings || {};
+			const precision = currentImageSettings.precision || 'bf16';
+			const resolution = String(currentImageSettings.default_resolution || '1024x1024');
+			const choices = Array.isArray(resolutionChoices) && resolutionChoices.length
+				? resolutionChoices
+				: [
+					{ value: '1024x1024', label: '1K · 1:1 · 1024×1024' },
+					{ value: '2048x2048', label: '2K · 1:1 · 2048×2048' },
+				];
+			const resolutionOptions = choices.map((choice) => {
+				const value = String(choice.value || '');
+				const selected = value === resolution || (resolution === '1k' && value === '1024x1024') || (resolution === '2k' && value === '2048x2048');
+				return '<option value="' + escapeHtml(value) + '"' + (selected ? ' selected' : '') + '>' + escapeHtml(String(choice.label || value)) + '</option>';
+			}).join('');
+			fields.imageSettings.innerHTML = [
+				'<label class="field"><span>Python path</span><input id="imagePythonPath" value="' + escapeHtml(currentImageSettings.python_path || '') + '" placeholder="Auto-detect Python 3.10+"></label>',
+				'<label class="field"><span>Virtual environment path</span><input id="imageVenvPath" value="' + escapeHtml(currentImageSettings.venv_path || '') + '"></label>',
+				'<label class="field"><span>Precision</span><select id="imagePrecision"><option value="bf16"' + (precision === 'fp8' ? '' : ' selected') + '>BF16 (recommended with CPU offload)</option><option value="fp8"' + (precision === 'fp8' ? ' selected' : '') + '>FP8 (falls back to BF16)</option></select></label>',
+				'<label class="field"><span>Default resolution</span><select id="imageDefaultResolution">' + resolutionOptions + '</select></label>',
+				'<label class="field"><span>Default steps</span><input id="imageDefaultSteps" type="number" min="1" max="100" step="1" inputmode="numeric" value="' + escapeHtml(currentImageSettings.default_steps || 40) + '"></label>',
+				'<label class="field"><span>True CFG scale</span><input id="imageGuidanceScale" type="number" min="0" max="20" step="0.1" inputmode="decimal" value="' + escapeHtml(currentImageSettings.guidance_scale == null ? 1 : currentImageSettings.guidance_scale) + '"><small class="muted">Qwen-Image-2.1 defaults to 1.0 (no CFG). Values &gt; 1 need a negative prompt and roughly double compute.</small></label>',
+				'<label class="checkbox-row"><input type="checkbox" id="imageCpuOffload"' + checkedAttr(currentImageSettings.cpu_offload !== false) + '><span>Enable model CPU offload</span></label>',
+				'<label class="checkbox-row"><input type="checkbox" id="imageVaeTiling"' + checkedAttr(currentImageSettings.vae_tiling !== false) + '><span>Enable VAE tiling</span></label>',
+				'<label class="checkbox-row"><input type="checkbox" id="imageAllowModelDownloads"' + checkedAttr(currentImageSettings.allow_model_downloads === true) + '><span>Allow model downloads during setup</span></label>',
+			].join('');
+			fields.imageModelStates.textContent = 'Models: ' + (Array.isArray(models) && models.length ? models.map((model) => String(model.label || model.id || 'model') + ' — ' + String(model.state || 'not checked')).join(' · ') : 'not checked');
+			fields.imageInstallActions.innerHTML = (Array.isArray(models) ? models : []).map((model) => (
+				'<div class="field"><strong>' + escapeHtml(String(model.label || model.id)) + '</strong><br>' +
+				'<small class="muted">Diffusers · CPU offload · VAE tiling · up to 10 reference images</small><br>' +
+				'<button type="button" data-image-install="' + escapeHtml(String(model.id)) + '">' +
+				(model.state === 'installed' ? 'Repair / Reinstall Model' : 'Install Model') +
+				'</button></div>'
+			)).join('') || '<span class="muted">No local image models were reported.</span>';
+		}
+
+		function serializeImageSettings() {
+			return {
+				python_path: ((document.getElementById('imagePythonPath') || {}).value || '').trim(),
+				venv_path: ((document.getElementById('imageVenvPath') || {}).value || '').trim(),
+				precision: ((document.getElementById('imagePrecision') || {}).value || currentImageSettings.precision || 'bf16'),
+				default_resolution: ((document.getElementById('imageDefaultResolution') || {}).value || currentImageSettings.default_resolution || '1024x1024'),
+				default_steps: numberValue((document.getElementById('imageDefaultSteps') || {}).value, currentImageSettings.default_steps || 40),
+				guidance_scale: numberValue((document.getElementById('imageGuidanceScale') || {}).value, currentImageSettings.guidance_scale == null ? 1 : currentImageSettings.guidance_scale),
+				cpu_offload: !!(document.getElementById('imageCpuOffload') || {}).checked,
+				vae_tiling: !!(document.getElementById('imageVaeTiling') || {}).checked,
+				allow_model_downloads: !!(document.getElementById('imageAllowModelDownloads') || {}).checked,
+			};
+		}
+
+		async function loadImageSettings() {
+			fields.imageSettingsMessage.textContent = 'Loading settings';
+			try {
+				const response = await fetch(imageSettingsUrl, { cache: 'no-store' });
+				const payload = await response.json();
+				if (!response.ok || payload.success === false) throw new Error(payload.message || 'Local image settings unavailable');
+				renderImageSettings(payload.settings || {}, payload.models || [], payload.resolution_choices || []);
+				captureFormSnapshots(['image']);
+				fields.imageSettingsMessage.textContent = 'Settings loaded';
+			} catch (error) {
+				fields.imageSettingsMessage.textContent = error.message || 'Local image settings load failed';
+			}
+		}
+
+		async function saveImageSettings() {
+			const settings = serializeImageSettings();
+			fields.imageSettingsMessage.textContent = 'Saving';
+			try {
+				const response = await fetch(imageSettingsUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ settings }) });
+				const payload = await response.json();
+				if (!response.ok || payload.success === false) throw new Error(payload.message || 'Save failed');
+				const resolutionChoices = payload.resolution_choices || payload.capabilities?.resolution_choices || [];
+				renderImageSettings(payload.settings || settings, payload.models || [], resolutionChoices);
+				fields.imageSettingsMessage.textContent = 'Saved';
+				captureFormSnapshots(['image']);
+				await Promise.all([refresh().catch(() => {}), loadRelaySettings().catch(() => {})]);
+			} catch (error) {
+				fields.imageSettingsMessage.textContent = error.message || 'Save failed';
+			}
+		}
+
+		async function setupImage(options = {}) {
+			const button = options.button || fields.setupImageEnvironment;
+			const original = button ? button.textContent : '';
+			const downloadModel = options.download_model === true;
+			const modelId = options.model || '';
+			try {
+				if (fields.setupImageEnvironment) fields.setupImageEnvironment.disabled = true;
+				Array.from(fields.imageInstallActions.querySelectorAll('[data-image-install]')).forEach((control) => { control.disabled = true; });
+				if (button) button.textContent = downloadModel ? 'Installing model...' : 'Setting up...';
+				showSetupLog(fields.imageSetupLog, '');
+				const settings = serializeImageSettings();
+				await fetch(imageSettingsUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ settings }) });
+				fields.imageSettingsMessage.textContent = downloadModel
+					? 'Downloading Qwen-Image-2.1 weights from Hugging Face...'
+					: 'Creating venv and installing CUDA Diffusers packages...';
+				const response = await fetch(imageSetupUrl, {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ model: modelId, download_model: downloadModel }),
+				});
+				const payload = await response.json();
+				if (!response.ok || payload.success === false) {
+					const error = new Error(payload.message || 'Local image setup failed');
+					error.payload = payload;
+					throw error;
+				}
+				fields.imageSettingsMessage.textContent = downloadModel
+					? ((payload.model && payload.model.label || modelId || 'Model') + ' is installed')
+					: 'Local image environment is ready';
+				showSetupLog(fields.imageSetupLog, payload.details && payload.details.log || '');
+				await Promise.all([loadImageSettings(), refresh().catch(() => {}), loadRelaySettings().catch(() => {})]);
+			} catch (error) {
+				fields.imageSettingsMessage.textContent = error.message || 'Local image setup failed';
+				showSetupLog(fields.imageSetupLog, setupFailureText(error.payload || {}, error.message || 'Local image setup failed'));
+			} finally {
+				if (fields.setupImageEnvironment) fields.setupImageEnvironment.disabled = false;
+				Array.from(fields.imageInstallActions.querySelectorAll('[data-image-install]')).forEach((control) => { control.disabled = false; });
+				if (button) button.textContent = original;
+			}
+		}
+
 		function checkedAttr(value) {
 			return value ? ' checked' : '';
 		}
@@ -3945,6 +4116,11 @@ function statusPageHtml() {
 			updateSettingsDirtyState();
 		});
 		fields.upscaleSettingsForm.addEventListener('change', updateSettingsDirtyState);
+		fields.imageSettingsForm.addEventListener('input', () => {
+			fields.imageSettingsMessage.textContent = 'Unsaved changes';
+			updateSettingsDirtyState();
+		});
+		fields.imageSettingsForm.addEventListener('change', updateSettingsDirtyState);
 		fields.asrSettingsForm.addEventListener('submit', (event) => {
 			event.preventDefault();
 			saveAsrSettings();
@@ -3990,6 +4166,15 @@ function statusPageHtml() {
 				return;
 			}
 			setupUpscale(modelId, button, !!(restricted && restricted.checked));
+		});
+		fields.imageSettingsForm.addEventListener('submit', (event) => { event.preventDefault(); saveImageSettings(); });
+		fields.reloadImageSettings.addEventListener('click', loadImageSettings);
+		fields.saveImageSettings.addEventListener('click', saveImageSettings);
+		fields.setupImageEnvironment.addEventListener('click', () => setupImage({ button: fields.setupImageEnvironment, download_model: false }));
+		fields.imageInstallActions.addEventListener('click', (event) => {
+			const button = event.target.closest('[data-image-install]');
+			if (!button) return;
+			setupImage({ button, model: button.getAttribute('data-image-install'), download_model: true });
 		});
 		fields.persistentPairingCodeForm.addEventListener('submit', (event) => {
 			event.preventDefault();

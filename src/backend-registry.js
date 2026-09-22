@@ -9,6 +9,7 @@ const { createBoundedCollector } = require('./diagnostics');
 const { attachProcessAbort, killProcessTree } = require('./cuda-torch-venv');
 const { detectCli, detectCliAsync, materializeChatImages, messagesToPromptJson, messagesToText, retainCliReadiness, runTextCommand, writePromptFile } = require('./local-cli');
 const { createLocalUpscaleDriver } = require('./local-upscale');
+const { createLocalImageDriver } = require('./local-image');
 const { resolveMaxTokens } = require('./token-policy');
 const { IMAGE_CAPABILITY_CONTRACT_VERSION, imageCapabilityContract, isCompleteImageCapabilityContract, findRelayImageModel, normalizeImageOutputFormat, normalizeImagePayloadForModel, relayCatalogEntrySupportsImages } = require('./image-capabilities');
 const { readImageDimensions } = require('./image-dimensions');
@@ -165,6 +166,9 @@ function providerFromPayload(payload = {}) {
 	}
 	if (model.startsWith('model-relay:local-upscale:')) {
 		return 'local-upscale';
+	}
+	if (model.startsWith('model-relay:local-image:')) {
+		return 'local-image';
 	}
 	if (model.startsWith('model-relay:music-analysis:')) {
 		return 'music-analysis';
@@ -1883,6 +1887,7 @@ function createBackendRegistry(options = {}) {
 		createCursorCliDriver(configuredCliOptions(options.cursor, 'cursor-cli')),
 		createLocalAsrDriver(options.codex),
 		createLocalUpscaleDriver(options.upscale || {}),
+		createLocalImageDriver(options.image || {}),
 		createMusicAnalysisDriver(options.musicAnalysis),
 		createOpenAiVideosDriver(options.video),
 		createXaiApiDriver({ fetchTimeoutMs, ...(options.xai || {}) }),
@@ -1902,6 +1907,8 @@ function createBackendRegistry(options = {}) {
 		asr: 'local-asr',
 		'local-asr': 'local-asr',
 		'local-upscale': 'local-upscale',
+		'local-image': 'local-image',
+		image: 'local-image',
 		'music-analysis': 'music-analysis',
 		xai: 'xai-api',
 		'xai-api': 'xai-api',
@@ -2010,6 +2017,7 @@ module.exports = {
 	createGrokCliDriver,
 	createLocalAsrDriver,
 	createLocalUpscaleDriver,
+	createLocalImageDriver,
 	createMusicAnalysisDriver,
 	createOpenAiVideosDriver,
 	createXaiApiDriver,

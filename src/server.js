@@ -10,6 +10,7 @@ const { JobManager, clampMaxConcurrent, publicJobsSnapshot } = require('./job-ma
 const mediaAnalysis = require('./media-analysis');
 const musicAnalysis = require('./music-analysis');
 const localUpscale = require('./local-upscale');
+const localImage = require('./local-image');
 const security = require('./security');
 const { statusPageHtml } = require('./status-page');
 const { resetTempDebugLogs } = require('./temp-debug-logs');
@@ -125,6 +126,7 @@ function sseHeaders(origin = '') {
 		headers['Access-Control-Allow-Origin'] = origin;
 		headers['Access-Control-Allow-Headers'] = 'Content-Type, X-Alorbach-Bridge-Token, X-Alorbach-Request-Id, X-Alorbach-Job-Token, X-Alorbach-Request-Hash, X-Alorbach-Upscale-Payload';
 		headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS';
+		headers['Access-Control-Allow-Private-Network'] = 'true';
 		headers.Vary = 'Origin';
 	}
 	return headers;
@@ -309,6 +311,7 @@ function sendJson(res, statusCode, payload, origin) {
 		headers['Access-Control-Allow-Origin'] = origin;
 		headers['Access-Control-Allow-Headers'] = 'Content-Type, X-Alorbach-Bridge-Token, X-Alorbach-Request-Id, X-Alorbach-Job-Token, X-Alorbach-Request-Hash, X-Alorbach-Upscale-Payload';
 		headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS';
+		headers['Access-Control-Allow-Private-Network'] = 'true';
 		headers.Vary = 'Origin';
 	}
 	res.writeHead(statusCode, headers);
@@ -349,6 +352,7 @@ function sendArtifact(res, artifact, origin) {
 	};
 	if (origin) {
 		headers['Access-Control-Allow-Origin'] = origin;
+		headers['Access-Control-Allow-Private-Network'] = 'true';
 		headers.Vary = 'Origin';
 	}
 	res.writeHead(200, headers);
@@ -595,6 +599,7 @@ function workflowForJob(jobType, provider) {
 		'antigravity-cli:chat': 'Antigravity chat',
 		'cursor-cli:chat': 'Cursor Agent',
 		'local-asr:transcribe': 'Local ASR',
+		'local-image:images': 'Local Qwen-Image',
 		'music-analysis:music.analyze': 'Local music analysis',
 		'openai-videos:videos': 'OpenAI Videos API',
 		'xai-api:chat': 'xAI Chat Completions API',
@@ -640,6 +645,8 @@ const STATUS_PAGE_MUTATORS = new Set([
 	'/v1/asr/setup',
 	'/v1/upscale/settings',
 	'/v1/upscale/setup',
+	'/v1/image/settings',
+	'/v1/image/setup',
 	'/v1/music-analysis/settings',
 	'/v1/music-analysis/setup',
 	'/v1/relay/settings',
@@ -832,6 +839,11 @@ async function route(req, res, context) {
 	}
 	if (req.method === 'GET' && url.pathname === '/v1/upscale/settings') {
 		const payload = context.localUpscale.publicSettings ? context.localUpscale.publicSettings() : { success: false, message: 'Local upscale settings are unavailable.' };
+		sendJson(res, payload.success === false ? 500 : 200, payload, corsOrigin(req, bridgeSecurity));
+		return;
+	}
+	if (req.method === 'GET' && url.pathname === '/v1/image/settings') {
+		const payload = context.localImage && context.localImage.publicSettings ? context.localImage.publicSettings() : { success: false, message: 'Local image settings are unavailable.' };
 		sendJson(res, payload.success === false ? 500 : 200, payload, corsOrigin(req, bridgeSecurity));
 		return;
 	}
@@ -1109,6 +1121,39 @@ async function route(req, res, context) {
 		sendJson(res, 200, result, origin);
 		return;
 	}
+	if (url.pathname === '/v1/image/settings') {
+		if (!context.localImage || !context.localImage.saveSettings || !context.localImage.publicSettings) {
+			sendErrorJson(req, res, 500, { success: false, message: 'Local image settings are unavailable.' }, origin);
+			return;
+		}
+		const settings = context.localImage.saveSettings(body.settings || body || {});
+		const driver = context.backends && context.backends.getDriverById ? context.backends.getDriverById('local-image') : null;
+		if (driver && driver.refresh) await driver.refresh();
+		const payload = context.localImage.publicSettings();
+		context.statusCache.sync();
+		context.statusEvents.broadcast('status', statusPayload(context, { includePairedOrigins: true }));
+		context.statusEvents.broadcast('capabilities', capabilitiesPayload(context));
+		sendJson(res, 200, { success: true, settings, models: payload.models, capabilities: payload }, origin);
+		return;
+	}
+	if (url.pathname === '/v1/image/setup') {
+		if (!context.localImage || !context.localImage.setup) {
+			sendErrorJson(req, res, 500, { success: false, message: 'Local image setup is unavailable.' }, origin);
+			return;
+		}
+		const result = await withSetupLock('image', () => context.localImage.setup({ model: body.model || '', download_model: body.download_model === true }));
+		const driver = context.backends && context.backends.getDriverById ? context.backends.getDriverById('local-image') : null;
+		if (driver && driver.refresh) await driver.refresh({ forceProbe: true });
+		context.statusCache.sync();
+		context.statusEvents.broadcast('status', statusPayload(context, { includePairedOrigins: true }));
+		context.statusEvents.broadcast('capabilities', capabilitiesPayload(context));
+		if (!result.success) {
+			sendErrorJson(req, res, errorStatusForResult(result), result, origin, { route: url.pathname });
+			return;
+		}
+		sendJson(res, 200, result, origin);
+		return;
+	}
 	if (url.pathname === '/v1/relay/settings') {
 		const previous = context.relaySettings.settings();
 		context.relaySettings.saveSettings(body.settings || body || {});
@@ -1341,6 +1386,7 @@ function createServer(options = {}) {
 		mediaAnalysis: options.mediaAnalysis || mediaAnalysis,
 		musicAnalysis: options.musicAnalysis || musicAnalysis,
 		localUpscale: options.localUpscale || localUpscale,
+		localImage: options.localImage || localImage,
 		security: options.security || security,
 		video: options.video || video,
 		jobManager: options.jobManager || createJobManager({ ...options, onJobState }),
@@ -1370,6 +1416,8 @@ function createServer(options = {}) {
 			mediaAnalysis: context.mediaAnalysis,
 			video: context.video,
 			musicAnalysis: context.musicAnalysis,
+			upscale: options.upscale || {},
+			image: options.image || {},
 			grok: { ...(driverOpts.grok || {}), ...(options.grok || {}) },
 			cursor: { ...(driverOpts.cursor || {}), ...(options.cursor || {}) },
 			antigravity: { ...(driverOpts.antigravity || {}), ...(options.antigravity || {}) },
