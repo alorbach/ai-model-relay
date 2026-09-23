@@ -1,0 +1,60 @@
+src/local-image.js
+  s_4c49eb5e31e5b8::t_26aca26d168d17 58,686-687
+  s_4c49eb5e31e5b8::t_d5c41c99538bc8 679-682,885-886
+  s_4c49eb5e31e5b8::t_42e1adc4829df9 889-890
+  s_4c49eb5e31e5b8::t_96d3bb83865021 59,118-132,166,215-220,232,238,242
+  s_4c49eb5e31e5b8::t_855d1e416bb351 41,316,318-321
+  s_4c49eb5e31e5b8::t_288b2dde96de87 549,567,569,572-578,587-588,592,609,627,632,635-640,646,655-663,671,684-685,716-717,723-724,860
+  s_4c49eb5e31e5b8::t_c63dc4158c3bdc 434-438,493,498-501
+  s_4c49eb5e31e5b8::t_008c6a32e5190f 45-57,60-67,164-165,167-171,346,350-352
+  s_4c49eb5e31e5b8::t_8b6d6d4da0583a 317,672-674
+  s_1d608908dbc14a::t_0650cc61aec129 172-175,353-354
+test/local-image.test.js
+  s_4c49eb5e31e5b8::t_8ae974ca715af7 14-15,45-55,86-87,95
+  s_4c49eb5e31e5b8::t_d56adab80f6619 226,283-288,291-300
+  s_4c49eb5e31e5b8::t_9ea4a5ec646706 99,314-315,342
+  s_4c49eb5e31e5b8::t_e6576ce47b4a55 16,88-90,290
+  s_4c49eb5e31e5b8::t_220090ef14b53d 98
+  s_4c49eb5e31e5b8::t_db81fa5c3e7aa3 130,168,182,208,216-218
+  s_4c49eb5e31e5b8::t_f28f2939d6c87e 354-358,370,381-383
+  s_4c49eb5e31e5b8::t_7e0917282f4fe7 289
+src/image-qwen-runner.py
+  s_4c49eb5e31e5b8::t_71503ef41c6a5e 2,47-48,71-81
+  s_4c49eb5e31e5b8::t_667a5f24c08c8a 108-127
+  s_4c49eb5e31e5b8::t_b40c829c1faf04 172-181,204-206,212-216,224,227,229,231,234,237,261
+  s_c1b12db8b09c8c::t_307a200e3cd0df 82
+src/status-page.js
+  s_4c49eb5e31e5b8::t_3f595eb3cb2a31 3398
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e4fcce1b2db7136fe206f2cc3b6001b592373888",
+  "prompts": {},
+  "sessions": {
+    "s_1d608908dbc14a": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "e04c709e-4143-4ac5-8cbc-056e82d87a43",
+        "model": "default"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_4c49eb5e31e5b8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0ccb5-e70f-7e53-a36d-47e1403f8d46",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_c1b12db8b09c8c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0b4e4-4c05-73e3-b51b-383185d7b73c",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
