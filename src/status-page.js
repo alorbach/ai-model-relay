@@ -1318,8 +1318,8 @@ function statusPageHtml() {
 						</form>
 					</div>
 					<div class="settings-section" id="settings-section-image" data-settings-panel="image" hidden>
-						<div class="label">Local Image Generation (Qwen-Image-2.1)</div>
-						<p class="muted">Sets up a CUDA Diffusers runtime for Qwen-Image-2.1 with CPU offload and VAE tiling. Use Setup Environment for the venv and packages; Install Model downloads weights only when you press the button.</p>
+						<div class="label">Local Image Generation</div>
+						<p class="muted">Sets up a CUDA Diffusers runtime for the available local image models with CPU offload and VAE tiling. Use Setup Environment for the venv and packages; Install Model downloads weights only when you press the button.</p>
 						<form class="settings-editor" id="imageSettingsForm">
 							<div class="settings-grid" id="imageSettings"></div>
 							<div class="muted" id="imageModelStates">Models: not checked</div>
@@ -2758,7 +2758,7 @@ function statusPageHtml() {
 				const installation = backend.id === 'local-upscale'
 					? '<br><small class="muted">Use Settings → Local CUDA Upscale to install an available pinned model. Jobs never download a model, downsample native output, or fall back to CPU.</small><br><small class="muted">Models: ' + (Array.isArray(backend.models) ? backend.models.map((model) => escapeHtml(String(model.label || model.id || 'model') + ' — ' + String(model.state || 'not checked'))).join(' · ') : 'not checked') + '</small>'
 					: (backend.id === 'local-image'
-						? '<br><small class="muted">Use Settings → Local Image to set up the Qwen-Image-2.1 Diffusers runtime. Setup Environment installs packages; Install Model downloads weights explicitly.</small><br><small class="muted">Models: ' + (Array.isArray(backend.models) ? backend.models.map((model) => escapeHtml(String(model.label || model.id || 'model') + ' — ' + String(model.state || (model.ready ? 'ready' : 'not ready')))).join(' · ') : 'not checked') + '</small>'
+						? '<br><small class="muted">Use Settings → Local Image to set up the Diffusers runtime. Setup Environment installs packages; Install Model downloads weights explicitly.</small><br><small class="muted">Models: ' + (Array.isArray(backend.models) ? backend.models.map((model) => escapeHtml(String(model.label || model.id || 'model') + ' — ' + String(model.state || (model.ready ? 'ready' : 'not ready')))).join(' · ') : 'not checked') + '</small>'
 						: '');
 				return '<div class="feature-pill ' + (backend.ready ? 'enabled' : 'disabled') + '"><span class="name"><strong>' + escapeHtml(backend.label || backend.id) + '</strong><br><small class="muted">' + escapeHtml(detail) + '</small>' + diagnostic + installation + '</span><span class="state">' + escapeHtml(status) + '</span></div>';
 			}).join('') || '<div class="muted">No provider metadata reported</div>';
@@ -3427,7 +3427,7 @@ function statusPageHtml() {
 				'<label class="field"><span>Precision</span><select id="imagePrecision"><option value="bf16"' + (precision === 'fp8' ? '' : ' selected') + '>BF16 (recommended with CPU offload)</option><option value="fp8"' + (precision === 'fp8' ? ' selected' : '') + '>FP8 (falls back to BF16)</option></select></label>',
 				'<label class="field"><span>Default resolution</span><select id="imageDefaultResolution">' + resolutionOptions + '</select></label>',
 				'<label class="field"><span>Default steps</span><input id="imageDefaultSteps" type="number" min="1" max="100" step="1" inputmode="numeric" value="' + escapeHtml(currentImageSettings.default_steps || 40) + '"></label>',
-				'<label class="field"><span>True CFG scale</span><input id="imageGuidanceScale" type="number" min="0" max="20" step="0.1" inputmode="decimal" value="' + escapeHtml(currentImageSettings.guidance_scale == null ? 1 : currentImageSettings.guidance_scale) + '"><small class="muted">Qwen-Image-2.1 defaults to 1.0 (no CFG). Values &gt; 1 need a negative prompt and roughly double compute.</small></label>',
+				'<label class="field"><span>Guidance / CFG scale</span><input id="imageGuidanceScale" type="number" min="0" max="20" step="0.1" inputmode="decimal" value="' + escapeHtml(currentImageSettings.guidance_scale == null ? 1 : currentImageSettings.guidance_scale) + '"><small class="muted">Qwen-Image-2.1 uses True CFG; FLUX.2 uses guidance scale. Each model applies its recommended default unless you change this setting.</small></label>',
 				'<label class="checkbox-row"><input type="checkbox" id="imageCpuOffload"' + checkedAttr(currentImageSettings.cpu_offload !== false) + '><span>Enable model CPU offload</span></label>',
 				'<label class="checkbox-row"><input type="checkbox" id="imageVaeTiling"' + checkedAttr(currentImageSettings.vae_tiling !== false) + '><span>Enable VAE tiling</span></label>',
 				'<label class="checkbox-row"><input type="checkbox" id="imageAllowModelDownloads"' + checkedAttr(currentImageSettings.allow_model_downloads === true) + '><span>Allow model downloads during setup</span></label>',
@@ -3500,7 +3500,7 @@ function statusPageHtml() {
 				const settings = serializeImageSettings();
 				await fetch(imageSettingsUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ settings }) });
 				fields.imageSettingsMessage.textContent = downloadModel
-					? 'Downloading Qwen-Image-2.1 weights from Hugging Face...'
+					? 'Downloading selected model weights from Hugging Face...'
 					: 'Creating venv and installing CUDA Diffusers packages...';
 				const response = await fetch(imageSetupUrl, {
 					method: 'POST',

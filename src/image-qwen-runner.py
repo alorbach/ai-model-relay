@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""CUDA-only runner for supported local Qwen-Image models.
+"""CUDA-only runner for supported local image models.
 
 This runner executes local text-to-image and image-editing jobs using
-Diffusers with sequential CPU offloading and VAE tiling to operate safely
+Diffusers with CPU offloading and VAE tiling to operate safely
 within consumer GPU VRAM limits (e.g. NVIDIA RTX 3060 12GB).
 """
 import argparse
@@ -46,6 +46,7 @@ def run_probe():
         "qwen_pipeline_ready": False,
         "qwen_image_pipeline_ready": False,
         "qwen_image_img2img_pipeline_ready": False,
+        "flux2_pipeline_ready": False,
         "bitsandbytes_ready": False,
     }
 
@@ -80,6 +81,12 @@ def run_probe():
         probe["qwen_image_img2img_pipeline_ready"] = QwenImageImg2ImgPipeline is not None
     except Exception as exc:
         probe["qwen_image_img2img_pipeline_error"] = str(exc)
+
+    try:
+        from diffusers import Flux2Pipeline
+        probe["flux2_pipeline_ready"] = Flux2Pipeline is not None
+    except Exception as exc:
+        probe["flux2_pipeline_error"] = str(exc)
 
     try:
         from importlib.metadata import version
@@ -129,6 +136,15 @@ MODEL_PIPELINES = {
         "default_precision": "nf4-bf16",
         "precisions": ("nf4-bf16",),
         "max_reference_images": 1,
+    },
+    "model-relay:local-image:flux-2-dev-nf4": {
+        "repo_id": "diffusers/FLUX.2-dev-bnb-4bit",
+        "text_pipeline": "Flux2Pipeline",
+        "img2img_pipeline": "Flux2Pipeline",
+        "default_precision": "nf4-bf16",
+        "precisions": ("nf4-bf16",),
+        "max_reference_images": 10,
+        "guidance_argument": "guidance_scale",
     },
 }
 
@@ -191,11 +207,14 @@ def run_job(job):
     vae_tiling = bool(job.get("vae_tiling", True))
     steps = int(job.get("num_inference_steps") or job.get("steps") or 40)
     # Qwen-Image-2.1 uses true_cfg_scale (default 1.0 = no CFG). guidance_scale is accepted as a legacy alias.
-    true_cfg_scale = float(
+    guidance_scale = float(
         job.get("true_cfg_scale")
         if job.get("true_cfg_scale") is not None
         else (job.get("guidance_scale") if job.get("guidance_scale") is not None else 1.0)
     )
+    negative_prompt = str(job.get("negative_prompt") or "").strip()
+    if negative_prompt and model_profile.get("guidance_argument") == "guidance_scale":
+        fail("negative_prompt_unsupported", "This FLUX.2 Diffusers pipeline does not accept a negative_prompt; remove it and guide the image with the positive prompt.")
     seed = job.get("seed")
 
     width, height = resolve_dimensions(
@@ -279,15 +298,14 @@ def run_job(job):
         "width": width,
         "height": height,
         "num_inference_steps": steps,
-        "true_cfg_scale": true_cfg_scale,
+        model_profile.get("guidance_argument", "true_cfg_scale"): guidance_scale,
     }
     if generator is not None:
         pipe_args["generator"] = generator
 
-    negative_prompt = str(job.get("negative_prompt") or "").strip()
     if negative_prompt:
         pipe_args["negative_prompt"] = negative_prompt
-    elif true_cfg_scale > 1:
+    elif model_profile.get("guidance_argument") != "guidance_scale" and guidance_scale > 1:
         # true_cfg_scale > 1 requires a negative prompt to engage CFG
         pipe_args["negative_prompt"] = " "
 
@@ -312,13 +330,14 @@ def run_job(job):
         "mode": generated_image.mode,
         "precision": precision,
         "steps": steps,
-        "true_cfg_scale": true_cfg_scale,
+        "true_cfg_scale": guidance_scale,
+        "guidance_scale": guidance_scale,
         "seed": seed,
     }))
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Qwen-Image-2.1 local runner")
+    parser = argparse.ArgumentParser(description="Local image generation runner")
     parser.add_argument("--probe", action="store_true", help="Probe CUDA and python dependencies and exit")
     parser.add_argument("--job-json", type=str, help="Path to job JSON file (or '-' for stdin)")
     args = parser.parse_args()

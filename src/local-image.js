@@ -67,6 +67,30 @@ const MODELS = {
 		enabled: true,
 		license: { spdx: 'CC-BY-NC-SA-4.0', commercial_use: false },
 	},
+	'model-relay:local-image:flux-2-dev-nf4': {
+		id: 'model-relay:local-image:flux-2-dev-nf4',
+		label: 'FLUX.2-dev NF4 (BF16 compute)',
+		provider: 'flux2',
+		repo_id: 'diffusers/FLUX.2-dev-bnb-4bit',
+		min_vram_mb: 20480,
+		recommended_vram_mb: 24576,
+		vram_note: 'Plan for about 20 GB free VRAM; CPU offload is recommended.',
+		precision: ['nf4-bf16'],
+		default_precision: 'nf4-bf16',
+		weights_quantization: 'nf4',
+		compute_dtype: 'bf16',
+		preferred_steps: 28,
+		preferred_guidance_scale: 4.0,
+		default_resolution: '1024x1024',
+		reference_images_max: 10,
+		pipeline: 'Flux2Pipeline',
+		img2img_pipeline: 'Flux2Pipeline',
+		guidance_argument: 'guidance_scale',
+		probe_requirements: ['flux2_pipeline_ready', 'bitsandbytes_ready'],
+		required_packages: ['bitsandbytes'],
+		required_snapshot_paths: ['model_index.json', 'transformer'],
+		license: { spdx: 'flux-dev-non-commercial-license', commercial_use: false },
+	},
 };
 
 const QWEN_IMAGE_ASPECT_CHOICES = [
@@ -175,6 +199,19 @@ const QWEN_IMAGE_2512_CAPABILITIES = imageCapabilityContract(QWEN_IMAGE_2512_TES
 	outputFormats: ['image/png'],
 });
 
+const FLUX2_RESOLUTION_CHOICES = QWEN_IMAGE_RESOLUTION_CHOICES.filter((choice) => Object.values(QWEN_IMAGE_SIZE_TABLE['1k'])
+	.some(([width, height]) => choice.value === `${width}x${height}`));
+const FLUX2_TEST_OPTIONS = QWEN_IMAGE_TEST_OPTIONS.map((option) => option.key === 'quality'
+	? { ...option, choices: [{ value: 'nf4-bf16', label: 'NF4 weights / BF16 compute' }] }
+	: option.key === 'resolution' ? { ...option, choices: FLUX2_RESOLUTION_CHOICES }
+	: option);
+const FLUX2_CAPABILITIES = imageCapabilityContract(FLUX2_TEST_OPTIONS, {
+	resolutionKey: 'resolution',
+	referenceImagesMax: 10,
+	candidateCountMax: 1,
+	outputFormats: ['image/png'],
+});
+
 function parseWxH(value) {
 	const match = String(value || '').trim().toLowerCase().match(/^(\d+)\s*[x×]\s*(\d+)$/i);
 	if (!match) return null;
@@ -216,6 +253,7 @@ function decodeReferenceImage(item) {
 
 function resolveOutputSize(payload = {}, current = {}, modelId = 'model-relay:local-image:qwen-image-2.1') {
 	const is2512 = modelId === 'model-relay:local-image:qwen-image-2512-4bit';
+	const isFlux2 = modelId === 'model-relay:local-image:flux-2-dev-nf4';
 	const modelSizeFromAspect = (aspectRatio, scale = 1) => {
 		const pair = QWEN_IMAGE_2512_SIZE_TABLE[String(aspectRatio || '1:1').trim()] || QWEN_IMAGE_2512_SIZE_TABLE['1:1'];
 		return { width: pair[0] * scale, height: pair[1] * scale };
@@ -232,7 +270,7 @@ function resolveOutputSize(payload = {}, current = {}, modelId = 'model-relay:lo
 	if (parsed) {
 		// The 2512 profile exposes its native sizes as explicit resolution choices.
 		// Preserve a chosen size even when the request also carries the UI's default ratio.
-		if (is2512 && (payload.resolution || payload.size)) return parsed;
+		if ((is2512 || isFlux2) && (payload.resolution || payload.size)) return parsed;
 		if (!payload.aspect_ratio) return parsed;
 		if (is2512) return modelSizeFromAspect(aspectRatio, Math.max(parsed.width, parsed.height) >= 1792 ? 2 : 1);
 		const tier = Math.max(parsed.width, parsed.height) >= 1792 ? '2k' : '1k';
@@ -348,7 +386,7 @@ function validateRunnerProbe(probe = {}) {
 	if (!probe.cuda_available) return { ok: false, state: 'cuda_unavailable', probe };
 	if (!probe.diffusers_ready) return { ok: false, state: 'diffusers_missing', probe };
 	if (!probe.transformers_ready) return { ok: false, state: 'transformers_missing', probe };
-	if (!probe.qwen_pipeline_ready && !probe.qwen_image_pipeline_ready) return { ok: false, state: 'diffusers_pipeline_missing', probe };
+	if (!probe.qwen_pipeline_ready && !probe.qwen_image_pipeline_ready && !probe.flux2_pipeline_ready) return { ok: false, state: 'diffusers_pipeline_missing', probe };
 	return { ok: true, state: 'ready', probe };
 }
 
@@ -551,11 +589,11 @@ function createLocalImageDriver(options = {}) {
 	let probeCache = null;
 	let snapshot = {
 		id: 'local-image',
-		label: 'Local Image (Qwen-Image)',
+		label: 'Local Image (Diffusers)',
 		kind: 'local-runtime',
 		ready: false,
 		state: 'checking',
-		diagnostic: 'Checking local Qwen-Image-2.1 runtime readiness.',
+		diagnostic: 'Checking local image model runtime readiness.',
 		models: [],
 	};
 
@@ -599,7 +637,7 @@ function createLocalImageDriver(options = {}) {
 
 		snapshot = {
 			id: 'local-image',
-			label: 'Local Image (Qwen-Image)',
+			label: 'Local Image (Diffusers)',
 			kind: 'local-runtime',
 			ready,
 			runtime_ready: runtimeReady,
@@ -616,7 +654,7 @@ function createLocalImageDriver(options = {}) {
 
 	return {
 		id: 'local-image',
-		label: 'Local Image (Qwen-Image)',
+		label: 'Local Image (Diffusers)',
 		kind: 'local-runtime',
 		job_types: ['images'],
 		checkStatus: () => ({ success: snapshot.ready, message: snapshot.diagnostic, details: snapshot }),
@@ -643,8 +681,8 @@ function createLocalImageDriver(options = {}) {
 				ready: !!(modelState && modelState.ready),
 				job_types: ['images'],
 				label: profile.label,
-				test_options: profile.reference_images_max > 1 ? QWEN_IMAGE_TEST_OPTIONS : QWEN_IMAGE_2512_TEST_OPTIONS,
-				image_capabilities: profile.reference_images_max > 1 ? QWEN_IMAGE_CAPABILITIES : QWEN_IMAGE_2512_CAPABILITIES,
+				test_options: id === 'model-relay:local-image:flux-2-dev-nf4' ? FLUX2_TEST_OPTIONS : profile.reference_images_max > 1 ? QWEN_IMAGE_TEST_OPTIONS : QWEN_IMAGE_2512_TEST_OPTIONS,
+				image_capabilities: id === 'model-relay:local-image:flux-2-dev-nf4' ? FLUX2_CAPABILITIES : profile.reference_images_max > 1 ? QWEN_IMAGE_CAPABILITIES : QWEN_IMAGE_2512_CAPABILITIES,
 				license: profile.license,
 				min_vram_mb: profile.min_vram_mb,
 				recommended_vram_mb: profile.recommended_vram_mb,
