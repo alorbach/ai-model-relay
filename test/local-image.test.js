@@ -11,6 +11,9 @@ const {
 	MODELS,
 	QWEN_IMAGE_TEST_OPTIONS,
 	QWEN_IMAGE_CAPABILITIES,
+	QWEN_IMAGE_2512_TEST_OPTIONS,
+	QWEN_IMAGE_2512_CAPABILITIES,
+	QWEN_IMAGE_2512_RESOLUTION_CHOICES,
 	QWEN_IMAGE_RESOLUTION_CHOICES,
 	createLocalImageDriver,
 	probeRunnerStatus,
@@ -39,6 +42,17 @@ const {
 	assert.ok(Array.isArray(qwenModel.precision) && qwenModel.precision.includes('bf16'), 'Model must list bf16 precision');
 	assert.strictEqual(qwenModel.default_precision, 'bf16', 'Default precision must be bf16');
 	assert.ok(qwenModel.reference_images_max >= 10, 'Model must support at least 10 reference images');
+	const quantizedModelId = 'model-relay:local-image:qwen-image-2512-4bit';
+	const quantizedModel = MODELS[quantizedModelId];
+	assert.ok(quantizedModel, 'Qwen-Image-2512-4bit model must exist');
+	assert.strictEqual(quantizedModel.repo_id, 'ovedrive/Qwen-Image-2512-4bit');
+	assert.strictEqual(quantizedModel.weights_quantization, 'nf4');
+	assert.strictEqual(quantizedModel.default_precision, 'nf4-bf16');
+	assert.strictEqual(quantizedModel.preferred_steps, 20);
+	assert.strictEqual(quantizedModel.reference_images_max, 1);
+	assert.strictEqual(quantizedModel.license.spdx, 'CC-BY-NC-SA-4.0');
+	assert.strictEqual(quantizedModel.min_vram_mb, 16384);
+	assert.strictEqual(quantizedModel.recommended_vram_mb, 20480);
 
 	// --- QWEN_IMAGE_TEST_OPTIONS ---
 	assert.ok(Array.isArray(QWEN_IMAGE_TEST_OPTIONS), 'Test options must be an array');
@@ -69,14 +83,20 @@ const {
 	assert.strictEqual(QWEN_IMAGE_CAPABILITIES.contract_version, 1);
 	assert.ok(QWEN_IMAGE_CAPABILITIES.reference_images === true, 'Must declare reference images support');
 	assert.strictEqual(QWEN_IMAGE_CAPABILITIES.reference_images_max, 10);
+	assert.strictEqual(QWEN_IMAGE_2512_CAPABILITIES.reference_images_max, 1);
+	assert.strictEqual(QWEN_IMAGE_2512_TEST_OPTIONS.find((opt) => opt.key === 'quality').choices[0].value, 'nf4-bf16');
+	assert.strictEqual(QWEN_IMAGE_2512_RESOLUTION_CHOICES.length, 7);
+	assert.deepStrictEqual(resolveOutputSize({ resolution: 'native', aspect_ratio: '16:9' }, {}, quantizedModelId), { width: 1664, height: 928 });
+	assert.deepStrictEqual(resolveOutputSize({ resolution: 'native', aspect_ratio: '3:2' }, {}, quantizedModelId), { width: 1584, height: 1056 });
 	assert.ok(Array.isArray(QWEN_IMAGE_CAPABILITIES.supported_output_formats) && QWEN_IMAGE_CAPABILITIES.supported_output_formats.includes('image/png'), 'Must support PNG output');
 	assert.strictEqual(QWEN_IMAGE_CAPABILITIES.candidate_count_max, 1);
 
 	// --- runtime probe requires the imports used by actual generation ---
-	const readyProbe = { cuda_available: true, diffusers_ready: true, transformers_ready: true, qwen_pipeline_ready: true };
+	const readyProbe = { cuda_available: true, diffusers_ready: true, transformers_ready: true, qwen_pipeline_ready: true, qwen_image_pipeline_ready: true, qwen_image_img2img_pipeline_ready: true };
 	assert.strictEqual(validateRunnerProbe(readyProbe).ok, true);
 	assert.strictEqual(validateRunnerProbe({ ...readyProbe, transformers_ready: false }).state, 'transformers_missing');
-	assert.strictEqual(validateRunnerProbe({ ...readyProbe, qwen_pipeline_ready: false }).state, 'diffusers_pipeline_missing');
+	assert.strictEqual(validateRunnerProbe({ ...readyProbe, qwen_pipeline_ready: false }).ok, true, 'Runtime may be ready through the newer QwenImage pipeline');
+	assert.strictEqual(validateRunnerProbe({ ...readyProbe, qwen_pipeline_ready: false, qwen_image_pipeline_ready: false }).state, 'diffusers_pipeline_missing');
 
 	// --- settings / saveSettings round-trip (isolated) ---
 	const originalSecurity = require('../src/security');
@@ -107,6 +127,7 @@ const {
 		const pub = publicSettings();
 		assert.ok(pub.success === true, 'publicSettings must return success:true');
 		assert.ok(Array.isArray(pub.models) && pub.models.length > 0, 'publicSettings must list models');
+		assert.ok(pub.models.some((model) => model.id === quantizedModelId && model.reference_images_max === 1), 'publicSettings must expose model-specific reference limits');
 		assert.strictEqual(pub.settings.precision, 'fp8');
 
 		// restore defaults for next test
@@ -144,7 +165,7 @@ const {
 		runnerPath: path.join(os.tmpdir(), 'nonexistent-image-runner.py'),
 	});
 	assert.strictEqual(driver.id, 'local-image');
-	assert.strictEqual(driver.label, 'Local Image (Qwen-Image-2.1)');
+	assert.strictEqual(driver.label, 'Local Image (Qwen-Image)');
 	assert.ok(Array.isArray(driver.job_types) && driver.job_types.includes('images'), 'Driver must support images job type');
 	assert.ok(typeof driver.capabilities === 'function', 'Driver must expose capabilities()');
 	assert.ok(typeof driver.models === 'function', 'Driver must expose models()');
@@ -158,7 +179,7 @@ const {
 	assert.ok(caps.features && caps.features.fp8_acceleration === false, 'Features must declare naive fp8 acceleration is unavailable');
 
 	const models = driver.models();
-	assert.ok(Array.isArray(models) && models.length >= 1, 'Driver must expose at least one model');
+	assert.ok(Array.isArray(models) && models.length >= 2, 'Driver must expose both local image models');
 	const firstModel = models[0];
 	assert.strictEqual(firstModel.type, 'image');
 	assert.strictEqual(firstModel.backend, 'local-image');
@@ -176,6 +197,7 @@ const {
 	const modelId = 'model-relay:local-image:qwen-image-2.1';
 	const readyRuntimeSettings = {
 		...settings(),
+		precision: 'fp8',
 		venv_path: path.join(os.tmpdir(), `relay-local-image-ready-venv-${Date.now()}`),
 		model_records: {},
 	};
@@ -184,7 +206,7 @@ const {
 		getSettings: () => readyRuntimeSettings,
 		probeRuntime: () => {
 			readinessProbeCalls += 1;
-			return { ok: true, state: 'ready', probe: { cuda_available: true, diffusers_ready: true } };
+			return { ok: true, state: 'ready', probe: { cuda_available: true, diffusers_ready: true, qwen_pipeline_ready: true, qwen_image_pipeline_ready: true, qwen_image_img2img_pipeline_ready: true } };
 		},
 	};
 	const noWeightsDriver = createLocalImageDriver(readinessOptions);
@@ -192,7 +214,9 @@ const {
 	assert.strictEqual(noWeightsDriver.checkStatus().success, false, 'Runtime must not be ready when model weights are absent');
 	assert.strictEqual(noWeightsDriver.capabilities().runtime_ready, true, 'Runtime readiness should remain visible separately');
 	assert.strictEqual(noWeightsDriver.models()[0].ready, false, 'Model must be unavailable until its weights are installed');
-	assert.strictEqual((await noWeightsDriver.images({ prompt: 'test' })).code, 'local_image_not_ready');
+	assert.strictEqual(noWeightsDriver.models()[1].ready, false, 'Quantized model must be unavailable until its weights are installed');
+	assert.strictEqual((await noWeightsDriver.images({ prompt: 'test' })).code, 'local_image_model_not_ready');
+	assert.strictEqual((await noWeightsDriver.images({ model: quantizedModelId, prompt: 'test' })).code, 'local_image_model_not_ready');
 	await noWeightsDriver.refresh();
 	assert.strictEqual(readinessProbeCalls, 1, 'Ordinary refresh should use the cached runtime probe');
 	await noWeightsDriver.refresh({ forceProbe: true });
@@ -200,6 +224,7 @@ const {
 
 	// --- standard input_reference_data_url reaches the local runner job ---
 	readyRuntimeSettings.model_records[modelId] = { installed: true, repo_id: MODELS[modelId].repo_id };
+	readyRuntimeSettings.model_records[quantizedModelId] = { installed: true, repo_id: MODELS[quantizedModelId].repo_id };
 	readyRuntimeSettings.allow_model_downloads = true;
 	let capturedJob = null;
 	const inputReference = 'data:image/png;base64,aGVsbG8=';
@@ -240,6 +265,7 @@ const {
 		});
 		assert.strictEqual(editResult.success, true, 'Installed model should accept a reference edit request');
 		assert.strictEqual(capturedJob.local_files_only, true, 'Image jobs must not download missing model files, even when Setup downloads are enabled');
+		assert.strictEqual(capturedJob.precision, 'fp8', 'Qwen-Image-2.1 jobs must respect the saved global precision');
 		assert.strictEqual(capturedJob.reference_images.length, 5, 'All inline, frame, and filesystem references must reach the runner');
 		assert.ok(capturedJob.reference_images.every((referencePath) => path.dirname(referencePath) === path.dirname(capturedJob.output_path)), 'Every runner reference must be a job-local file');
 		assert.deepStrictEqual(capturedReferenceBytes, [
@@ -256,6 +282,32 @@ const {
 		const oversizedResult = await readyDriver.images({ prompt: 'oversized reference', input_reference_data_url: `data:image/png;base64,${oversizedB64}` });
 		assert.strictEqual(oversizedResult.code, 'local_image_reference_invalid', 'Inline image references must enforce the 20 MB cap');
 		assert.strictEqual(imageSpawnCount, 1, 'Oversized references must be rejected before starting the runner');
+		const textToImage = await readyDriver.images({ model: quantizedModelId, prompt: 'quantized model text-to-image' });
+		assert.strictEqual(textToImage.success, true);
+		assert.strictEqual(capturedJob.model_id, quantizedModelId);
+		assert.strictEqual(capturedJob.model_path, MODELS[quantizedModelId].repo_id);
+		assert.strictEqual(capturedJob.precision, 'nf4-bf16');
+		assert.strictEqual(capturedJob.steps, 20, 'Quantized model should default to its recommended 20 steps');
+		assert.strictEqual(capturedJob.true_cfg_scale, 4, 'Quantized model should default to the model-card CFG value');
+		assert.deepStrictEqual([capturedJob.width, capturedJob.height], [1328, 1328], 'Quantized model should default to its model-card native resolution');
+		assert.deepStrictEqual(capturedJob.reference_images, [], 'Text-to-image jobs should not pass references');
+		const explicitNativeResolution = await readyDriver.images({
+			model: quantizedModelId,
+			prompt: 'quantized model explicit resolution',
+			resolution: '1664x928',
+			aspect_ratio: '1:1',
+		});
+		assert.strictEqual(explicitNativeResolution.success, true);
+		assert.deepStrictEqual([capturedJob.width, capturedJob.height], [1664, 928], 'Explicit native resolution must take precedence over the default aspect ratio');
+		const imageToImage = await readyDriver.images({ model: quantizedModelId, prompt: 'quantized model image-to-image', input_reference_data_url: inputReference });
+		assert.strictEqual(imageToImage.success, true);
+		assert.strictEqual(capturedJob.model_id, quantizedModelId);
+		assert.strictEqual(capturedJob.reference_images.length, 1, 'Quantized Img2Img must forward one reference image');
+		const tooManyReferences = await readyDriver.images({ model: quantizedModelId, prompt: 'too many refs', reference_images: [inputReference, secondInputReference] });
+		assert.strictEqual(tooManyReferences.code, 'local_image_reference_limit');
+		assert.strictEqual(imageSpawnCount, 4, 'Reference-limit errors must not start the runner');
+		const unknownModel = await readyDriver.images({ model: 'model-relay:local-image:unknown', prompt: 'unknown model' });
+		assert.strictEqual(unknownModel.code, 'local_image_model_unknown');
 		assert.strictEqual(readinessProbeCalls, 3, 'Image jobs must not spawn a synchronous Python readiness probe');
 	} finally {
 		fs.rmSync(sourceImagePath, { force: true });
@@ -269,6 +321,8 @@ const {
 	});
 	assert.strictEqual(setupResult.success, false);
 	assert.strictEqual(setupResult.code, 'local_image_python_missing');
+	const unknownSetupModel = await setup({ model: 'model-relay:local-image:unknown', pythonCommand: '', saveSettings: () => ({}) });
+	assert.strictEqual(unknownSetupModel.code, 'local_image_model_unknown', 'Unknown models must fail before environment setup');
 
 	// --- setup - nonexistent absolute python path ---
 	const setupMissingPath = await setup({
@@ -295,6 +349,7 @@ const {
 	// --- backend-registry integration: local-image model routing ---
 	const { providerFromPayload } = require('../src/backend-registry');
 	assert.strictEqual(providerFromPayload({ model: 'model-relay:local-image:qwen-image-2.1' }), 'local-image');
+	assert.strictEqual(providerFromPayload({ model: quantizedModelId }), 'local-image');
 
 	// --- backend-registry integration: createLocalImageDriver exported ---
 	const { createLocalImageDriver: registryExport } = require('../src/backend-registry');
@@ -306,7 +361,11 @@ const {
 	const runnerContent = fs.readFileSync(runnerScriptPath, 'utf8');
 	assert.ok(runnerContent.includes('run_probe'), 'Runner must define run_probe function');
 	assert.ok(runnerContent.includes('run_job'), 'Runner must define run_job function');
-	assert.ok(runnerContent.includes('from diffusers import QwenImage21Pipeline'), 'Runtime probe must import the actual generation pipeline');
+	assert.ok(runnerContent.includes('from diffusers import QwenImage21Pipeline'), 'Runtime probe must import the legacy generation pipeline');
+	assert.ok(runnerContent.includes('from diffusers import QwenImagePipeline'), 'Runtime probe must import the quantized text-to-image pipeline');
+	assert.ok(runnerContent.includes('from diffusers import QwenImageImg2ImgPipeline'), 'Runtime probe must import the quantized image-to-image pipeline');
+	assert.ok(runnerContent.includes('MODEL_PIPELINES'), 'Runner must route model ids through explicit pipeline profiles');
+	assert.ok(runnerContent.includes('model_repo_mismatch'), 'Runner must reject mismatched model ids and repository paths');
 	assert.ok(runnerContent.includes('enable_model_cpu_offload'), 'Runner must use enable_model_cpu_offload');
 	const offloadBlock = runnerContent.split('if cpu_offload:', 2)[1].split('else:', 1)[0];
 	assert.ok(offloadBlock.includes('cpu_offload_failed'), 'CPU offload failure must report a clear runtime error');
@@ -318,7 +377,7 @@ const {
 	assert.ok(!runnerContent.includes('.to(torch.float8_e4m3fn)'), 'Runner must not cast transformer weights to float8_e4m3fn');
 	assert.ok(runnerContent.includes('--probe'), 'Runner must support --probe argument');
 	assert.ok(runnerContent.includes('--job-json'), 'Runner must support --job-json argument');
-	assert.ok(!/\"guidance_scale\":\s*guidance_scale/.test(runnerContent), 'Runner must not pass guidance_scale into QwenImage21Pipeline.__call__');
+	assert.ok(!/\"guidance_scale\":\s*guidance_scale/.test(runnerContent), 'Runner must not pass guidance_scale into Qwen pipelines');
 
 	// --- local-image.js structural checks ---
 	const driverSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'local-image.js'), 'utf8');
@@ -329,7 +388,9 @@ const {
 	assert.ok(driverSource.includes('fp8'), 'Driver must reference fp8 precision');
 	assert.ok(driverSource.includes('killProcessTree'), 'Driver must use killProcessTree for child process cleanup');
 	assert.ok(driverSource.includes("'local_image_not_ready'"), 'Driver must return local_image_not_ready when not configured');
-	assert.ok(driverSource.includes('chat_template.jinja'), 'Model install must verify processor/chat_template.jinja');
+	assert.ok(driverSource.includes('required_snapshot_paths'), 'Model install must validate profile-specific model paths');
+	assert.ok(driverSource.includes('chat_template.jinja'), 'Qwen-Image-2.1 install must keep its processor template check');
+	assert.ok(driverSource.includes('quantization_info.json'), 'Quantized model install must require its quantization metadata');
 	assert.ok(driverSource.includes('snapshot_download'), 'Model install must use snapshot_download');
 	assert.ok(!driverSource.includes('allow_patterns'), 'Model install must download the full snapshot so nested templates are not skipped');
 

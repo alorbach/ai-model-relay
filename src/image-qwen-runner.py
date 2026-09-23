@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CUDA-only runner for Qwen-Image-2.1 image generation and editing.
+"""CUDA-only runner for supported local Qwen-Image models.
 
 This runner executes local text-to-image and image-editing jobs using
 Diffusers with sequential CPU offloading and VAE tiling to operate safely
@@ -44,6 +44,8 @@ def run_probe():
         "diffusers_ready": False,
         "transformers_ready": False,
         "qwen_pipeline_ready": False,
+        "qwen_image_pipeline_ready": False,
+        "qwen_image_img2img_pipeline_ready": False,
     }
 
     try:
@@ -65,6 +67,18 @@ def run_probe():
         probe["qwen_pipeline_ready"] = QwenImage21Pipeline is not None
     except Exception as exc:
         probe["qwen_pipeline_error"] = str(exc)
+
+    try:
+        from diffusers import QwenImagePipeline
+        probe["qwen_image_pipeline_ready"] = QwenImagePipeline is not None
+    except Exception as exc:
+        probe["qwen_image_pipeline_error"] = str(exc)
+
+    try:
+        from diffusers import QwenImageImg2ImgPipeline
+        probe["qwen_image_img2img_pipeline_ready"] = QwenImageImg2ImgPipeline is not None
+    except Exception as exc:
+        probe["qwen_image_img2img_pipeline_error"] = str(exc)
 
     print(json.dumps(probe))
     sys.exit(0)
@@ -89,6 +103,26 @@ def decode_image(value):
         return Image.open(io.BytesIO(raw_bytes))
     except Exception:
         return None
+
+
+MODEL_PIPELINES = {
+    "model-relay:local-image:qwen-image-2.1": {
+        "repo_id": "Qwen/Qwen-Image-2.1",
+        "text_pipeline": "QwenImage21Pipeline",
+        "img2img_pipeline": "QwenImage21Pipeline",
+        "default_precision": "bf16",
+        "precisions": ("bf16", "fp8"),
+        "max_reference_images": 10,
+    },
+    "model-relay:local-image:qwen-image-2512-4bit": {
+        "repo_id": "ovedrive/Qwen-Image-2512-4bit",
+        "text_pipeline": "QwenImagePipeline",
+        "img2img_pipeline": "QwenImageImg2ImgPipeline",
+        "default_precision": "nf4-bf16",
+        "precisions": ("nf4-bf16",),
+        "max_reference_images": 1,
+    },
+}
 
 
 ASPECT_RATIOS_2K = {
@@ -135,8 +169,16 @@ def run_job(job):
     if not output_path:
         fail("output_path_required", "An output_path is required.")
 
-    model_id = str(job.get("model_path") or job.get("model_id") or "Qwen/Qwen-Image-2.1").strip()
-    precision = str(job.get("precision") or "fp8").strip().lower()
+    model_id = str(job.get("model_id") or "model-relay:local-image:qwen-image-2.1").strip()
+    model_profile = MODEL_PIPELINES.get(model_id)
+    if model_profile is None:
+        fail("model_unknown", f"Unsupported local image model id: {model_id}")
+    model_path = str(job.get("model_path") or model_profile["repo_id"]).strip()
+    if model_path != model_profile["repo_id"]:
+        fail("model_repo_mismatch", f"The model path does not match the selected model id '{model_id}'.")
+    precision = str(job.get("precision") or model_profile["default_precision"]).strip().lower()
+    if precision not in model_profile["precisions"]:
+        fail("precision_unsupported", f"Precision '{precision}' is not supported by {model_id}.")
     cpu_offload = bool(job.get("cpu_offload", True))
     vae_tiling = bool(job.get("vae_tiling", True))
     steps = int(job.get("num_inference_steps") or job.get("steps") or 40)
@@ -159,15 +201,19 @@ def run_job(job):
     raw_refs = job.get("reference_images") or job.get("images") or []
     if isinstance(raw_refs, (str, bytes)):
         raw_refs = [raw_refs]
-    for raw in raw_refs[:10]:
+    if len(raw_refs) > model_profile["max_reference_images"]:
+        fail("reference_image_limit", f"This model accepts at most {model_profile['max_reference_images']} reference image(s).")
+    for raw in raw_refs[:model_profile["max_reference_images"]]:
         img = decode_image(raw)
         if img is not None:
             reference_images.append(img)
 
     try:
-        from diffusers import QwenImage21Pipeline
-    except ImportError as err:
-        fail("diffusers_pipeline_missing", f"Diffusers QwenImage21Pipeline could not be imported: {err}")
+        import diffusers
+        pipeline_name = model_profile["img2img_pipeline"] if reference_images else model_profile["text_pipeline"]
+        pipeline_class = getattr(diffusers, pipeline_name)
+    except (ImportError, AttributeError) as err:
+        fail("diffusers_pipeline_missing", f"Diffusers pipeline could not be imported: {err}")
 
     torch_dtype = torch.bfloat16
     load_kwargs = {
@@ -175,20 +221,20 @@ def run_job(job):
     }
     # Prefer dtype= (diffusers >=1.0); fall back to torch_dtype for older installs.
     try:
-        pipe = QwenImage21Pipeline.from_pretrained(model_id, dtype=torch_dtype, **load_kwargs)
+        pipe = pipeline_class.from_pretrained(model_path, dtype=torch_dtype, **load_kwargs)
     except TypeError:
         try:
-            pipe = QwenImage21Pipeline.from_pretrained(model_id, torch_dtype=torch_dtype, **load_kwargs)
+            pipe = pipeline_class.from_pretrained(model_path, torch_dtype=torch_dtype, **load_kwargs)
         except Exception as exc:
-            fail("pipeline_load_failed", f"Failed to load QwenImage21Pipeline from '{model_id}': {exc}")
+            fail("pipeline_load_failed", f"Failed to load {pipeline_name} from '{model_path}': {exc}")
     except Exception as exc:
-        fail("pipeline_load_failed", f"Failed to load QwenImage21Pipeline from '{model_id}': {exc}")
+        fail("pipeline_load_failed", f"Failed to load {pipeline_name} from '{model_path}': {exc}")
 
     # Naive weight casting to float8_e4m3fn breaks matmul (BF16 activations vs FP8 weights).
-    # Until a proper FP8 quant path (e.g. torchao) is wired, always run BF16 + CPU offload.
+    # Until a proper FP8 quant path is wired, legacy FP8 requests run BF16 + CPU offload.
     if precision == "fp8":
         sys.stderr.write(
-            "FP8 requested, but raw float8 casting is unsupported for QwenImage21Pipeline; "
+            "FP8 requested, but raw float8 casting is unsupported for Qwen-Image; "
             "using BF16 with CPU offload instead.\n"
         )
         precision = "bf16"
@@ -212,7 +258,7 @@ def run_job(job):
             elif hasattr(pipe, "vae") and pipe.vae is not None and hasattr(pipe.vae, "enable_tiling"):
                 pipe.vae.enable_tiling()
             else:
-                sys.stderr.write("VAE tiling unavailable on this QwenImage21Pipeline build.\n")
+                sys.stderr.write(f"VAE tiling unavailable on this {pipeline_name} build.\n")
         except Exception as tiling_err:
             sys.stderr.write(f"VAE tiling warning: {tiling_err}\n")
 

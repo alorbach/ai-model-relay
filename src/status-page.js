@@ -3395,7 +3395,7 @@ function statusPageHtml() {
 			fields.imageModelStates.textContent = 'Models: ' + (Array.isArray(models) && models.length ? models.map((model) => String(model.label || model.id || 'model') + ' — ' + String(model.state || 'not checked')).join(' · ') : 'not checked');
 			fields.imageInstallActions.innerHTML = (Array.isArray(models) ? models : []).map((model) => (
 				'<div class="field"><strong>' + escapeHtml(String(model.label || model.id)) + '</strong><br>' +
-				'<small class="muted">Diffusers · CPU offload · VAE tiling · up to 10 reference images</small><br>' +
+				'<small class="muted">Diffusers · ' + escapeHtml(String(model.precision || 'BF16')) + ' · ' + (Number(model.reference_images_max) === 1 ? '1 reference image' : 'up to ' + escapeHtml(String(model.reference_images_max || 10)) + ' reference images') + (model.vram_note ? ' · ' + escapeHtml(String(model.vram_note)) : '') + '</small><br>' +
 				'<button type="button" data-image-install="' + escapeHtml(String(model.id)) + '">' +
 				(model.state === 'installed' ? 'Repair / Reinstall Model' : 'Install Model') +
 				'</button></div>'

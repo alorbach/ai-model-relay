@@ -36,10 +36,35 @@ const MODELS = {
 		min_vram_mb: 8192,
 		precision: ['bf16', 'fp8'],
 		default_precision: 'bf16',
+		precision_from_settings: true,
 		preferred_steps: 40,
 		reference_images_max: 10,
+		probe_requirements: ['qwen_pipeline_ready'],
 		enabled: true,
 		license: { spdx: 'Qwen-Research', commercial_use: false },
+	},
+	'model-relay:local-image:qwen-image-2512-4bit': {
+		id: 'model-relay:local-image:qwen-image-2512-4bit',
+		label: 'Qwen-Image-2512 4-bit NF4 (BF16 compute)',
+		provider: 'qwen-image',
+		repo_id: 'ovedrive/Qwen-Image-2512-4bit',
+		min_vram_mb: 16384,
+		recommended_vram_mb: 20480,
+		vram_note: '16 GB may work; 20 GB recommended.',
+		precision: ['nf4-bf16'],
+		default_precision: 'nf4-bf16',
+		weights_quantization: 'nf4',
+		compute_dtype: 'bf16',
+		preferred_steps: 20,
+		preferred_guidance_scale: 4.0,
+		default_resolution: '1328x1328',
+		reference_images_max: 1,
+		pipeline: 'QwenImagePipeline',
+		img2img_pipeline: 'QwenImageImg2ImgPipeline',
+		probe_requirements: ['qwen_image_pipeline_ready', 'qwen_image_img2img_pipeline_ready'],
+		required_snapshot_paths: ['model_index.json', 'quantization_info.json', 'transformer'],
+		enabled: true,
+		license: { spdx: 'CC-BY-NC-SA-4.0', commercial_use: false },
 	},
 };
 
@@ -91,6 +116,21 @@ const QWEN_IMAGE_RESOLUTION_CHOICES = [
 	{ value: '1536x2752', label: '2K · 9:16 · 1536×2752' },
 ];
 
+const QWEN_IMAGE_2512_SIZE_TABLE = {
+	'1:1': [1328, 1328],
+	'16:9': [1664, 928],
+	'9:16': [928, 1664],
+	'4:3': [1472, 1140],
+	'3:4': [1140, 1472],
+	'3:2': [1584, 1056],
+	'2:3': [1056, 1584],
+};
+
+const QWEN_IMAGE_2512_RESOLUTION_CHOICES = Object.entries(QWEN_IMAGE_2512_SIZE_TABLE).map(([aspectRatio, [width, height]]) => ({
+	value: `${width}x${height}`,
+	label: `Native · ${aspectRatio} · ${width}×${height}`,
+}));
+
 const QWEN_IMAGE_TEST_OPTIONS = [
 	{
 		key: 'aspect_ratio',
@@ -118,6 +158,18 @@ const QWEN_IMAGE_TEST_OPTIONS = [
 const QWEN_IMAGE_CAPABILITIES = imageCapabilityContract(QWEN_IMAGE_TEST_OPTIONS, {
 	resolutionKey: 'resolution',
 	referenceImagesMax: 10,
+	candidateCountMax: 1,
+	outputFormats: ['image/png'],
+});
+
+const QWEN_IMAGE_2512_TEST_OPTIONS = QWEN_IMAGE_TEST_OPTIONS.map((option) => option.key === 'quality'
+	? { ...option, choices: [{ value: 'nf4-bf16', label: 'NF4 weights / BF16 compute' }] }
+	: option.key === 'resolution' ? { ...option, choices: QWEN_IMAGE_2512_RESOLUTION_CHOICES }
+	: option);
+
+const QWEN_IMAGE_2512_CAPABILITIES = imageCapabilityContract(QWEN_IMAGE_2512_TEST_OPTIONS, {
+	resolutionKey: 'resolution',
+	referenceImagesMax: 1,
 	candidateCountMax: 1,
 	outputFormats: ['image/png'],
 });
@@ -161,7 +213,12 @@ function decodeReferenceImage(item) {
 	return { bytes, extension };
 }
 
-function resolveOutputSize(payload = {}, current = {}) {
+function resolveOutputSize(payload = {}, current = {}, modelId = 'model-relay:local-image:qwen-image-2.1') {
+	const is2512 = modelId === 'model-relay:local-image:qwen-image-2512-4bit';
+	const modelSizeFromAspect = (aspectRatio, scale = 1) => {
+		const pair = QWEN_IMAGE_2512_SIZE_TABLE[String(aspectRatio || '1:1').trim()] || QWEN_IMAGE_2512_SIZE_TABLE['1:1'];
+		return { width: pair[0] * scale, height: pair[1] * scale };
+	};
 	const explicitWidth = Number(payload.width);
 	const explicitHeight = Number(payload.height);
 	if (Number.isFinite(explicitWidth) && Number.isFinite(explicitHeight) && explicitWidth > 0 && explicitHeight > 0) {
@@ -172,15 +229,21 @@ function resolveOutputSize(payload = {}, current = {}) {
 	const parsed = parseWxH(sizeRaw);
 	const aspectRatio = String(payload.aspect_ratio || '1:1').trim() || '1:1';
 	if (parsed) {
+		// The 2512 profile exposes its native sizes as explicit resolution choices.
+		// Preserve a chosen size even when the request also carries the UI's default ratio.
+		if (is2512 && (payload.resolution || payload.size)) return parsed;
 		if (!payload.aspect_ratio) return parsed;
+		if (is2512) return modelSizeFromAspect(aspectRatio, Math.max(parsed.width, parsed.height) >= 1792 ? 2 : 1);
 		const tier = Math.max(parsed.width, parsed.height) >= 1792 ? '2k' : '1k';
 		return sizeFromAspect(aspectRatio, tier);
 	}
 
 	if (sizeRaw === '1k' || sizeRaw === '2k' || sizeRaw === 'high' || sizeRaw === 'native') {
+		if (is2512) return modelSizeFromAspect(aspectRatio, sizeRaw === '2k' ? 2 : 1);
 		return sizeFromAspect(aspectRatio, sizeRaw === '1k' ? '1k' : '2k');
 	}
 
+	if (is2512) return modelSizeFromAspect(aspectRatio);
 	return sizeFromAspect(aspectRatio, '1k');
 }
 
@@ -254,7 +317,12 @@ function publicSettings() {
 			id,
 			label: MODELS[id].label,
 			state: current.model_records && current.model_records[id] && current.model_records[id].installed ? 'installed' : 'not_installed',
-			precision: current.precision,
+			precision: MODELS[id].default_precision,
+			reference_images_max: MODELS[id].reference_images_max,
+			min_vram_mb: MODELS[id].min_vram_mb,
+			recommended_vram_mb: MODELS[id].recommended_vram_mb,
+			vram_note: MODELS[id].vram_note,
+			license: MODELS[id].license,
 		})),
 	};
 }
@@ -279,8 +347,13 @@ function validateRunnerProbe(probe = {}) {
 	if (!probe.cuda_available) return { ok: false, state: 'cuda_unavailable', probe };
 	if (!probe.diffusers_ready) return { ok: false, state: 'diffusers_missing', probe };
 	if (!probe.transformers_ready) return { ok: false, state: 'transformers_missing', probe };
-	if (!probe.qwen_pipeline_ready) return { ok: false, state: 'diffusers_pipeline_missing', probe };
+	if (!probe.qwen_pipeline_ready && !probe.qwen_image_pipeline_ready) return { ok: false, state: 'diffusers_pipeline_missing', probe };
 	return { ok: true, state: 'ready', probe };
+}
+
+function modelPipelineReady(model, probe = {}) {
+	return (model && Array.isArray(model.probe_requirements) ? model.probe_requirements : [])
+		.every((key) => probe[key] === true);
 }
 
 function probeRunnerStatus(pythonPath, runnerFile) {
@@ -362,6 +435,11 @@ async function setup(options = {}) {
 	const current = options.settings
 		? { ...defaultSettings(), ...options.settings }
 		: settings();
+	const modelId = String(options.model || 'model-relay:local-image:qwen-image-2.1').trim();
+	const modelProfile = MODELS[modelId];
+	if (!modelProfile) {
+		return { success: false, category: 'configuration', code: 'local_image_model_unknown', message: `Unknown local image model: ${modelId}.` };
+	}
 	let basePython = Object.prototype.hasOwnProperty.call(options, 'pythonCommand')
 		? String(options.pythonCommand || '').trim()
 		: discoverBasePython(current);
@@ -412,20 +490,19 @@ async function setup(options = {}) {
 		return { success: false, category: 'configuration', code: 'local_image_packages_failed', message: 'Could not install Diffusers and required image generation packages.', details: { error: pkgsResult.stderr || pkgsResult.stdout, log: collectedLog() } };
 	}
 
-	const modelId = String(options.model || 'model-relay:local-image:qwen-image-2.1').trim();
-	const modelProfile = MODELS[modelId] || MODELS['model-relay:local-image:qwen-image-2.1'];
 	const downloadModel = options.download_model === true || current.allow_model_downloads === true;
 	const updatedRecords = { ...(current.model_records || {}) };
 
 	if (downloadModel) {
-		emit('stdout', `Prefetching full model snapshot for ${modelProfile.repo_id} from Hugging Face (includes processor templates)...\n`);
+		emit('stdout', `Prefetching full model snapshot for ${modelProfile.repo_id} from Hugging Face...\n`);
 		const downloadScript = [
 			'import os',
 			'from huggingface_hub import snapshot_download',
 			`path = snapshot_download(repo_id="${modelProfile.repo_id}")`,
-			'required = os.path.join(path, "processor", "chat_template.jinja")',
-			'if not os.path.isfile(required):',
-			'\traise SystemExit("Incomplete snapshot: missing processor/chat_template.jinja at " + required)',
+			`required_paths = ${JSON.stringify(modelProfile.required_snapshot_paths || ['processor/chat_template.jinja'])}`,
+			'missing = [item for item in required_paths if not os.path.exists(os.path.join(path, item))]',
+			'if missing:',
+			'\traise SystemExit("Incomplete snapshot: missing required model paths: " + ", ".join(missing))',
 			'print("MODEL_SNAPSHOT_OK=" + path)',
 		].join('\n');
 		const dlResult = await run(venvPython, ['-c', downloadScript], { timeout: SETUP_TIMEOUT_MS, onOutput: emit });
@@ -473,7 +550,7 @@ function createLocalImageDriver(options = {}) {
 	let probeCache = null;
 	let snapshot = {
 		id: 'local-image',
-		label: 'Local Image (Qwen-Image-2.1)',
+		label: 'Local Image (Qwen-Image)',
 		kind: 'local-runtime',
 		ready: false,
 		state: 'checking',
@@ -491,13 +568,18 @@ function createLocalImageDriver(options = {}) {
 		const probe = probeCache.result;
 		const runtimeReady = !!probe.ok;
 		const models = Object.keys(MODELS).map((id) => {
+			const profile = MODELS[id];
 			const installed = !!(current.model_records && current.model_records[id] && current.model_records[id].installed === true);
+			const pipelineReady = runtimeReady && modelPipelineReady(profile, probe.probe || {});
 			return {
 				id,
-				label: MODELS[id].label,
-				ready: runtimeReady && installed,
-				state: installed ? 'installed' : 'not_installed',
-				precision: current.precision || 'bf16',
+				label: profile.label,
+				ready: pipelineReady && installed,
+				state: !pipelineReady ? 'runtime_unavailable' : installed ? 'installed' : 'not_installed',
+				precision: profile.default_precision,
+				min_vram_mb: profile.min_vram_mb,
+				recommended_vram_mb: profile.recommended_vram_mb,
+				vram_note: profile.vram_note,
 			};
 		});
 		const ready = runtimeReady && models.some((model) => model.ready);
@@ -506,12 +588,12 @@ function createLocalImageDriver(options = {}) {
 				? 'CUDA is not available in the local image environment.'
 				: 'Use Setup on the Status Page to configure the local image runtime.')
 			: !ready
-				? 'The local image runtime is ready, but Qwen-Image-2.1 weights are not installed. Run Setup and enable model downloads.'
-				: 'CUDA PyTorch, Diffusers, and Qwen-Image-2.1 weights are ready.';
+				? 'The local image runtime is ready, but no supported model weights are installed. Run Setup and install a model.'
+				: 'CUDA PyTorch, Diffusers, and at least one local image model are ready.';
 
 		snapshot = {
 			id: 'local-image',
-			label: 'Local Image (Qwen-Image-2.1)',
+			label: 'Local Image (Qwen-Image)',
 			kind: 'local-runtime',
 			ready,
 			runtime_ready: runtimeReady,
@@ -528,7 +610,7 @@ function createLocalImageDriver(options = {}) {
 
 	return {
 		id: 'local-image',
-		label: 'Local Image (Qwen-Image-2.1)',
+		label: 'Local Image (Qwen-Image)',
 		kind: 'local-runtime',
 		job_types: ['images'],
 		checkStatus: () => ({ success: snapshot.ready, message: snapshot.diagnostic, details: snapshot }),
@@ -546,21 +628,26 @@ function createLocalImageDriver(options = {}) {
 		}),
 		models: () => Object.keys(MODELS).map((id) => {
 			const profile = MODELS[id];
+			const modelState = snapshot.models.find((model) => model.id === id);
 			return {
 				id,
 				type: 'image',
 				backend: 'local-image',
-				ready: snapshot.ready,
+				ready: !!(modelState && modelState.ready),
 				job_types: ['images'],
 				label: profile.label,
-				test_options: QWEN_IMAGE_TEST_OPTIONS,
-				image_capabilities: QWEN_IMAGE_CAPABILITIES,
+				test_options: profile.reference_images_max > 1 ? QWEN_IMAGE_TEST_OPTIONS : QWEN_IMAGE_2512_TEST_OPTIONS,
+				image_capabilities: profile.reference_images_max > 1 ? QWEN_IMAGE_CAPABILITIES : QWEN_IMAGE_2512_CAPABILITIES,
+				license: profile.license,
+				min_vram_mb: profile.min_vram_mb,
+				recommended_vram_mb: profile.recommended_vram_mb,
+				vram_note: profile.vram_note,
 			};
 		}),
 		refresh: async (refreshOptions = {}) => inspect(refreshOptions.forceProbe === true),
 		async images(payload = {}, session = {}) {
 			const state = inspect();
-			if (!state.ready) {
+			if (!state.runtime_ready) {
 				return {
 					success: false,
 					category: 'configuration',
@@ -569,6 +656,15 @@ function createLocalImageDriver(options = {}) {
 					details: state,
 				};
 			}
+			const modelId = String(payload.model || 'model-relay:local-image:qwen-image-2.1').trim();
+			const modelProfile = MODELS[modelId];
+			if (!modelProfile) {
+				return { success: false, category: 'configuration', code: 'local_image_model_unknown', message: `Unknown local image model: ${modelId}.` };
+			}
+			const modelState = state.models.find((model) => model.id === modelId);
+			if (!modelState || !modelState.ready) {
+				return { success: false, category: 'configuration', code: 'local_image_model_not_ready', message: `${modelProfile.label} is not installed or its Diffusers pipeline is unavailable. Install this model from the Status Page first.`, details: { model: modelId, state: modelState || null } };
+			}
 
 			const prompt = String(payload.prompt || '').trim();
 			if (!prompt) {
@@ -576,15 +672,24 @@ function createLocalImageDriver(options = {}) {
 			}
 
 			const current = readSettings();
+			const defaultPrecision = modelProfile.precision_from_settings ? current.precision : modelProfile.default_precision;
+			const precision = String(payload.quality || defaultPrecision || modelProfile.default_precision || 'bf16').toLowerCase();
+			if (!modelProfile.precision.includes(precision)) {
+				return { success: false, category: 'validation', code: 'local_image_precision_unsupported', message: `Precision ${precision} is not supported by ${modelProfile.label}.`, details: { model: modelId, supported: modelProfile.precision } };
+			}
 			const workdir = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-model-relay-image-'));
 			const outputPath = path.join(workdir, 'generated.png');
 			const jobPath = path.join(workdir, 'job.json');
 
-			const precision = String(payload.quality || current.precision || 'bf16').toLowerCase();
-			const outputSize = resolveOutputSize(payload, current);
+			const resolutionSettings = modelProfile.default_resolution && current.default_resolution === '1024x1024'
+				? { ...current, default_resolution: modelProfile.default_resolution }
+				: current;
+			const outputSize = resolveOutputSize(payload, resolutionSettings, modelId);
 			const aspectRatio = String(payload.aspect_ratio || '').trim();
-			const steps = Number(payload.steps || payload.num_inference_steps || current.default_steps || 40);
-			const guidanceScale = Number(payload.true_cfg_scale ?? payload.guidance_scale ?? current.guidance_scale ?? 1.0);
+			const configuredSteps = Number(current.default_steps || 40);
+			const steps = Number(payload.steps || payload.num_inference_steps || (configuredSteps === 40 ? modelProfile.preferred_steps || configuredSteps : configuredSteps));
+			const configuredGuidance = Number(current.guidance_scale ?? 1.0);
+			const guidanceScale = Number(payload.true_cfg_scale ?? payload.guidance_scale ?? (configuredGuidance === 1.0 ? modelProfile.preferred_guidance_scale ?? configuredGuidance : configuredGuidance));
 			const seed = payload.seed !== undefined ? Number(payload.seed) : undefined;
 
 			// Handle reference images
@@ -613,14 +718,15 @@ function createLocalImageDriver(options = {}) {
 				cpu_offload: current.cpu_offload !== false,
 				vae_tiling: current.vae_tiling !== false,
 				reference_images: referenceImages,
-				model_path: MODELS['model-relay:local-image:qwen-image-2.1'].repo_id,
+				model_id: modelId,
+				model_path: modelProfile.repo_id,
 				local_files_only: true,
 			};
 
 			try {
 				const referencePaths = Array.isArray(payload.referenced_image_paths) ? payload.referenced_image_paths.filter(Boolean) : [];
-				if (rawImages.length + referencePaths.length > 10) {
-					return { success: false, category: 'validation', code: 'local_image_reference_limit', message: 'Local image generation accepts at most 10 reference images.' };
+				if (rawImages.length + referencePaths.length > modelProfile.reference_images_max) {
+					return { success: false, category: 'validation', code: 'local_image_reference_limit', message: `${modelProfile.label} accepts at most ${modelProfile.reference_images_max} reference image${modelProfile.reference_images_max === 1 ? '' : 's'}.` };
 				}
 				for (const item of rawImages) {
 					const image = decodeReferenceImage(item);
@@ -756,7 +862,7 @@ function createLocalImageDriver(options = {}) {
 						],
 						provider_details: {
 							provider: 'local-image',
-							model: 'model-relay:local-image:qwen-image-2.1',
+							model: modelId,
 							width: parsed.width,
 							height: parsed.height,
 							format: 'image/png',
@@ -781,8 +887,12 @@ module.exports = {
 	QWEN_IMAGE_ASPECT_CHOICES,
 	QWEN_IMAGE_RESOLUTION_CHOICES,
 	QWEN_IMAGE_SIZE_TABLE,
+	QWEN_IMAGE_2512_SIZE_TABLE,
+	QWEN_IMAGE_2512_RESOLUTION_CHOICES,
 	QWEN_IMAGE_TEST_OPTIONS,
 	QWEN_IMAGE_CAPABILITIES,
+	QWEN_IMAGE_2512_TEST_OPTIONS,
+	QWEN_IMAGE_2512_CAPABILITIES,
 	createLocalImageDriver,
 	parseWxH,
 	probeRunnerStatus,
