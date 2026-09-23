@@ -48,6 +48,7 @@ const {
 	assert.strictEqual(quantizedModel.repo_id, 'ovedrive/Qwen-Image-2512-4bit');
 	assert.strictEqual(quantizedModel.weights_quantization, 'nf4');
 	assert.strictEqual(quantizedModel.default_precision, 'nf4-bf16');
+	assert.ok(quantizedModel.required_packages.includes('bitsandbytes'), 'NF4 model setup must install bitsandbytes');
 	assert.strictEqual(quantizedModel.preferred_steps, 20);
 	assert.strictEqual(quantizedModel.reference_images_max, 1);
 	assert.strictEqual(quantizedModel.license.spdx, 'CC-BY-NC-SA-4.0');
@@ -92,7 +93,7 @@ const {
 	assert.strictEqual(QWEN_IMAGE_CAPABILITIES.candidate_count_max, 1);
 
 	// --- runtime probe requires the imports used by actual generation ---
-	const readyProbe = { cuda_available: true, diffusers_ready: true, transformers_ready: true, qwen_pipeline_ready: true, qwen_image_pipeline_ready: true, qwen_image_img2img_pipeline_ready: true };
+	const readyProbe = { cuda_available: true, diffusers_ready: true, transformers_ready: true, qwen_pipeline_ready: true, qwen_image_pipeline_ready: true, qwen_image_img2img_pipeline_ready: true, bitsandbytes_ready: true };
 	assert.strictEqual(validateRunnerProbe(readyProbe).ok, true);
 	assert.strictEqual(validateRunnerProbe({ ...readyProbe, transformers_ready: false }).state, 'transformers_missing');
 	assert.strictEqual(validateRunnerProbe({ ...readyProbe, qwen_pipeline_ready: false }).ok, true, 'Runtime may be ready through the newer QwenImage pipeline');
@@ -206,7 +207,7 @@ const {
 		getSettings: () => readyRuntimeSettings,
 		probeRuntime: () => {
 			readinessProbeCalls += 1;
-			return { ok: true, state: 'ready', probe: { cuda_available: true, diffusers_ready: true, qwen_pipeline_ready: true, qwen_image_pipeline_ready: true, qwen_image_img2img_pipeline_ready: true } };
+			return { ok: true, state: 'ready', probe: { cuda_available: true, diffusers_ready: true, qwen_pipeline_ready: true, qwen_image_pipeline_ready: true, qwen_image_img2img_pipeline_ready: true, bitsandbytes_ready: true } };
 		},
 	};
 	const noWeightsDriver = createLocalImageDriver(readinessOptions);
@@ -217,6 +218,14 @@ const {
 	assert.strictEqual(noWeightsDriver.models()[1].ready, false, 'Quantized model must be unavailable until its weights are installed');
 	assert.strictEqual((await noWeightsDriver.images({ prompt: 'test' })).code, 'local_image_model_not_ready');
 	assert.strictEqual((await noWeightsDriver.images({ model: quantizedModelId, prompt: 'test' })).code, 'local_image_model_not_ready');
+	const missingBitsandbytesDriver = createLocalImageDriver({
+		getSettings: () => ({ ...readyRuntimeSettings, model_records: { [quantizedModelId]: { installed: true } } }),
+		probeRuntime: () => ({ ok: true, state: 'ready', probe: { cuda_available: true, diffusers_ready: true, transformers_ready: true, qwen_pipeline_ready: true, qwen_image_pipeline_ready: true, qwen_image_img2img_pipeline_ready: true } }),
+	});
+	assert.strictEqual(missingBitsandbytesDriver.models()[0].ready, false, 'Uninstalled Qwen-Image-2.1 weights must stay unavailable');
+	assert.strictEqual(missingBitsandbytesDriver.models()[1].ready, false, 'NF4 model must not report ready until bitsandbytes metadata is installed');
+	assert.strictEqual(missingBitsandbytesDriver.capabilities().models[1].state, 'dependency_missing');
+	assert.match(missingBitsandbytesDriver.capabilities().diagnostic, /requires bitsandbytes/i);
 	await noWeightsDriver.refresh();
 	assert.strictEqual(readinessProbeCalls, 1, 'Ordinary refresh should use the cached runtime probe');
 	await noWeightsDriver.refresh({ forceProbe: true });

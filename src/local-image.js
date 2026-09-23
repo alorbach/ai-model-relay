@@ -61,7 +61,8 @@ const MODELS = {
 		reference_images_max: 1,
 		pipeline: 'QwenImagePipeline',
 		img2img_pipeline: 'QwenImageImg2ImgPipeline',
-		probe_requirements: ['qwen_image_pipeline_ready', 'qwen_image_img2img_pipeline_ready'],
+		probe_requirements: ['qwen_image_pipeline_ready', 'qwen_image_img2img_pipeline_ready', 'bitsandbytes_ready'],
+		required_packages: ['bitsandbytes'],
 		required_snapshot_paths: ['model_index.json', 'quantization_info.json', 'transformer'],
 		enabled: true,
 		license: { spdx: 'CC-BY-NC-SA-4.0', commercial_use: false },
@@ -483,7 +484,7 @@ async function setup(options = {}) {
 	const torchConstraintFile = constraintPath(venvDir);
 	fs.writeFileSync(torchConstraintFile, constraintText);
 
-	const packages = ['transformers>=5.17', 'git+https://github.com/huggingface/diffusers', 'accelerate', 'pillow', 'huggingface_hub'];
+	const packages = ['transformers>=5.17', 'git+https://github.com/huggingface/diffusers', 'accelerate', 'pillow', 'huggingface_hub', ...(modelProfile.required_packages || [])];
 	emit('stdout', 'Installing Diffusers and dependencies with CUDA PyTorch pinned...\n');
 	const pkgsResult = await run(venvPython, ['-m', 'pip', 'install', '--disable-pip-version-check', '--progress-bar', 'off', '--constraint', torchConstraintFile, ...packages], { timeout: SETUP_TIMEOUT_MS, onOutput: emit });
 	if (pkgsResult.error || pkgsResult.status !== 0) {
@@ -570,12 +571,15 @@ function createLocalImageDriver(options = {}) {
 		const models = Object.keys(MODELS).map((id) => {
 			const profile = MODELS[id];
 			const installed = !!(current.model_records && current.model_records[id] && current.model_records[id].installed === true);
-			const pipelineReady = runtimeReady && modelPipelineReady(profile, probe.probe || {});
+			const modelProbe = probe.probe || {};
+			const missingRequirements = (profile.probe_requirements || []).filter((key) => modelProbe[key] !== true);
+			const pipelineReady = runtimeReady && modelPipelineReady(profile, modelProbe);
 			return {
 				id,
 				label: profile.label,
 				ready: pipelineReady && installed,
-				state: !pipelineReady ? 'runtime_unavailable' : installed ? 'installed' : 'not_installed',
+				state: !pipelineReady ? missingRequirements.includes('bitsandbytes_ready') ? 'dependency_missing' : 'runtime_unavailable' : installed ? 'installed' : 'not_installed',
+				missing_requirements: missingRequirements,
 				precision: profile.default_precision,
 				min_vram_mb: profile.min_vram_mb,
 				recommended_vram_mb: profile.recommended_vram_mb,
@@ -588,7 +592,9 @@ function createLocalImageDriver(options = {}) {
 				? 'CUDA is not available in the local image environment.'
 				: 'Use Setup on the Status Page to configure the local image runtime.')
 			: !ready
-				? 'The local image runtime is ready, but no supported model weights are installed. Run Setup and install a model.'
+				? (models.find((model) => model.state === 'dependency_missing')
+					? `${models.find((model) => model.state === 'dependency_missing').label} requires bitsandbytes. Run Setup for this model to install the missing package.`
+					: 'The local image runtime is ready, but no supported model weights are installed. Run Setup and install a model.')
 				: 'CUDA PyTorch, Diffusers, and at least one local image model are ready.';
 
 		snapshot = {
@@ -619,6 +625,7 @@ function createLocalImageDriver(options = {}) {
 			job_types: ['images'],
 			features: {
 				local_image: true,
+				cancellation: true,
 				native_transparency: true,
 				multi_reference: true,
 				fp8_acceleration: false,

@@ -345,11 +345,12 @@ class JobManager {
 		return true;
 	}
 
-	cancelByRequestId(requestId, type = '', origin = '') {
+	cancelByRequestId(requestId, type = '', origin = '', provider = '') {
 		const value = String(requestId || '').trim();
 		const expectedType = String(type || '').trim();
+		const expectedProvider = String(provider || '').trim();
 		if (!value) return false;
-		const matches = (job) => job.requestId === value && (!expectedType || job.type === expectedType) && jobMatchesOrigin(job, origin);
+		const matches = (job) => job.requestId === value && (!expectedType || job.type === expectedType) && (!expectedProvider || job.provider === expectedProvider) && jobMatchesOrigin(job, origin);
 		const queued = this.queue.find(matches);
 		const running = Array.from(this.running.values()).find(matches);
 		return this.cancel((queued || running || {}).id);

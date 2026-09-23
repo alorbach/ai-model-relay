@@ -1227,6 +1227,7 @@ function statusPageHtml() {
 								<div class="muted" id="liveDetailSubtitle"></div>
 							</div>
 							<div class="live-detail-actions">
+								<button type="button" class="copy-value" id="liveDetailCancel" hidden>Cancel generation</button>
 								<button type="button" class="copy-value" id="liveDetailCopyId">Copy request id</button>
 							</div>
 						</div>
@@ -1431,6 +1432,7 @@ function statusPageHtml() {
 		const relaySettingsUrl = '/v1/relay/settings';
 		const pairingCodeSettingsUrl = '/v1/relay/pairing-code';
 		const relayTestUrl = '/v1/relay/test';
+		const liveImageCancelUrl = '/v1/relay/jobs/images/cancel';
 		const jobEventsUrl = '/v1/status/events';
 		let currentStatus = {};
 		let currentCapabilities = {};
@@ -1446,6 +1448,7 @@ function statusPageHtml() {
 		let liveSearchQuery = '';
 		let selectedLiveRequestId = '';
 		let livePinned = false;
+		const cancellingLiveImageRequests = new Set();
 		const seenLiveRequestIds = new Set();
 		let settingsSection = 'providers';
 		let suppressHashChange = false;
@@ -1471,6 +1474,7 @@ function statusPageHtml() {
 			liveDetailSubtitle: document.getElementById('liveDetailSubtitle'),
 			liveDetailBody: document.getElementById('liveDetailBody'),
 			liveDetailCopyId: document.getElementById('liveDetailCopyId'),
+			liveDetailCancel: document.getElementById('liveDetailCancel'),
 			settingsNavButtons: Array.from(document.querySelectorAll('#settings-nav [data-settings-section]')),
 			settingsPanels: Array.from(document.querySelectorAll('[data-settings-panel]')),
 			persistentPairingCodeForm: document.getElementById('persistentPairingCodeForm'),
@@ -2338,6 +2342,19 @@ function statusPageHtml() {
 			const requestId = jobRequestId(job);
 			const status = liveJobStatus(job);
 			const live = status === 'running' || status === 'queued' || status === 'pending';
+			const canCancelImage = job.type === 'images' && job.provider === 'local-image' && ['running', 'queued', 'cancelling'].includes(status);
+			if (canCancelImage && fields.liveDetailCancel) {
+				fields.liveDetailCancel.hidden = false;
+				fields.liveDetailCancel.disabled = status === 'cancelling' || cancellingLiveImageRequests.has(requestId);
+				fields.liveDetailCancel.textContent = fields.liveDetailCancel.disabled ? 'Cancelling…' : 'Cancel generation';
+				fields.liveDetailCancel.dataset.requestId = requestId;
+			} else if (fields.liveDetailCancel) {
+				fields.liveDetailCancel.hidden = true;
+				fields.liveDetailCancel.disabled = false;
+				fields.liveDetailCancel.textContent = 'Cancel generation';
+				fields.liveDetailCancel.dataset.requestId = '';
+				if (['completed', 'failed', 'cancelled'].includes(status)) cancellingLiveImageRequests.delete(requestId);
+			}
 			const key = 'detail:' + requestId;
 			fields.liveDetailEmpty.hidden = true;
 			fields.liveDetailContent.hidden = false;
@@ -2399,6 +2416,29 @@ function statusPageHtml() {
 				if (input) updateSessionOutput(input, job.session_input);
 			}
 			updateDebugLogBlocks(fields.liveDetailBody, job, key);
+		}
+
+		async function cancelLiveImageJob(button) {
+			const requestId = String(button && button.dataset.requestId || '').trim();
+			if (!requestId || button.disabled) return;
+			button.disabled = true;
+			button.textContent = 'Cancelling…';
+			cancellingLiveImageRequests.add(requestId);
+			try {
+				const response = await fetch(liveImageCancelUrl, {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ request_id: requestId }),
+				});
+				const payload = await response.json();
+				if (!response.ok || payload.success === false) throw new Error(payload.message || 'Image generation could not be cancelled.');
+				if (fields.lastEvent) fields.lastEvent.textContent = 'Image cancellation requested ' + new Date().toLocaleTimeString();
+			} catch (error) {
+				cancellingLiveImageRequests.delete(requestId);
+				button.disabled = false;
+				button.textContent = 'Cancel generation';
+				if (fields.lastEvent) fields.lastEvent.textContent = error.message || 'Image cancellation failed';
+			}
 		}
 
 		function findJobByRequestId(requestId, jobs) {
@@ -3807,6 +3847,12 @@ function statusPageHtml() {
 		}
 
 		document.addEventListener('click', async (event) => {
+			const cancelLiveImage = event.target.closest('#liveDetailCancel');
+			if (cancelLiveImage) {
+				event.preventDefault();
+				await cancelLiveImageJob(cancelLiveImage);
+				return;
+			}
 			const providerTest = event.target.closest('[data-provider-test]');
 			if (providerTest) {
 				event.preventDefault();

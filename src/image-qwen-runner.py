@@ -46,6 +46,7 @@ def run_probe():
         "qwen_pipeline_ready": False,
         "qwen_image_pipeline_ready": False,
         "qwen_image_img2img_pipeline_ready": False,
+        "bitsandbytes_ready": False,
     }
 
     try:
@@ -79,6 +80,13 @@ def run_probe():
         probe["qwen_image_img2img_pipeline_ready"] = QwenImageImg2ImgPipeline is not None
     except Exception as exc:
         probe["qwen_image_img2img_pipeline_error"] = str(exc)
+
+    try:
+        from importlib.metadata import version
+        probe["bitsandbytes_version"] = version("bitsandbytes")
+        probe["bitsandbytes_ready"] = True
+    except Exception as exc:
+        probe["bitsandbytes_error"] = str(exc)
 
     print(json.dumps(probe))
     sys.exit(0)

@@ -652,6 +652,7 @@ const STATUS_PAGE_MUTATORS = new Set([
 	'/v1/relay/settings',
 	'/v1/relay/refresh',
 	'/v1/relay/test',
+	'/v1/relay/jobs/images/cancel',
 	'/v1/relay/pairing-code',
 ]);
 const STATUS_BOOTSTRAP_PATHS = new Set([
@@ -945,6 +946,17 @@ async function route(req, res, context) {
 	}
 
 	if (STATUS_PAGE_MUTATORS.has(url.pathname) && !requireLocalPageOrigin(req, res, origin)) {
+		return;
+	}
+
+	if (url.pathname === '/v1/relay/jobs/images/cancel') {
+		const requestId = String(body.request_id || '').trim();
+		if (!requestId || !jobManager.cancelByRequestId(requestId, 'images', '', 'local-image')) {
+			sendErrorJson(req, res, 404, { success: false, category: 'validation', message: 'No active local image generation matches this request.' }, origin, { requestId, route: url.pathname });
+			return;
+		}
+		context.statusCache.sync();
+		sendJson(res, 200, { success: true, request_id: requestId, status: 'cancelling' }, origin);
 		return;
 	}
 
