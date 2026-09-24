@@ -19,6 +19,7 @@ const {
 	SANA_TEST_OPTIONS,
 	SANA_CAPABILITIES,
 	createLocalImageDriver,
+	imageJobTimeoutMs,
 	probeRunnerStatus,
 	publicSettings,
 	resolveOutputSize,
@@ -64,21 +65,40 @@ const {
 	assert.strictEqual(sanaModel.pipeline, 'SanaPipeline');
 	assert.strictEqual(sanaModel.pretrained_variant, 'bf16');
 	assert.strictEqual(sanaModel.default_precision, 'bf16');
+	assert.ok(sanaModel.precision.includes('nf4-bf16'), 'Sana must offer optional NF4 weights with BF16 compute');
+	assert.deepStrictEqual(sanaModel.gpu_only_precisions, ['nf4-bf16']);
+	assert.deepStrictEqual(sanaModel.precision_requirements['nf4-bf16'], ['bitsandbytes_ready']);
 	assert.strictEqual(sanaModel.default_resolution, '2048x2048');
 	assert.strictEqual(sanaModel.preferred_steps, 20);
 	assert.strictEqual(sanaModel.preferred_guidance_scale, 5);
+	assert.strictEqual(sanaModel.timeout_ms, 1800000, 'Sana output generation must have a 30-minute timeout');
+	assert.strictEqual(sanaModel.large_output_timeout_ms, 3600000, 'Sana 4K output must have a one-hour timeout');
 	assert.strictEqual(sanaModel.reference_images_max, 0);
-	assert.deepStrictEqual(sanaModel.required_packages, ['sentencepiece']);
+	assert.ok(sanaModel.required_packages.includes('sentencepiece'));
+	assert.ok(sanaModel.required_packages.includes('bitsandbytes'), 'Sana NF4 setup must install bitsandbytes');
 	assert.ok(sanaModel.required_snapshot_paths.includes('tokenizer'));
 	assert.strictEqual(sanaModel.license.spdx, 'Apache-2.0');
 	assert.strictEqual(sanaModel.min_vram_mb, 12288);
 	assert.strictEqual(sanaModel.recommended_vram_mb, 16384);
-	assert.deepStrictEqual(SANA_RESOLUTION_CHOICES.map((choice) => choice.value), ['2048x2048', '4096x4096']);
+	assert.strictEqual(SANA_RESOLUTION_CHOICES.length, 21, 'Sana must offer 1K, 2K, and 4K presets in multiple aspect ratios');
+	assert.strictEqual(SANA_RESOLUTION_CHOICES[0].value, '2048x2048', 'Keep 2K square as the default choice');
+	assert.ok(SANA_RESOLUTION_CHOICES.some((choice) => choice.value === '1024x1024'), 'Offer 1K output for faster generation');
+	assert.ok(SANA_RESOLUTION_CHOICES.some((choice) => choice.value === '2752x1536'), 'Offer 2K landscape output');
+	assert.ok(SANA_RESOLUTION_CHOICES.some((choice) => choice.value === '4096x2304'), 'Offer 4K landscape output');
 	assert.strictEqual(SANA_TEST_OPTIONS.find((option) => option.key === 'quality').choices[0].value, 'bf16');
+	assert.strictEqual(SANA_TEST_OPTIONS.find((option) => option.key === 'quality').choices[1].value, 'nf4-bf16');
 	assert.strictEqual(SANA_CAPABILITIES.reference_images, false);
 	assert.strictEqual(SANA_CAPABILITIES.reference_images_max, 0);
 	assert.deepStrictEqual(resolveOutputSize({ resolution: '2048x2048', aspect_ratio: '16:9' }, {}, sanaModelId), { width: 2048, height: 2048 });
 	assert.deepStrictEqual(resolveOutputSize({ resolution: '4096x4096', aspect_ratio: '16:9' }, {}, sanaModelId), { width: 4096, height: 4096 });
+	assert.deepStrictEqual(resolveOutputSize({ resolution: '2752x1536' }, {}, sanaModelId), { width: 2752, height: 1536 });
+	assert.deepStrictEqual(resolveOutputSize({ resolution: '4096x2304' }, {}, sanaModelId), { width: 4096, height: 2304 });
+	assert.strictEqual(imageJobTimeoutMs({}, sanaModel, { width: 2048, height: 2048 }), 1800000);
+	assert.strictEqual(imageJobTimeoutMs({}, sanaModel, { width: 4096, height: 2304 }), 3600000);
+	assert.strictEqual(imageJobTimeoutMs({}, sanaModel, { width: 4032, height: 2688 }), 3600000, 'Sana 4K 3:2 landscape must receive the large-output timeout');
+	assert.strictEqual(imageJobTimeoutMs({}, sanaModel, { width: 2688, height: 4032 }), 3600000, 'Sana 4K 3:2 portrait must receive the large-output timeout');
+	assert.strictEqual(imageJobTimeoutMs({ timeout_ms: 120000 }, sanaModel, { width: 4096, height: 4096 }), 120000, 'Explicit per-job timeouts must still take precedence');
+	assert.strictEqual(imageJobTimeoutMs({}, MODELS['model-relay:local-image:qwen-image-2.1'], { width: 1024, height: 1024 }), 900000, 'Other image models must keep their existing timeout');
 
 	// --- QWEN_IMAGE_TEST_OPTIONS ---
 	assert.ok(Array.isArray(QWEN_IMAGE_TEST_OPTIONS), 'Test options must be an array');
@@ -217,7 +237,7 @@ const {
 	assert.strictEqual(sanaPublicModel.image_capabilities.reference_images_max, 0);
 	assert.strictEqual(sanaPublicModel.reference_images_max, 0);
 	assert.strictEqual(sanaPublicModel.pipeline, 'SanaPipeline');
-	assert.deepStrictEqual(sanaPublicModel.test_options.find((option) => option.key === 'resolution').choices.map((choice) => choice.value), ['2048x2048', '4096x4096']);
+	assert.deepStrictEqual(sanaPublicModel.test_options.find((option) => option.key === 'resolution').choices.map((choice) => choice.value), SANA_RESOLUTION_CHOICES.map((choice) => choice.value));
 	assert.strictEqual(sanaPublicModel.recommended_vram_mb, 16384);
 
 	// --- images() - not-ready path ---
@@ -231,6 +251,7 @@ const {
 	const readyRuntimeSettings = {
 		...settings(),
 		precision: 'fp8',
+		cpu_offload: true,
 		venv_path: path.join(os.tmpdir(), `relay-local-image-ready-venv-${Date.now()}`),
 		model_records: {},
 	};
@@ -267,6 +288,14 @@ const {
 	});
 	const missingSanaStatus = missingSanaPipelineDriver.models().find((model) => model.id === sanaModelId);
 	assert.strictEqual(missingSanaStatus.ready, false);
+	const missingSanaBitsandbytesDriver = createLocalImageDriver({
+		getSettings: () => ({ ...readyRuntimeSettings, model_records: { [sanaModelId]: { installed: true, repo_id: sanaModel.repo_id } } }),
+		probeRuntime: () => ({ ok: true, state: 'ready', probe: { cuda_available: true, diffusers_ready: true, transformers_ready: true, sana_pipeline_ready: true, bitsandbytes_ready: false } }),
+	});
+	assert.strictEqual(missingSanaBitsandbytesDriver.models().find((model) => model.id === sanaModelId).ready, true, 'BF16 Sana must remain available without the optional bitsandbytes dependency');
+	const missingSanaNf4 = await missingSanaBitsandbytesDriver.images({ model: sanaModelId, prompt: 'Sana NF4 without bitsandbytes', quality: 'nf4-bf16' });
+	assert.strictEqual(missingSanaNf4.code, 'local_image_dependency_missing');
+	assert.match(missingSanaNf4.message, /requires bitsandbytes/i);
 	assert.strictEqual(missingSanaStatus.state, 'runtime_unavailable');
 	assert.deepStrictEqual(missingSanaStatus.missing_requirements, ['sana_pipeline_ready']);
 	await noWeightsDriver.refresh();
@@ -361,19 +390,27 @@ const {
 		assert.strictEqual(capturedJob.model_id, sanaModelId);
 		assert.strictEqual(capturedJob.model_path, sanaModel.repo_id);
 		assert.strictEqual(capturedJob.precision, 'bf16');
+		assert.strictEqual(capturedJob.cpu_offload, true, 'The official Sana BF16 path must preserve the global CPU offload setting');
 		assert.strictEqual(capturedJob.steps, 20);
 		assert.strictEqual(capturedJob.guidance_scale, 5);
 		assert.deepStrictEqual([capturedJob.width, capturedJob.height], [2048, 2048]);
 		assert.deepStrictEqual(capturedJob.reference_images, []);
-		const sana4k = await readyDriver.images({ model: sanaModelId, prompt: 'Sana 4K', resolution: '4096x4096', aspect_ratio: '16:9' });
+		const sanaNf4 = await readyDriver.images({ model: sanaModelId, prompt: 'Sana NF4 GPU-only', quality: 'nf4-bf16' });
+		assert.strictEqual(sanaNf4.success, true);
+		assert.strictEqual(capturedJob.precision, 'nf4-bf16');
+		assert.strictEqual(capturedJob.cpu_offload, false, 'Sana NF4 must override the global CPU offload setting');
+		const sanaFast = await readyDriver.images({ model: sanaModelId, prompt: 'Sana faster 1K output', resolution: '1344x768', aspect_ratio: '1:1' });
+		assert.strictEqual(sanaFast.success, true);
+		assert.deepStrictEqual([capturedJob.width, capturedJob.height], [1344, 768]);
+		const sana4k = await readyDriver.images({ model: sanaModelId, prompt: 'Sana 4K landscape', resolution: '4096x2304', aspect_ratio: '1:1' });
 		assert.strictEqual(sana4k.success, true);
-		assert.deepStrictEqual([capturedJob.width, capturedJob.height], [4096, 4096]);
+		assert.deepStrictEqual([capturedJob.width, capturedJob.height], [4096, 2304]);
 		const sanaImageToImage = await readyDriver.images({ model: sanaModelId, prompt: 'Sana edit request', input_reference_data_url: inputReference });
 		assert.strictEqual(sanaImageToImage.code, 'local_image_reference_limit');
 		assert.match(sanaImageToImage.message, /text-to-image only/i);
 		const tooManyReferences = await readyDriver.images({ model: quantizedModelId, prompt: 'too many refs', reference_images: [inputReference, secondInputReference] });
 		assert.strictEqual(tooManyReferences.code, 'local_image_reference_limit');
-		assert.strictEqual(imageSpawnCount, 6, 'Reference-limit errors must not start the runner');
+		assert.strictEqual(imageSpawnCount, 8, 'Reference-limit errors must not start the runner');
 		const unknownModel = await readyDriver.images({ model: 'model-relay:local-image:unknown', prompt: 'unknown model' });
 		assert.strictEqual(unknownModel.code, 'local_image_model_unknown');
 		assert.strictEqual(readinessProbeCalls, 3, 'Image jobs must not spawn a synchronous Python readiness probe');
@@ -435,6 +472,17 @@ const {
 	assert.ok(runnerContent.includes('from diffusers import QwenImageImg2ImgPipeline'), 'Runtime probe must import the quantized image-to-image pipeline');
 	assert.ok(runnerContent.includes('from diffusers import SanaPipeline'), 'Runtime probe must check SanaPipeline readiness');
 	assert.ok(runnerContent.includes('"variant": "bf16"'), 'Sana must load the BF16 variant explicitly');
+	assert.ok(runnerContent.includes('"gpu_only_precisions": ("nf4-bf16",)'), 'Sana NF4 must be designated as GPU-only');
+	assert.ok(runnerContent.includes('PipelineQuantizationConfig('), 'Runner must configure pipeline-level NF4 quantization');
+	assert.ok(runnerContent.includes('"bnb_4bit_quant_type": "nf4"'), 'Sana NF4 must use NF4 weights');
+	assert.ok(runnerContent.includes('components_to_quantize=["transformer", "text_encoder"]'), 'Sana NF4 must quantize its transformer and Gemma text encoder');
+	assert.ok(runnerContent.includes('if precision in model_profile.get("gpu_only_precisions", ()):\n        cpu_offload = False'), 'Runner must disable CPU offload in Sana NF4 mode');
+	assert.ok(runnerContent.includes('pipe.to("cuda")'), 'Runner must keep a GPU-only quantized pipeline on CUDA');
+	assert.ok(runnerContent.includes('pipe_args["callback_on_step_end"] = on_sana_step_end'), 'Runner must timestamp the last Sana denoising step');
+	assert.ok(runnerContent.includes('pipe.vae.decode = timed_vae_decode'), 'Runner must time Sana VAE decoding separately');
+	assert.ok(runnerContent.includes('post_steps_to_pipeline_return_seconds'), 'Runner must report post-denoising pipeline time');
+	assert.ok(runnerContent.includes('log_elapsed("png_save"'), 'Runner must report PNG save time separately');
+	assert.ok(runnerContent.includes('log_elapsed("model_load"'), 'Runner must report model loading time');
 	assert.ok(runnerContent.includes('"default_steps": 20'), 'Sana runner profile must default to 20 steps');
 	assert.ok(runnerContent.includes('"default_guidance_scale": 5.0'), 'Sana runner profile must default to guidance scale 5');
 	assert.ok(runnerContent.includes('tile_sample_min_height') && runnerContent.includes('tile_sample_stride_width'), 'Sana profile must define its 4K VAE tiling values');

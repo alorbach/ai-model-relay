@@ -99,9 +99,14 @@ const MODELS = {
 		min_vram_mb: 12288,
 		recommended_vram_mb: 16384,
 		vram_note: 'About 16 GB VRAM recommended for 4K; VAE tiling is applied automatically.',
-		precision: ['bf16'],
+		precision: ['bf16', 'nf4-bf16'],
 		default_precision: 'bf16',
 		pretrained_variant: 'bf16',
+		timeout_ms: 1800000,
+		large_output_timeout_ms: 3600000,
+		large_output_threshold_px: 4000,
+		gpu_only_precisions: ['nf4-bf16'],
+		precision_requirements: { 'nf4-bf16': ['bitsandbytes_ready'] },
 		preferred_steps: 20,
 		preferred_guidance_scale: 5.0,
 		default_resolution: '2048x2048',
@@ -110,7 +115,7 @@ const MODELS = {
 		pipeline: 'SanaPipeline',
 		guidance_argument: 'guidance_scale',
 		probe_requirements: ['sana_pipeline_ready'],
-		required_packages: ['sentencepiece'],
+		required_packages: ['sentencepiece', 'bitsandbytes'],
 		required_snapshot_paths: ['model_index.json', 'transformer', 'text_encoder', 'tokenizer', 'vae'],
 		vae_tiling_for_4k: {
 			tile_sample_min_height: 1024,
@@ -243,7 +248,26 @@ const FLUX2_CAPABILITIES = imageCapabilityContract(FLUX2_TEST_OPTIONS, {
 
 const SANA_RESOLUTION_CHOICES = [
 	{ value: '2048x2048', label: '2K - 2048 x 2048' },
+	{ value: '2752x1536', label: '2K landscape - 16:9 - 2752 x 1536' },
+	{ value: '1536x2752', label: '2K portrait - 9:16 - 1536 x 2752' },
+	{ value: '2400x1792', label: '2K landscape - 4:3 - 2400 x 1792' },
+	{ value: '1792x2400', label: '2K portrait - 3:4 - 1792 x 2400' },
+	{ value: '2528x1696', label: '2K landscape - 3:2 - 2528 x 1696' },
+	{ value: '1696x2528', label: '2K portrait - 2:3 - 1696 x 2528' },
+	{ value: '1024x1024', label: '1K - 1024 x 1024 (faster)' },
+	{ value: '1344x768', label: '1K landscape - 16:9 - 1344 x 768' },
+	{ value: '768x1344', label: '1K portrait - 9:16 - 768 x 1344' },
+	{ value: '1152x864', label: '1K landscape - 4:3 - 1152 x 864' },
+	{ value: '864x1152', label: '1K portrait - 3:4 - 864 x 1152' },
+	{ value: '1216x832', label: '1K landscape - 3:2 - 1216 x 832' },
+	{ value: '832x1216', label: '1K portrait - 2:3 - 832 x 1216' },
 	{ value: '4096x4096', label: '4K - 4096 x 4096 (VAE tiled)' },
+	{ value: '4096x2304', label: '4K landscape - 16:9 - 4096 x 2304 (VAE tiled)' },
+	{ value: '2304x4096', label: '4K portrait - 9:16 - 2304 x 4096 (VAE tiled)' },
+	{ value: '4096x3072', label: '4K landscape - 4:3 - 4096 x 3072 (VAE tiled)' },
+	{ value: '3072x4096', label: '4K portrait - 3:4 - 3072 x 4096 (VAE tiled)' },
+	{ value: '4032x2688', label: '4K landscape - 3:2 - 4032 x 2688 (VAE tiled)' },
+	{ value: '2688x4032', label: '4K portrait - 2:3 - 2688 x 4032 (VAE tiled)' },
 ];
 const SANA_TEST_OPTIONS = [
 	{
@@ -256,7 +280,10 @@ const SANA_TEST_OPTIONS = [
 		key: 'quality',
 		label: 'Precision',
 		delivery: 'direct',
-		choices: [{ value: 'bf16', label: 'BF16 (official checkpoint)' }],
+		choices: [
+			{ value: 'bf16', label: 'BF16 (official checkpoint)' },
+			{ value: 'nf4-bf16', label: 'NF4 weights / BF16 compute (GPU only)' },
+		],
 	},
 ];
 const SANA_CAPABILITIES = imageCapabilityContract(SANA_TEST_OPTIONS, {
@@ -273,6 +300,16 @@ function parseWxH(value) {
 	const height = Number(match[2]);
 	if (!Number.isFinite(width) || !Number.isFinite(height) || width < 1 || height < 1) return null;
 	return { width, height };
+}
+
+function imageJobTimeoutMs(payload, modelProfile, outputSize) {
+	if (payload && payload.timeout_ms) return Number(payload.timeout_ms);
+	const largestDimension = Math.max(Number(outputSize && outputSize.width) || 0, Number(outputSize && outputSize.height) || 0);
+	const largeOutputThreshold = Number(modelProfile && modelProfile.large_output_threshold_px) || 4096;
+	if (modelProfile && modelProfile.large_output_timeout_ms && largestDimension >= largeOutputThreshold) {
+		return Number(modelProfile.large_output_timeout_ms);
+	}
+	return Number(modelProfile && modelProfile.timeout_ms || DEFAULT_TIMEOUT_MS);
 }
 
 function sizeFromAspect(aspectRatio, tier = '1k') {
@@ -784,6 +821,17 @@ function createLocalImageDriver(options = {}) {
 			if (!modelProfile.precision.includes(precision)) {
 				return { success: false, category: 'validation', code: 'local_image_precision_unsupported', message: `Precision ${precision} is not supported by ${modelProfile.label}.`, details: { model: modelId, supported: modelProfile.precision } };
 			}
+			const missingPrecisionRequirement = (modelProfile.precision_requirements && modelProfile.precision_requirements[precision] || [])
+				.find((requirement) => !state.probe || !state.probe.probe || state.probe.probe[requirement] !== true);
+			if (missingPrecisionRequirement) {
+				return {
+					success: false,
+					category: 'configuration',
+					code: 'local_image_dependency_missing',
+					message: `${modelProfile.label} ${precision} mode requires bitsandbytes. Run Setup for this model to install the optional GPU quantization dependency.`,
+					details: { model: modelId, precision, missing_requirement: missingPrecisionRequirement },
+				};
+			}
 			const workdir = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-model-relay-image-'));
 			const outputPath = path.join(workdir, 'generated.png');
 			const jobPath = path.join(workdir, 'job.json');
@@ -822,7 +870,7 @@ function createLocalImageDriver(options = {}) {
 				guidance_scale: guidanceScale,
 				seed,
 				precision,
-				cpu_offload: current.cpu_offload !== false,
+				cpu_offload: (modelProfile.gpu_only_precisions || []).includes(precision) ? false : current.cpu_offload !== false,
 				vae_tiling: current.vae_tiling !== false,
 				reference_images: referenceImages,
 				model_id: modelId,
@@ -868,7 +916,7 @@ function createLocalImageDriver(options = {}) {
 				jobConfig.reference_images = referenceImages;
 				fs.writeFileSync(jobPath, JSON.stringify(jobConfig));
 				const venvPython = state.python;
-				const timeoutMs = Number(payload.timeout_ms || DEFAULT_TIMEOUT_MS);
+				const timeoutMs = imageJobTimeoutMs(payload, modelProfile, outputSize);
 
 				const result = await new Promise((resolve) => {
 					const stdoutCollector = createBoundedCollector({ maxChars: 1024 * 1024 });
@@ -1004,6 +1052,7 @@ module.exports = {
 	SANA_TEST_OPTIONS,
 	SANA_CAPABILITIES,
 	createLocalImageDriver,
+	imageJobTimeoutMs,
 	parseWxH,
 	probeRunnerStatus,
 	publicSettings,

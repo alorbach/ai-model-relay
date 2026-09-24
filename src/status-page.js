@@ -3430,7 +3430,8 @@ function statusPageHtml() {
 				'<label class="field"><span>Default steps</span><input id="imageDefaultSteps" type="number" min="1" max="100" step="1" inputmode="numeric" value="' + escapeHtml(currentImageSettings.default_steps || 40) + '"></label>',
 				'<label class="field"><span>Guidance / CFG scale</span><input id="imageGuidanceScale" type="number" min="0" max="20" step="0.1" inputmode="decimal" value="' + escapeHtml(currentImageSettings.guidance_scale == null ? 1 : currentImageSettings.guidance_scale) + '"><small class="muted">Qwen-Image-2.1 uses True CFG; FLUX.2 uses guidance scale. Each model applies its recommended default unless you change this setting.</small></label>',
 				'<label class="checkbox-row"><input type="checkbox" id="imageCpuOffload"' + checkedAttr(currentImageSettings.cpu_offload !== false) + '><span>Enable model CPU offload</span></label>',
-				'<label class="checkbox-row"><input type="checkbox" id="imageVaeTiling"' + checkedAttr(currentImageSettings.vae_tiling !== false) + '><span>Enable VAE tiling</span></label>',
+				'<label class="checkbox-row"><input type="checkbox" id="imageVaeTiling"' + checkedAttr(currentImageSettings.vae_tiling !== false) + '><span>Enable VAE tiling (reduces peak VRAM use)</span></label>',
+				'<small class="muted">Turning this off uses more VRAM and does not guarantee faster generation. Sana 4K always enables its required model-specific tiling.</small>',
 				'<label class="checkbox-row"><input type="checkbox" id="imageAllowModelDownloads"' + checkedAttr(currentImageSettings.allow_model_downloads === true) + '><span>Allow model downloads during setup</span></label>',
 			].join('');
 			fields.imageModelStates.textContent = 'Models: ' + (Array.isArray(models) && models.length ? models.map((model) => String(model.label || model.id || 'model') + ' — ' + String(model.state || 'not checked')).join(' · ') : 'not checked');

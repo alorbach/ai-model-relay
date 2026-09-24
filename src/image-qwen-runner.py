@@ -11,6 +11,7 @@ import io
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 
@@ -23,6 +24,12 @@ def fail(code, message, details=None):
     }
     print(json.dumps(payload), file=sys.stdout)
     sys.exit(1)
+
+
+def log_elapsed(phase, started_at):
+    elapsed = time.perf_counter() - started_at
+    print(f"[timing] {phase}_seconds={elapsed:.3f}", file=sys.stderr, flush=True)
+    return elapsed
 
 
 def run_probe():
@@ -157,7 +164,8 @@ MODEL_PIPELINES = {
         "repo_id": "Efficient-Large-Model/Sana_1600M_4Kpx_BF16_diffusers",
         "text_pipeline": "SanaPipeline",
         "default_precision": "bf16",
-        "precisions": ("bf16",),
+        "precisions": ("bf16", "nf4-bf16"),
+        "gpu_only_precisions": ("nf4-bf16",),
         "max_reference_images": 0,
         "variant": "bf16",
         "default_steps": 20,
@@ -229,6 +237,8 @@ def run_job(job):
     if precision not in model_profile["precisions"]:
         fail("precision_unsupported", f"Precision '{precision}' is not supported by {model_id}.")
     cpu_offload = bool(job.get("cpu_offload", True))
+    if precision in model_profile.get("gpu_only_precisions", ()):
+        cpu_offload = False
     vae_tiling = bool(job.get("vae_tiling", True))
     steps = int(job.get("num_inference_steps") or job.get("steps") or model_profile.get("default_steps") or 40)
     # Qwen-Image-2.1 uses true_cfg_scale (default 1.0 = no CFG). guidance_scale is accepted as a legacy alias.
@@ -273,16 +283,42 @@ def run_job(job):
     }
     if model_profile.get("variant"):
         load_kwargs["variant"] = model_profile["variant"]
+    gpu_quantized_load = precision in model_profile.get("gpu_only_precisions", ())
+    if gpu_quantized_load:
+        try:
+            from diffusers.quantizers import PipelineQuantizationConfig
+
+            load_kwargs["quantization_config"] = PipelineQuantizationConfig(
+                quant_backend="bitsandbytes_4bit",
+                quant_kwargs={
+                    "load_in_4bit": True,
+                    "bnb_4bit_quant_type": "nf4",
+                    "bnb_4bit_compute_dtype": torch.bfloat16,
+                },
+                components_to_quantize=["transformer", "text_encoder"],
+            )
+        except Exception as quantization_err:
+            fail(
+                "quantization_unavailable",
+                "Sana NF4 GPU mode requires a Diffusers build with bitsandbytes 4-bit quantization: "
+                f"{quantization_err}",
+            )
     # Prefer dtype= (diffusers >=1.0); fall back to torch_dtype for older installs.
+    model_load_started_at = time.perf_counter()
     try:
         pipe = pipeline_class.from_pretrained(model_path, dtype=torch_dtype, **load_kwargs)
     except TypeError:
         try:
             pipe = pipeline_class.from_pretrained(model_path, torch_dtype=torch_dtype, **load_kwargs)
         except Exception as exc:
-            fail("pipeline_load_failed", f"Failed to load {pipeline_name} from '{model_path}': {exc}")
+            code = "quantization_load_failed" if gpu_quantized_load else "pipeline_load_failed"
+            prefix = "Sana NF4 GPU-only mode could not quantize/load the selected components" if gpu_quantized_load else f"Failed to load {pipeline_name}"
+            fail(code, f"{prefix} from '{model_path}': {exc}")
     except Exception as exc:
-        fail("pipeline_load_failed", f"Failed to load {pipeline_name} from '{model_path}': {exc}")
+        code = "quantization_load_failed" if gpu_quantized_load else "pipeline_load_failed"
+        prefix = "Sana NF4 GPU-only mode could not quantize/load the selected components" if gpu_quantized_load else f"Failed to load {pipeline_name}"
+        fail(code, f"{prefix} from '{model_path}': {exc}")
+    log_elapsed("model_load", model_load_started_at)
 
     # Naive weight casting to float8_e4m3fn breaks matmul (BF16 activations vs FP8 weights).
     # Until a proper FP8 quant path is wired, legacy FP8 requests run BF16 + CPU offload.
@@ -352,14 +388,58 @@ def run_job(job):
     if reference_images:
         pipe_args["image"] = reference_images if len(reference_images) > 1 else reference_images[0]
 
+    denoising_completed_at = None
+    if pipeline_name == "SanaPipeline":
+        def on_sana_step_end(_pipeline, step, _timestep, callback_kwargs):
+            nonlocal denoising_completed_at
+            if int(step) + 1 == steps:
+                if torch.cuda.is_available():
+                    torch.cuda.synchronize()
+                denoising_completed_at = time.perf_counter()
+                log_elapsed("steps_complete", pipeline_started_at)
+            return callback_kwargs
+
+        pipe_args["callback_on_step_end"] = on_sana_step_end
+
+    vae_decode_seconds = None
+    if pipeline_name == "SanaPipeline" and getattr(pipe, "vae", None) is not None:
+        original_vae_decode = pipe.vae.decode
+
+        def timed_vae_decode(*args, **kwargs):
+            nonlocal vae_decode_seconds
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+            decode_started_at = time.perf_counter()
+            try:
+                return original_vae_decode(*args, **kwargs)
+            finally:
+                if torch.cuda.is_available():
+                    torch.cuda.synchronize()
+                vae_decode_seconds = log_elapsed("vae_decode", decode_started_at)
+
+        pipe.vae.decode = timed_vae_decode
+
+    pipeline_started_at = time.perf_counter()
     try:
         output = pipe(**pipe_args)
         generated_image = output.images[0]
     except Exception as exc:
         fail("generation_failed", f"Image generation failed during diffusion sampling: {exc}")
+    pipeline_finished_at = time.perf_counter()
+    log_elapsed("pipeline_total", pipeline_started_at)
+    if denoising_completed_at is not None:
+        print(
+            f"[timing] post_steps_to_pipeline_return_seconds={pipeline_finished_at - denoising_completed_at:.3f}",
+            file=sys.stderr,
+            flush=True,
+        )
+    if vae_decode_seconds is None and pipeline_name == "SanaPipeline":
+        print("[timing] vae_decode_seconds=unavailable", file=sys.stderr, flush=True)
 
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+    png_save_started_at = time.perf_counter()
     generated_image.save(output_path, format="PNG")
+    log_elapsed("png_save", png_save_started_at)
 
     print(json.dumps({
         "success": True,
