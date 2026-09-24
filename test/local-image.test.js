@@ -15,6 +15,9 @@ const {
 	QWEN_IMAGE_2512_CAPABILITIES,
 	QWEN_IMAGE_2512_RESOLUTION_CHOICES,
 	QWEN_IMAGE_RESOLUTION_CHOICES,
+	SANA_RESOLUTION_CHOICES,
+	SANA_TEST_OPTIONS,
+	SANA_CAPABILITIES,
 	createLocalImageDriver,
 	probeRunnerStatus,
 	publicSettings,
@@ -54,6 +57,28 @@ const {
 	assert.strictEqual(quantizedModel.license.spdx, 'CC-BY-NC-SA-4.0');
 	assert.strictEqual(quantizedModel.min_vram_mb, 16384);
 	assert.strictEqual(quantizedModel.recommended_vram_mb, 20480);
+	const sanaModelId = 'model-relay:local-image:sana-1600m-4k';
+	const sanaModel = MODELS[sanaModelId];
+	assert.ok(sanaModel, 'NVIDIA Sana model must exist');
+	assert.strictEqual(sanaModel.repo_id, 'Efficient-Large-Model/Sana_1600M_4Kpx_BF16_diffusers');
+	assert.strictEqual(sanaModel.pipeline, 'SanaPipeline');
+	assert.strictEqual(sanaModel.pretrained_variant, 'bf16');
+	assert.strictEqual(sanaModel.default_precision, 'bf16');
+	assert.strictEqual(sanaModel.default_resolution, '2048x2048');
+	assert.strictEqual(sanaModel.preferred_steps, 20);
+	assert.strictEqual(sanaModel.preferred_guidance_scale, 5);
+	assert.strictEqual(sanaModel.reference_images_max, 0);
+	assert.deepStrictEqual(sanaModel.required_packages, ['sentencepiece']);
+	assert.ok(sanaModel.required_snapshot_paths.includes('tokenizer'));
+	assert.strictEqual(sanaModel.license.spdx, 'Apache-2.0');
+	assert.strictEqual(sanaModel.min_vram_mb, 12288);
+	assert.strictEqual(sanaModel.recommended_vram_mb, 16384);
+	assert.deepStrictEqual(SANA_RESOLUTION_CHOICES.map((choice) => choice.value), ['2048x2048', '4096x4096']);
+	assert.strictEqual(SANA_TEST_OPTIONS.find((option) => option.key === 'quality').choices[0].value, 'bf16');
+	assert.strictEqual(SANA_CAPABILITIES.reference_images, false);
+	assert.strictEqual(SANA_CAPABILITIES.reference_images_max, 0);
+	assert.deepStrictEqual(resolveOutputSize({ resolution: '2048x2048', aspect_ratio: '16:9' }, {}, sanaModelId), { width: 2048, height: 2048 });
+	assert.deepStrictEqual(resolveOutputSize({ resolution: '4096x4096', aspect_ratio: '16:9' }, {}, sanaModelId), { width: 4096, height: 4096 });
 
 	// --- QWEN_IMAGE_TEST_OPTIONS ---
 	assert.ok(Array.isArray(QWEN_IMAGE_TEST_OPTIONS), 'Test options must be an array');
@@ -93,11 +118,11 @@ const {
 	assert.strictEqual(QWEN_IMAGE_CAPABILITIES.candidate_count_max, 1);
 
 	// --- runtime probe requires the imports used by actual generation ---
-	const readyProbe = { cuda_available: true, diffusers_ready: true, transformers_ready: true, qwen_pipeline_ready: true, qwen_image_pipeline_ready: true, qwen_image_img2img_pipeline_ready: true, bitsandbytes_ready: true };
+	const readyProbe = { cuda_available: true, diffusers_ready: true, transformers_ready: true, qwen_pipeline_ready: true, qwen_image_pipeline_ready: true, qwen_image_img2img_pipeline_ready: true, flux2_pipeline_ready: true, sana_pipeline_ready: true, bitsandbytes_ready: true };
 	assert.strictEqual(validateRunnerProbe(readyProbe).ok, true);
 	assert.strictEqual(validateRunnerProbe({ ...readyProbe, transformers_ready: false }).state, 'transformers_missing');
 	assert.strictEqual(validateRunnerProbe({ ...readyProbe, qwen_pipeline_ready: false }).ok, true, 'Runtime may be ready through the newer QwenImage pipeline');
-	assert.strictEqual(validateRunnerProbe({ ...readyProbe, qwen_pipeline_ready: false, qwen_image_pipeline_ready: false }).state, 'diffusers_pipeline_missing');
+	assert.strictEqual(validateRunnerProbe({ ...readyProbe, qwen_pipeline_ready: false, qwen_image_pipeline_ready: false, flux2_pipeline_ready: false, sana_pipeline_ready: false }).state, 'diffusers_pipeline_missing');
 
 	// --- settings / saveSettings round-trip (isolated) ---
 	const originalSecurity = require('../src/security');
@@ -166,7 +191,7 @@ const {
 		runnerPath: path.join(os.tmpdir(), 'nonexistent-image-runner.py'),
 	});
 	assert.strictEqual(driver.id, 'local-image');
-	assert.strictEqual(driver.label, 'Local Image (Qwen-Image)');
+	assert.strictEqual(driver.label, 'Local Image (Diffusers)');
 	assert.ok(Array.isArray(driver.job_types) && driver.job_types.includes('images'), 'Driver must support images job type');
 	assert.ok(typeof driver.capabilities === 'function', 'Driver must expose capabilities()');
 	assert.ok(typeof driver.models === 'function', 'Driver must expose models()');
@@ -180,13 +205,20 @@ const {
 	assert.ok(caps.features && caps.features.fp8_acceleration === false, 'Features must declare naive fp8 acceleration is unavailable');
 
 	const models = driver.models();
-	assert.ok(Array.isArray(models) && models.length >= 2, 'Driver must expose both local image models');
+	assert.ok(Array.isArray(models) && models.length >= 4, 'Driver must expose all supported local image models');
 	const firstModel = models[0];
 	assert.strictEqual(firstModel.type, 'image');
 	assert.strictEqual(firstModel.backend, 'local-image');
 	assert.ok(Array.isArray(firstModel.job_types) && firstModel.job_types.includes('images'));
 	assert.ok(firstModel.image_capabilities && firstModel.image_capabilities.contract_version === 1, 'Model must publish image_capabilities');
 	assert.ok(Array.isArray(firstModel.test_options) && firstModel.test_options.length > 0, 'Model must publish test_options');
+	const sanaPublicModel = models.find((model) => model.id === sanaModelId);
+	assert.ok(sanaPublicModel, 'Sana must appear in the model catalog');
+	assert.strictEqual(sanaPublicModel.image_capabilities.reference_images_max, 0);
+	assert.strictEqual(sanaPublicModel.reference_images_max, 0);
+	assert.strictEqual(sanaPublicModel.pipeline, 'SanaPipeline');
+	assert.deepStrictEqual(sanaPublicModel.test_options.find((option) => option.key === 'resolution').choices.map((choice) => choice.value), ['2048x2048', '4096x4096']);
+	assert.strictEqual(sanaPublicModel.recommended_vram_mb, 16384);
 
 	// --- images() - not-ready path ---
 	const notReadyResult = await driver.images({ prompt: 'test' });
@@ -207,7 +239,7 @@ const {
 		getSettings: () => readyRuntimeSettings,
 		probeRuntime: () => {
 			readinessProbeCalls += 1;
-			return { ok: true, state: 'ready', probe: { cuda_available: true, diffusers_ready: true, qwen_pipeline_ready: true, qwen_image_pipeline_ready: true, qwen_image_img2img_pipeline_ready: true, bitsandbytes_ready: true } };
+			return { ok: true, state: 'ready', probe: { cuda_available: true, diffusers_ready: true, transformers_ready: true, qwen_pipeline_ready: true, qwen_image_pipeline_ready: true, qwen_image_img2img_pipeline_ready: true, flux2_pipeline_ready: true, sana_pipeline_ready: true, bitsandbytes_ready: true } };
 		},
 	};
 	const noWeightsDriver = createLocalImageDriver(readinessOptions);
@@ -216,8 +248,11 @@ const {
 	assert.strictEqual(noWeightsDriver.capabilities().runtime_ready, true, 'Runtime readiness should remain visible separately');
 	assert.strictEqual(noWeightsDriver.models()[0].ready, false, 'Model must be unavailable until its weights are installed');
 	assert.strictEqual(noWeightsDriver.models()[1].ready, false, 'Quantized model must be unavailable until its weights are installed');
+	assert.strictEqual(noWeightsDriver.models().find((model) => model.id === sanaModelId).ready, false, 'Sana model must be unavailable until its weights are installed');
+	assert.strictEqual(noWeightsDriver.models().find((model) => model.id === sanaModelId).state, 'not_installed');
 	assert.strictEqual((await noWeightsDriver.images({ prompt: 'test' })).code, 'local_image_model_not_ready');
 	assert.strictEqual((await noWeightsDriver.images({ model: quantizedModelId, prompt: 'test' })).code, 'local_image_model_not_ready');
+	assert.strictEqual((await noWeightsDriver.images({ model: sanaModelId, prompt: 'test' })).code, 'local_image_model_not_ready');
 	const missingBitsandbytesDriver = createLocalImageDriver({
 		getSettings: () => ({ ...readyRuntimeSettings, model_records: { [quantizedModelId]: { installed: true } } }),
 		probeRuntime: () => ({ ok: true, state: 'ready', probe: { cuda_available: true, diffusers_ready: true, transformers_ready: true, qwen_pipeline_ready: true, qwen_image_pipeline_ready: true, qwen_image_img2img_pipeline_ready: true } }),
@@ -226,6 +261,14 @@ const {
 	assert.strictEqual(missingBitsandbytesDriver.models()[1].ready, false, 'NF4 model must not report ready until bitsandbytes metadata is installed');
 	assert.strictEqual(missingBitsandbytesDriver.capabilities().models[1].state, 'dependency_missing');
 	assert.match(missingBitsandbytesDriver.capabilities().diagnostic, /requires bitsandbytes/i);
+	const missingSanaPipelineDriver = createLocalImageDriver({
+		getSettings: () => ({ ...readyRuntimeSettings, model_records: { [sanaModelId]: { installed: true, repo_id: sanaModel.repo_id } } }),
+		probeRuntime: () => ({ ok: true, state: 'ready', probe: { cuda_available: true, diffusers_ready: true, transformers_ready: true, qwen_pipeline_ready: true, qwen_image_pipeline_ready: true, qwen_image_img2img_pipeline_ready: true, flux2_pipeline_ready: true, sana_pipeline_ready: false } }),
+	});
+	const missingSanaStatus = missingSanaPipelineDriver.models().find((model) => model.id === sanaModelId);
+	assert.strictEqual(missingSanaStatus.ready, false);
+	assert.strictEqual(missingSanaStatus.state, 'runtime_unavailable');
+	assert.deepStrictEqual(missingSanaStatus.missing_requirements, ['sana_pipeline_ready']);
 	await noWeightsDriver.refresh();
 	assert.strictEqual(readinessProbeCalls, 1, 'Ordinary refresh should use the cached runtime probe');
 	await noWeightsDriver.refresh({ forceProbe: true });
@@ -234,6 +277,7 @@ const {
 	// --- standard input_reference_data_url reaches the local runner job ---
 	readyRuntimeSettings.model_records[modelId] = { installed: true, repo_id: MODELS[modelId].repo_id };
 	readyRuntimeSettings.model_records[quantizedModelId] = { installed: true, repo_id: MODELS[quantizedModelId].repo_id };
+	readyRuntimeSettings.model_records[sanaModelId] = { installed: true, repo_id: sanaModel.repo_id };
 	readyRuntimeSettings.allow_model_downloads = true;
 	let capturedJob = null;
 	const inputReference = 'data:image/png;base64,aGVsbG8=';
@@ -312,9 +356,24 @@ const {
 		assert.strictEqual(imageToImage.success, true);
 		assert.strictEqual(capturedJob.model_id, quantizedModelId);
 		assert.strictEqual(capturedJob.reference_images.length, 1, 'Quantized Img2Img must forward one reference image');
+		const sanaTextToImage = await readyDriver.images({ model: sanaModelId, prompt: 'Sana text-to-image' });
+		assert.strictEqual(sanaTextToImage.success, true);
+		assert.strictEqual(capturedJob.model_id, sanaModelId);
+		assert.strictEqual(capturedJob.model_path, sanaModel.repo_id);
+		assert.strictEqual(capturedJob.precision, 'bf16');
+		assert.strictEqual(capturedJob.steps, 20);
+		assert.strictEqual(capturedJob.guidance_scale, 5);
+		assert.deepStrictEqual([capturedJob.width, capturedJob.height], [2048, 2048]);
+		assert.deepStrictEqual(capturedJob.reference_images, []);
+		const sana4k = await readyDriver.images({ model: sanaModelId, prompt: 'Sana 4K', resolution: '4096x4096', aspect_ratio: '16:9' });
+		assert.strictEqual(sana4k.success, true);
+		assert.deepStrictEqual([capturedJob.width, capturedJob.height], [4096, 4096]);
+		const sanaImageToImage = await readyDriver.images({ model: sanaModelId, prompt: 'Sana edit request', input_reference_data_url: inputReference });
+		assert.strictEqual(sanaImageToImage.code, 'local_image_reference_limit');
+		assert.match(sanaImageToImage.message, /text-to-image only/i);
 		const tooManyReferences = await readyDriver.images({ model: quantizedModelId, prompt: 'too many refs', reference_images: [inputReference, secondInputReference] });
 		assert.strictEqual(tooManyReferences.code, 'local_image_reference_limit');
-		assert.strictEqual(imageSpawnCount, 4, 'Reference-limit errors must not start the runner');
+		assert.strictEqual(imageSpawnCount, 6, 'Reference-limit errors must not start the runner');
 		const unknownModel = await readyDriver.images({ model: 'model-relay:local-image:unknown', prompt: 'unknown model' });
 		assert.strictEqual(unknownModel.code, 'local_image_model_unknown');
 		assert.strictEqual(readinessProbeCalls, 3, 'Image jobs must not spawn a synchronous Python readiness probe');
@@ -359,6 +418,7 @@ const {
 	const { providerFromPayload } = require('../src/backend-registry');
 	assert.strictEqual(providerFromPayload({ model: 'model-relay:local-image:qwen-image-2.1' }), 'local-image');
 	assert.strictEqual(providerFromPayload({ model: quantizedModelId }), 'local-image');
+	assert.strictEqual(providerFromPayload({ model: sanaModelId }), 'local-image');
 
 	// --- backend-registry integration: createLocalImageDriver exported ---
 	const { createLocalImageDriver: registryExport } = require('../src/backend-registry');
@@ -373,6 +433,12 @@ const {
 	assert.ok(runnerContent.includes('from diffusers import QwenImage21Pipeline'), 'Runtime probe must import the legacy generation pipeline');
 	assert.ok(runnerContent.includes('from diffusers import QwenImagePipeline'), 'Runtime probe must import the quantized text-to-image pipeline');
 	assert.ok(runnerContent.includes('from diffusers import QwenImageImg2ImgPipeline'), 'Runtime probe must import the quantized image-to-image pipeline');
+	assert.ok(runnerContent.includes('from diffusers import SanaPipeline'), 'Runtime probe must check SanaPipeline readiness');
+	assert.ok(runnerContent.includes('"variant": "bf16"'), 'Sana must load the BF16 variant explicitly');
+	assert.ok(runnerContent.includes('"default_steps": 20'), 'Sana runner profile must default to 20 steps');
+	assert.ok(runnerContent.includes('"default_guidance_scale": 5.0'), 'Sana runner profile must default to guidance scale 5');
+	assert.ok(runnerContent.includes('tile_sample_min_height') && runnerContent.includes('tile_sample_stride_width'), 'Sana profile must define its 4K VAE tiling values');
+	assert.ok(runnerContent.includes('pipe.vae.enable_tiling(**sana_tiling)'), 'Sana 4K must enable its configured VAE tiling');
 	assert.ok(runnerContent.includes('MODEL_PIPELINES'), 'Runner must route model ids through explicit pipeline profiles');
 	assert.ok(runnerContent.includes('model_repo_mismatch'), 'Runner must reject mismatched model ids and repository paths');
 	assert.ok(runnerContent.includes('enable_model_cpu_offload'), 'Runner must use enable_model_cpu_offload');
@@ -386,7 +452,7 @@ const {
 	assert.ok(!runnerContent.includes('.to(torch.float8_e4m3fn)'), 'Runner must not cast transformer weights to float8_e4m3fn');
 	assert.ok(runnerContent.includes('--probe'), 'Runner must support --probe argument');
 	assert.ok(runnerContent.includes('--job-json'), 'Runner must support --job-json argument');
-	assert.ok(!/\"guidance_scale\":\s*guidance_scale/.test(runnerContent), 'Runner must not pass guidance_scale into Qwen pipelines');
+	assert.ok(runnerContent.includes('model_profile.get("guidance_argument", "true_cfg_scale"): guidance_scale'), 'Runner must route guidance through the selected profile');
 
 	// --- local-image.js structural checks ---
 	const driverSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'local-image.js'), 'utf8');

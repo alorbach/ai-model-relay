@@ -91,6 +91,35 @@ const MODELS = {
 		required_snapshot_paths: ['model_index.json', 'transformer'],
 		license: { spdx: 'flux-dev-non-commercial-license', commercial_use: false },
 	},
+	'model-relay:local-image:sana-1600m-4k': {
+		id: 'model-relay:local-image:sana-1600m-4k',
+		label: 'NVIDIA Sana 1.6B BF16 (2K / 4K)',
+		provider: 'sana',
+		repo_id: 'Efficient-Large-Model/Sana_1600M_4Kpx_BF16_diffusers',
+		min_vram_mb: 12288,
+		recommended_vram_mb: 16384,
+		vram_note: 'About 16 GB VRAM recommended for 4K; VAE tiling is applied automatically.',
+		precision: ['bf16'],
+		default_precision: 'bf16',
+		pretrained_variant: 'bf16',
+		preferred_steps: 20,
+		preferred_guidance_scale: 5.0,
+		default_resolution: '2048x2048',
+		reference_images_max: 0,
+		reference_images_unsupported_message: 'NVIDIA Sana supports text-to-image only. Choose a Qwen or FLUX.2 model to edit a reference image.',
+		pipeline: 'SanaPipeline',
+		guidance_argument: 'guidance_scale',
+		probe_requirements: ['sana_pipeline_ready'],
+		required_packages: ['sentencepiece'],
+		required_snapshot_paths: ['model_index.json', 'transformer', 'text_encoder', 'tokenizer', 'vae'],
+		vae_tiling_for_4k: {
+			tile_sample_min_height: 1024,
+			tile_sample_min_width: 1024,
+			tile_sample_stride_height: 896,
+			tile_sample_stride_width: 896,
+		},
+		license: { spdx: 'Apache-2.0', commercial_use: true },
+	},
 };
 
 const QWEN_IMAGE_ASPECT_CHOICES = [
@@ -212,6 +241,31 @@ const FLUX2_CAPABILITIES = imageCapabilityContract(FLUX2_TEST_OPTIONS, {
 	outputFormats: ['image/png'],
 });
 
+const SANA_RESOLUTION_CHOICES = [
+	{ value: '2048x2048', label: '2K - 2048 x 2048' },
+	{ value: '4096x4096', label: '4K - 4096 x 4096 (VAE tiled)' },
+];
+const SANA_TEST_OPTIONS = [
+	{
+		key: 'resolution',
+		label: 'Resolution',
+		delivery: 'direct',
+		choices: SANA_RESOLUTION_CHOICES,
+	},
+	{
+		key: 'quality',
+		label: 'Precision',
+		delivery: 'direct',
+		choices: [{ value: 'bf16', label: 'BF16 (official checkpoint)' }],
+	},
+];
+const SANA_CAPABILITIES = imageCapabilityContract(SANA_TEST_OPTIONS, {
+	resolutionKey: 'resolution',
+	referenceImagesMax: 0,
+	candidateCountMax: 1,
+	outputFormats: ['image/png'],
+});
+
 function parseWxH(value) {
 	const match = String(value || '').trim().toLowerCase().match(/^(\d+)\s*[x×]\s*(\d+)$/i);
 	if (!match) return null;
@@ -254,6 +308,7 @@ function decodeReferenceImage(item) {
 function resolveOutputSize(payload = {}, current = {}, modelId = 'model-relay:local-image:qwen-image-2.1') {
 	const is2512 = modelId === 'model-relay:local-image:qwen-image-2512-4bit';
 	const isFlux2 = modelId === 'model-relay:local-image:flux-2-dev-nf4';
+	const isSana = modelId === 'model-relay:local-image:sana-1600m-4k';
 	const modelSizeFromAspect = (aspectRatio, scale = 1) => {
 		const pair = QWEN_IMAGE_2512_SIZE_TABLE[String(aspectRatio || '1:1').trim()] || QWEN_IMAGE_2512_SIZE_TABLE['1:1'];
 		return { width: pair[0] * scale, height: pair[1] * scale };
@@ -270,7 +325,7 @@ function resolveOutputSize(payload = {}, current = {}, modelId = 'model-relay:lo
 	if (parsed) {
 		// The 2512 profile exposes its native sizes as explicit resolution choices.
 		// Preserve a chosen size even when the request also carries the UI's default ratio.
-		if ((is2512 || isFlux2) && (payload.resolution || payload.size)) return parsed;
+		if ((is2512 || isFlux2 || isSana) && (payload.resolution || payload.size)) return parsed;
 		if (!payload.aspect_ratio) return parsed;
 		if (is2512) return modelSizeFromAspect(aspectRatio, Math.max(parsed.width, parsed.height) >= 1792 ? 2 : 1);
 		const tier = Math.max(parsed.width, parsed.height) >= 1792 ? '2k' : '1k';
@@ -386,7 +441,7 @@ function validateRunnerProbe(probe = {}) {
 	if (!probe.cuda_available) return { ok: false, state: 'cuda_unavailable', probe };
 	if (!probe.diffusers_ready) return { ok: false, state: 'diffusers_missing', probe };
 	if (!probe.transformers_ready) return { ok: false, state: 'transformers_missing', probe };
-	if (!probe.qwen_pipeline_ready && !probe.qwen_image_pipeline_ready && !probe.flux2_pipeline_ready) return { ok: false, state: 'diffusers_pipeline_missing', probe };
+	if (!probe.qwen_pipeline_ready && !probe.qwen_image_pipeline_ready && !probe.flux2_pipeline_ready && !probe.sana_pipeline_ready) return { ok: false, state: 'diffusers_pipeline_missing', probe };
 	return { ok: true, state: 'ready', probe };
 }
 
@@ -679,10 +734,17 @@ function createLocalImageDriver(options = {}) {
 				type: 'image',
 				backend: 'local-image',
 				ready: !!(modelState && modelState.ready),
+				state: modelState ? modelState.state : 'not_checked',
 				job_types: ['images'],
 				label: profile.label,
-				test_options: id === 'model-relay:local-image:flux-2-dev-nf4' ? FLUX2_TEST_OPTIONS : profile.reference_images_max > 1 ? QWEN_IMAGE_TEST_OPTIONS : QWEN_IMAGE_2512_TEST_OPTIONS,
-				image_capabilities: id === 'model-relay:local-image:flux-2-dev-nf4' ? FLUX2_CAPABILITIES : profile.reference_images_max > 1 ? QWEN_IMAGE_CAPABILITIES : QWEN_IMAGE_2512_CAPABILITIES,
+				repo_id: profile.repo_id,
+				pipeline: profile.pipeline,
+				precision: profile.default_precision,
+				reference_images_max: profile.reference_images_max,
+				missing_requirements: modelState ? modelState.missing_requirements : [],
+				default_resolution: profile.default_resolution,
+				test_options: id === 'model-relay:local-image:flux-2-dev-nf4' ? FLUX2_TEST_OPTIONS : id === 'model-relay:local-image:sana-1600m-4k' ? SANA_TEST_OPTIONS : profile.reference_images_max > 1 ? QWEN_IMAGE_TEST_OPTIONS : QWEN_IMAGE_2512_TEST_OPTIONS,
+				image_capabilities: id === 'model-relay:local-image:flux-2-dev-nf4' ? FLUX2_CAPABILITIES : id === 'model-relay:local-image:sana-1600m-4k' ? SANA_CAPABILITIES : profile.reference_images_max > 1 ? QWEN_IMAGE_CAPABILITIES : QWEN_IMAGE_2512_CAPABILITIES,
 				license: profile.license,
 				min_vram_mb: profile.min_vram_mb,
 				recommended_vram_mb: profile.recommended_vram_mb,
@@ -771,7 +833,7 @@ function createLocalImageDriver(options = {}) {
 			try {
 				const referencePaths = Array.isArray(payload.referenced_image_paths) ? payload.referenced_image_paths.filter(Boolean) : [];
 				if (rawImages.length + referencePaths.length > modelProfile.reference_images_max) {
-					return { success: false, category: 'validation', code: 'local_image_reference_limit', message: `${modelProfile.label} accepts at most ${modelProfile.reference_images_max} reference image${modelProfile.reference_images_max === 1 ? '' : 's'}.` };
+					return { success: false, category: 'validation', code: 'local_image_reference_limit', message: modelProfile.reference_images_unsupported_message || `${modelProfile.label} accepts at most ${modelProfile.reference_images_max} reference image${modelProfile.reference_images_max === 1 ? '' : 's'}.` };
 				}
 				for (const item of rawImages) {
 					const image = decodeReferenceImage(item);
@@ -938,6 +1000,9 @@ module.exports = {
 	QWEN_IMAGE_CAPABILITIES,
 	QWEN_IMAGE_2512_TEST_OPTIONS,
 	QWEN_IMAGE_2512_CAPABILITIES,
+	SANA_RESOLUTION_CHOICES,
+	SANA_TEST_OPTIONS,
+	SANA_CAPABILITIES,
 	createLocalImageDriver,
 	parseWxH,
 	probeRunnerStatus,

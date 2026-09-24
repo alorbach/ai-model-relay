@@ -2899,7 +2899,8 @@ function statusPageHtml() {
                                 const isVideo = jobType === 'videos';
                                 const isMediaAnalysis = jobType === 'media.analyze';
                                 const isAudio = jobType === 'transcribe' || jobType === 'music.analyze';
-				const reference = '<label class="field"><span>Reference image (optional)</span><input type="file" accept="image/png,image/jpeg,image/webp" data-test-reference></label>';
+				const referenceLimit = model.image_capabilities && Number(model.image_capabilities.reference_images_max);
+				const reference = referenceLimit === 0 ? '' : '<label class="field"><span>Reference image (optional)</span><input type="file" accept="image/png,image/jpeg,image/webp" data-test-reference></label>';
 				const media = '<label class="field"><span>Video file (MP4, MOV, WebM, or AVI; small test file)</span><input type="file" accept="video/mp4,video/quicktime,video/webm,video/x-msvideo,.mp4,.mov,.webm,.avi" data-test-media></label>';
 				const audio = '<label class="field"><span>Audio file</span><input type="file" accept="audio/*,.mp3,.wav,.m4a,.flac,.ogg,.webm" data-test-audio></label>';
 				const promptField = isAudio ? '' : '<label class="field"><span>Test prompt</span><input type="text" data-test-prompt value="' + escapeHtml(prompt) + '"></label>';
@@ -3435,7 +3436,7 @@ function statusPageHtml() {
 			fields.imageModelStates.textContent = 'Models: ' + (Array.isArray(models) && models.length ? models.map((model) => String(model.label || model.id || 'model') + ' — ' + String(model.state || 'not checked')).join(' · ') : 'not checked');
 			fields.imageInstallActions.innerHTML = (Array.isArray(models) ? models : []).map((model) => (
 				'<div class="field"><strong>' + escapeHtml(String(model.label || model.id)) + '</strong><br>' +
-				'<small class="muted">Diffusers · ' + escapeHtml(String(model.precision || 'BF16')) + ' · ' + (Number(model.reference_images_max) === 1 ? '1 reference image' : 'up to ' + escapeHtml(String(model.reference_images_max || 10)) + ' reference images') + (model.vram_note ? ' · ' + escapeHtml(String(model.vram_note)) : '') + '</small><br>' +
+				'<small class="muted">Diffusers · ' + escapeHtml(String(model.precision || 'BF16')) + ' · ' + (Number(model.reference_images_max) === 0 ? 'text-to-image only' : Number(model.reference_images_max) === 1 ? '1 reference image' : 'up to ' + escapeHtml(String(model.reference_images_max)) + ' reference images') + (model.vram_note ? ' · ' + escapeHtml(String(model.vram_note)) : '') + '</small><br>' +
 				'<button type="button" data-image-install="' + escapeHtml(String(model.id)) + '">' +
 				(model.state === 'installed' ? 'Repair / Reinstall Model' : 'Install Model') +
 				'</button></div>'

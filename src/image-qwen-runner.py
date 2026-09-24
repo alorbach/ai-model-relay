@@ -47,6 +47,7 @@ def run_probe():
         "qwen_image_pipeline_ready": False,
         "qwen_image_img2img_pipeline_ready": False,
         "flux2_pipeline_ready": False,
+        "sana_pipeline_ready": False,
         "bitsandbytes_ready": False,
     }
 
@@ -87,6 +88,12 @@ def run_probe():
         probe["flux2_pipeline_ready"] = Flux2Pipeline is not None
     except Exception as exc:
         probe["flux2_pipeline_error"] = str(exc)
+
+    try:
+        from diffusers import SanaPipeline
+        probe["sana_pipeline_ready"] = SanaPipeline is not None
+    except Exception as exc:
+        probe["sana_pipeline_error"] = str(exc)
 
     try:
         from importlib.metadata import version
@@ -145,6 +152,24 @@ MODEL_PIPELINES = {
         "precisions": ("nf4-bf16",),
         "max_reference_images": 10,
         "guidance_argument": "guidance_scale",
+    },
+    "model-relay:local-image:sana-1600m-4k": {
+        "repo_id": "Efficient-Large-Model/Sana_1600M_4Kpx_BF16_diffusers",
+        "text_pipeline": "SanaPipeline",
+        "default_precision": "bf16",
+        "precisions": ("bf16",),
+        "max_reference_images": 0,
+        "variant": "bf16",
+        "default_steps": 20,
+        "default_guidance_scale": 5.0,
+        "guidance_argument": "guidance_scale",
+        "vae_tiling_for_4k": {
+            "tile_sample_min_height": 1024,
+            "tile_sample_min_width": 1024,
+            "tile_sample_stride_height": 896,
+            "tile_sample_stride_width": 896,
+        },
+        "reference_images_unsupported_message": "NVIDIA Sana supports text-to-image only. Choose a Qwen or FLUX.2 model to edit a reference image.",
     },
 }
 
@@ -205,15 +230,15 @@ def run_job(job):
         fail("precision_unsupported", f"Precision '{precision}' is not supported by {model_id}.")
     cpu_offload = bool(job.get("cpu_offload", True))
     vae_tiling = bool(job.get("vae_tiling", True))
-    steps = int(job.get("num_inference_steps") or job.get("steps") or 40)
+    steps = int(job.get("num_inference_steps") or job.get("steps") or model_profile.get("default_steps") or 40)
     # Qwen-Image-2.1 uses true_cfg_scale (default 1.0 = no CFG). guidance_scale is accepted as a legacy alias.
     guidance_scale = float(
         job.get("true_cfg_scale")
         if job.get("true_cfg_scale") is not None
-        else (job.get("guidance_scale") if job.get("guidance_scale") is not None else 1.0)
+        else (job.get("guidance_scale") if job.get("guidance_scale") is not None else model_profile.get("default_guidance_scale", 1.0))
     )
     negative_prompt = str(job.get("negative_prompt") or "").strip()
-    if negative_prompt and model_profile.get("guidance_argument") == "guidance_scale":
+    if negative_prompt and model_id == "model-relay:local-image:flux-2-dev-nf4":
         fail("negative_prompt_unsupported", "This FLUX.2 Diffusers pipeline does not accept a negative_prompt; remove it and guide the image with the positive prompt.")
     seed = job.get("seed")
 
@@ -229,7 +254,7 @@ def run_job(job):
     if isinstance(raw_refs, (str, bytes)):
         raw_refs = [raw_refs]
     if len(raw_refs) > model_profile["max_reference_images"]:
-        fail("reference_image_limit", f"This model accepts at most {model_profile['max_reference_images']} reference image(s).")
+        fail("reference_image_limit", model_profile.get("reference_images_unsupported_message") or f"This model accepts at most {model_profile['max_reference_images']} reference image(s).")
     for raw in raw_refs[:model_profile["max_reference_images"]]:
         img = decode_image(raw)
         if img is not None:
@@ -246,6 +271,8 @@ def run_job(job):
     load_kwargs = {
         "local_files_only": bool(job.get("local_files_only", False)),
     }
+    if model_profile.get("variant"):
+        load_kwargs["variant"] = model_profile["variant"]
     # Prefer dtype= (diffusers >=1.0); fall back to torch_dtype for older installs.
     try:
         pipe = pipeline_class.from_pretrained(model_path, dtype=torch_dtype, **load_kwargs)
@@ -266,6 +293,19 @@ def run_job(job):
         )
         precision = "bf16"
 
+    sana_tiling = model_profile.get("vae_tiling_for_4k") if max(width, height) >= 4096 else None
+    if sana_tiling:
+        if not vae_tiling:
+            sys.stderr.write("VAE tiling is required for Sana 4K and will be enabled for this job.\n")
+        try:
+            pipe.vae.enable_tiling(**sana_tiling)
+        except Exception as tiling_err:
+            fail(
+                "vae_tiling_failed",
+                "Sana 4K requires VAE tiling, but the configured tiling could not be enabled: "
+                f"{tiling_err}",
+            )
+
     if cpu_offload:
         try:
             pipe.enable_model_cpu_offload()
@@ -278,7 +318,7 @@ def run_job(job):
     else:
         pipe.to("cuda")
 
-    if vae_tiling:
+    if vae_tiling and not sana_tiling:
         try:
             if hasattr(pipe, "enable_vae_tiling"):
                 pipe.enable_vae_tiling()
