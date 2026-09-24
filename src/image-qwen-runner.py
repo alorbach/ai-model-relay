@@ -55,6 +55,8 @@ def run_probe():
         "qwen_image_img2img_pipeline_ready": False,
         "flux2_pipeline_ready": False,
         "sana_pipeline_ready": False,
+        "ideogram_pipeline_ready": False,
+        "gguf_ready": False,
         "bitsandbytes_ready": False,
     }
 
@@ -101,6 +103,19 @@ def run_probe():
         probe["sana_pipeline_ready"] = SanaPipeline is not None
     except Exception as exc:
         probe["sana_pipeline_error"] = str(exc)
+
+    try:
+        from ideogram4 import Ideogram4Pipeline, PRESETS
+        probe["ideogram_pipeline_ready"] = Ideogram4Pipeline is not None and bool(PRESETS)
+    except Exception as exc:
+        probe["ideogram_pipeline_error"] = str(exc)
+
+    try:
+        import gguf
+        probe["gguf_ready"] = gguf is not None
+        probe["gguf_version"] = getattr(gguf, "__version__", "")
+    except Exception as exc:
+        probe["gguf_error"] = str(exc)
 
     try:
         from importlib.metadata import version
@@ -179,7 +194,195 @@ MODEL_PIPELINES = {
         },
         "reference_images_unsupported_message": "NVIDIA Sana supports text-to-image only. Choose a Qwen or FLUX.2 model to edit a reference image.",
     },
+    "model-relay:local-image:ideogram-4-gguf-q4-k": {
+        "repo_id": "transformerlab/ideogram-4-gguf-q4_k",
+        "base_weights_repo_id": "ideogram-ai/ideogram-4-fp8",
+        "pipeline": "Ideogram4Pipeline",
+        "default_precision": "q4-k-bf16",
+        "precisions": ("q4-k-bf16",),
+        "gpu_only_precisions": ("q4-k-bf16",),
+        "max_reference_images": 0,
+        "default_steps": 20,
+        "default_sampler_preset": "V4_DEFAULT_20",
+        "sampler_presets": ("V4_TURBO_12", "V4_DEFAULT_20", "V4_QUALITY_48"),
+        "reference_images_unsupported_message": "Ideogram 4.0 supports text-to-image only; reference-image editing is unavailable.",
+    },
 }
+
+
+IDEOGRAM_MODEL_ID = "model-relay:local-image:ideogram-4-gguf-q4-k"
+IDEOGRAM_MIN_RESOLUTION = 256
+IDEOGRAM_MAX_RESOLUTION = 2048
+IDEOGRAM_RESOLUTION_MULTIPLE = 16
+IDEOGRAM_MAX_ASPECT_RATIO = 6.0
+
+
+def validate_ideogram_dimensions(width, height):
+    width = int(width)
+    height = int(height)
+    if (width < IDEOGRAM_MIN_RESOLUTION or height < IDEOGRAM_MIN_RESOLUTION
+            or width > IDEOGRAM_MAX_RESOLUTION or height > IDEOGRAM_MAX_RESOLUTION
+            or width % IDEOGRAM_RESOLUTION_MULTIPLE or height % IDEOGRAM_RESOLUTION_MULTIPLE):
+        raise ValueError(
+            f"Ideogram 4.0 width and height must be multiples of {IDEOGRAM_RESOLUTION_MULTIPLE} "
+            f"from {IDEOGRAM_MIN_RESOLUTION} to {IDEOGRAM_MAX_RESOLUTION} pixels."
+        )
+    ratio = max(width / height, height / width)
+    if ratio > IDEOGRAM_MAX_ASPECT_RATIO:
+        raise ValueError(f"Ideogram 4.0 supports aspect ratios up to {IDEOGRAM_MAX_ASPECT_RATIO}:1.")
+
+
+def load_ideogram_gguf_tensors(gguf_path):
+    """Load the TransformerLab GGUF linears into CPU BF16 tensors.
+
+    The source checkpoint is GGUF Q4_K. This reference loading path expands
+    linear tensors to BF16 during layer replacement and therefore has high
+    system-memory and VRAM requirements.
+    """
+    import numpy as np
+    import torch
+    from gguf import GGMLQuantizationType, GGUFReader, dequantize
+
+    plain_types = {GGMLQuantizationType.F16, GGMLQuantizationType.F32}
+    reader = GGUFReader(gguf_path)
+    tensors = {}
+    for tensor in reader.tensors:
+        array = np.array(tensor.data) if tensor.tensor_type in plain_types else dequantize(tensor.data, tensor.tensor_type)
+        shape = tuple(int(dim) for dim in reversed(tensor.shape))
+        tensors[tensor.name] = torch.from_numpy(np.ascontiguousarray(array).reshape(shape)).to(torch.bfloat16)
+    return tensors
+
+
+def swap_ideogram_gguf_branch(transformer, tensors, branch):
+    """Replace official FP8 linear modules with matching TransformerLab Q4_K tensors."""
+    import torch.nn as nn
+    import torch
+
+    swapped = 0
+    for parent_name, parent in transformer.named_modules():
+        for child_name, child in list(parent.named_children()):
+            weight = getattr(child, "weight", None)
+            if weight is None or weight.ndim != 2 or weight.dtype != torch.float8_e4m3fn:
+                continue
+            full_name = f"{parent_name}.{child_name}" if parent_name else child_name
+            weight_key = f"{branch}.{full_name}.weight"
+            bias_key = f"{branch}.{full_name}.bias"
+            if weight_key not in tensors:
+                continue
+            replacement_weight = tensors[weight_key].to(weight.device)
+            linear = nn.Linear(
+                replacement_weight.shape[1], replacement_weight.shape[0],
+                bias=(bias_key in tensors), dtype=torch.bfloat16, device=weight.device,
+            )
+            linear.weight = nn.Parameter(replacement_weight, requires_grad=False)
+            if bias_key in tensors:
+                linear.bias = nn.Parameter(tensors[bias_key].to(weight.device), requires_grad=False)
+            setattr(parent, child_name, linear)
+            swapped += 1
+    return swapped
+
+
+def run_ideogram_job(job, prompt, output_path, width, height, seed, precision):
+    import gc
+    import torch
+    from huggingface_hub import hf_hub_download
+    from ideogram4 import Ideogram4Pipeline, Ideogram4PipelineConfig, PRESETS
+
+    validate_ideogram_dimensions(width, height)
+    preset_name = str(job.get("sampler_preset") or "V4_DEFAULT_20").strip()
+    if preset_name not in ("V4_TURBO_12", "V4_DEFAULT_20", "V4_QUALITY_48") or preset_name not in PRESETS:
+        fail("sampler_unsupported", f"Unsupported Ideogram 4.0 sampler preset: {preset_name}.")
+    model_repo = str(job.get("model_path") or MODEL_PIPELINES[IDEOGRAM_MODEL_ID]["repo_id"])
+    if model_repo != MODEL_PIPELINES[IDEOGRAM_MODEL_ID]["repo_id"]:
+        fail("model_repo_mismatch", "The model path does not match the selected Ideogram 4.0 Q4_K profile.")
+    base_repo = MODEL_PIPELINES[IDEOGRAM_MODEL_ID]["base_weights_repo_id"]
+    if job.get("negative_prompt"):
+        fail("negative_prompt_unsupported", "Ideogram 4.0 does not accept a separate negative_prompt; include the desired guidance in the main prompt.")
+    if bool(job.get("local_files_only", False)):
+        os.environ["HF_HUB_OFFLINE"] = "1"
+    try:
+        gguf_path = hf_hub_download(repo_id=model_repo, filename="ideogram4-q4_k.gguf", local_files_only=True)
+    except Exception as exc:
+        text = str(exc)
+        if any(marker in text.lower() for marker in ("localentrynotfound", "offline mode", "not found in the cached", "no such file")):
+            fail("gguf_file_missing", "The Ideogram 4.0 Q4_K checkpoint is not installed in the local Hugging Face cache. Run Setup for this model.")
+        if any(marker in text.lower() for marker in ("gatedrepo", "401", "403", "repository not found")):
+            fail("model_access_required", f"Hugging Face access to '{model_repo}' is required. Accept the model terms and authenticate before running Setup.")
+        fail("gguf_download_failed", f"Could not locate the locally installed Ideogram 4.0 Q4_K checkpoint: {exc}")
+    started_at = time.perf_counter()
+    try:
+        # The official pipeline supplies the FP8 architecture, gated encoder and
+        # VAE. TransformerLab's loader then replaces both DiT branches with Q4_K.
+        pipe = Ideogram4Pipeline.from_pretrained(
+            config=Ideogram4PipelineConfig(weights_repo=base_repo),
+            device="cuda",
+            dtype=torch.bfloat16,
+        )
+    except Exception as exc:
+        text = str(exc)
+        if any(marker in text.lower() for marker in ("gatedrepo", "401", "403", "repository not found")):
+            fail("model_access_required", f"Hugging Face access to '{base_repo}' is required. Accept the model terms and authenticate before running Setup.")
+        if any(marker in text.lower() for marker in ("localentrynotfound", "offline mode", "not found in the cached", "no such file", "entrynotfound")):
+            fail("base_components_missing", f"Ideogram 4.0 text encoder, tokenizer, transformer, or VAE files are missing from the local cache for '{base_repo}'. Run Setup for this model and verify gated-repository access.")
+        if isinstance(exc, torch.OutOfMemoryError):
+            fail("cuda_out_of_memory", "Ideogram 4.0 ran out of GPU memory while loading the base pipeline. The Q4_K reference loader expands weights to BF16; 24 GB may still be insufficient.")
+        fail("pipeline_load_failed", f"Failed to load the official Ideogram 4.0 base pipeline: {exc}")
+    log_elapsed("model_load", started_at)
+
+    replacement_started_at = time.perf_counter()
+    try:
+        tensors = load_ideogram_gguf_tensors(gguf_path)
+        cond_count = swap_ideogram_gguf_branch(pipe.conditional_transformer, tensors, "cond")
+        uncond_count = swap_ideogram_gguf_branch(pipe.unconditional_transformer, tensors, "uncond")
+        del tensors
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        if not cond_count or not uncond_count:
+            fail("gguf_weights_mismatch", f"The Q4_K checkpoint did not match the expected Ideogram transformer layers (conditional={cond_count}, unconditional={uncond_count}).")
+    except Exception as exc:
+        if isinstance(exc, SystemExit):
+            raise
+        if isinstance(exc, torch.OutOfMemoryError):
+            fail("cuda_out_of_memory", "Ideogram 4.0 ran out of GPU memory while replacing FP8 weights with Q4_K tensors. The reference loader expands weights to BF16.")
+        fail("gguf_load_failed", f"Failed to load the TransformerLab Q4_K checkpoint: {exc}")
+    log_elapsed("gguf_weight_swap", replacement_started_at)
+
+    preset = PRESETS[preset_name]
+    generate_started_at = time.perf_counter()
+    try:
+        images = pipe(
+            prompt,
+            width=width,
+            height=height,
+            num_steps=preset.num_steps,
+            guidance_schedule=preset.guidance_schedule,
+            mu=preset.mu,
+            std=preset.std,
+            seed=int(seed) if seed is not None else 0,
+            raise_on_caption_issues=False,
+        )
+    except Exception as exc:
+        if isinstance(exc, torch.OutOfMemoryError):
+            fail("cuda_out_of_memory", "Ideogram 4.0 ran out of GPU memory during generation. Try a smaller image or close other GPU workloads.")
+        fail("generation_failed", f"Ideogram 4.0 generation failed: {exc}")
+    log_elapsed("pipeline_total", generate_started_at)
+    if not images:
+        fail("generation_empty", "Ideogram 4.0 returned no image.")
+    os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+    images[0].save(output_path, format="PNG")
+    print(json.dumps({
+        "success": True,
+        "output_path": output_path,
+        "width": images[0].width,
+        "height": images[0].height,
+        "format": "image/png",
+        "mode": images[0].mode,
+        "precision": precision,
+        "steps": preset.num_steps,
+        "sampler_preset": preset_name,
+        "seed": seed if seed is not None else 0,
+    }))
 
 
 ASPECT_RATIOS_2K = {
@@ -269,6 +472,12 @@ def run_job(job):
         img = decode_image(raw)
         if img is not None:
             reference_images.append(img)
+
+    if model_id == IDEOGRAM_MODEL_ID:
+        if reference_images:
+            fail("reference_image_limit", model_profile["reference_images_unsupported_message"])
+        run_ideogram_job(job, prompt, output_path, width, height, seed, precision)
+        return
 
     try:
         import diffusers

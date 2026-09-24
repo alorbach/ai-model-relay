@@ -125,6 +125,50 @@ const MODELS = {
 		},
 		license: { spdx: 'Apache-2.0', commercial_use: true },
 	},
+	'model-relay:local-image:ideogram-4-gguf-q4-k': {
+		id: 'model-relay:local-image:ideogram-4-gguf-q4-k',
+		label: 'Ideogram 4.0 GGUF Q4_K (PyTorch)',
+		provider: 'ideogram4-gguf',
+		repo_id: 'transformerlab/ideogram-4-gguf-q4_k',
+		base_weights_repo_id: 'ideogram-ai/ideogram-4-fp8',
+		min_vram_mb: 65536,
+		recommended_vram_mb: 81920,
+		vram_note: 'The reference Q4_K loader expands DiT linears to BF16. This integration needs very high VRAM; 24 GB may still be insufficient and 12 GB is unsupported.',
+		precision: ['q4-k-bf16'],
+		default_precision: 'q4-k-bf16',
+		weights_quantization: 'q4_k',
+		compute_dtype: 'bf16',
+		precision_from_settings: false,
+		default_sampler_preset: 'V4_DEFAULT_20',
+		sampler_presets: ['V4_TURBO_12', 'V4_DEFAULT_20', 'V4_QUALITY_48'],
+		prompt_note: 'Ideogram was trained on structured JSON image descriptions. Direct plain-text prompts are passed through unchanged but may give less precise results.',
+		default_resolution: '1024x1024',
+		resolution_constraints: { min: 256, max: 2048, multiple: 16, max_aspect_ratio: 6 },
+		preferred_steps: 20,
+		timeout_ms: 3600000,
+		download_timeout_ms: 5400000,
+		large_output_timeout_ms: 3600000,
+		large_output_threshold_px: 1792,
+		gpu_only_precisions: ['q4-k-bf16'],
+		reference_images_max: 0,
+		reference_images_unsupported_message: 'Ideogram 4.0 supports text-to-image only; reference-image editing is unavailable.',
+		pipeline: 'Ideogram4Pipeline',
+		probe_requirements: ['ideogram_pipeline_ready', 'gguf_ready'],
+		required_packages: ['gguf'],
+		python_packages: ['git+https://github.com/ideogram-oss/ideogram4.git'],
+		required_snapshot_paths: ['ideogram4-q4_k.gguf'],
+		dependency_repos: [{
+			repo_id: 'ideogram-ai/ideogram-4-fp8',
+			required_snapshot_paths: [
+				'transformer/diffusion_pytorch_model.safetensors.index.json',
+				'unconditional_transformer/diffusion_pytorch_model.safetensors.index.json',
+				'text_encoder/config.json',
+				'tokenizer/tokenizer_config.json',
+				'vae/diffusion_pytorch_model.safetensors',
+			],
+		}],
+		license: { spdx: 'ideogram-4-non-commercial', commercial_use: false },
+	},
 };
 
 const QWEN_IMAGE_ASPECT_CHOICES = [
@@ -293,6 +337,31 @@ const SANA_CAPABILITIES = imageCapabilityContract(SANA_TEST_OPTIONS, {
 	outputFormats: ['image/png'],
 });
 
+const IDEOGRAM_TEST_OPTIONS = [
+	{
+		key: 'resolution',
+		label: 'Resolution (256–2048, multiples of 16, aspect ratio up to 6:1)',
+		delivery: 'direct',
+		input: { type: 'text', default_value: '1024x1024', placeholder: 'width x height' },
+	},
+	{
+		key: 'sampler_preset',
+		label: 'Sampler preset',
+		delivery: 'direct',
+		choices: [
+			{ value: 'V4_TURBO_12', label: 'Turbo · 12 steps' },
+			{ value: 'V4_DEFAULT_20', label: 'Default · 20 steps' },
+			{ value: 'V4_QUALITY_48', label: 'Quality · 48 steps' },
+		],
+	},
+];
+const IDEOGRAM_CAPABILITIES = imageCapabilityContract(IDEOGRAM_TEST_OPTIONS, {
+	resolutionKey: 'resolution',
+	referenceImagesMax: 0,
+	candidateCountMax: 1,
+	outputFormats: ['image/png'],
+});
+
 function parseWxH(value) {
 	const match = String(value || '').trim().toLowerCase().match(/^(\d+)\s*[x×]\s*(\d+)$/i);
 	if (!match) return null;
@@ -346,6 +415,7 @@ function resolveOutputSize(payload = {}, current = {}, modelId = 'model-relay:lo
 	const is2512 = modelId === 'model-relay:local-image:qwen-image-2512-4bit';
 	const isFlux2 = modelId === 'model-relay:local-image:flux-2-dev-nf4';
 	const isSana = modelId === 'model-relay:local-image:sana-1600m-4k';
+	const isIdeogram = modelId === 'model-relay:local-image:ideogram-4-gguf-q4-k';
 	const modelSizeFromAspect = (aspectRatio, scale = 1) => {
 		const pair = QWEN_IMAGE_2512_SIZE_TABLE[String(aspectRatio || '1:1').trim()] || QWEN_IMAGE_2512_SIZE_TABLE['1:1'];
 		return { width: pair[0] * scale, height: pair[1] * scale };
@@ -360,6 +430,7 @@ function resolveOutputSize(payload = {}, current = {}, modelId = 'model-relay:lo
 	const parsed = parseWxH(sizeRaw);
 	const aspectRatio = String(payload.aspect_ratio || '1:1').trim() || '1:1';
 	if (parsed) {
+		if (isIdeogram || isSana || is2512 || isFlux2) return parsed;
 		// The 2512 profile exposes its native sizes as explicit resolution choices.
 		// Preserve a chosen size even when the request also carries the UI's default ratio.
 		if ((is2512 || isFlux2 || isSana) && (payload.resolution || payload.size)) return parsed;
@@ -376,6 +447,21 @@ function resolveOutputSize(payload = {}, current = {}, modelId = 'model-relay:lo
 
 	if (is2512) return modelSizeFromAspect(aspectRatio);
 	return sizeFromAspect(aspectRatio, '1k');
+}
+
+function validateModelOutputSize(modelProfile, size) {
+	const limits = modelProfile && modelProfile.resolution_constraints;
+	if (!limits) return null;
+	const width = Number(size && size.width);
+	const height = Number(size && size.height);
+	if (!Number.isInteger(width) || !Number.isInteger(height)
+		|| width < limits.min || height < limits.min || width > limits.max || height > limits.max
+		|| width % limits.multiple !== 0 || height % limits.multiple !== 0) {
+		return `Ideogram 4.0 width and height must be multiples of ${limits.multiple} from ${limits.min} to ${limits.max} pixels.`;
+	}
+	const ratio = Math.max(width / height, height / width);
+	if (ratio > limits.max_aspect_ratio) return `Ideogram 4.0 supports aspect ratios up to ${limits.max_aspect_ratio}:1.`;
+	return null;
 }
 
 function unpackedAsarPath(sourcePath) {
@@ -478,7 +564,7 @@ function validateRunnerProbe(probe = {}) {
 	if (!probe.cuda_available) return { ok: false, state: 'cuda_unavailable', probe };
 	if (!probe.diffusers_ready) return { ok: false, state: 'diffusers_missing', probe };
 	if (!probe.transformers_ready) return { ok: false, state: 'transformers_missing', probe };
-	if (!probe.qwen_pipeline_ready && !probe.qwen_image_pipeline_ready && !probe.flux2_pipeline_ready && !probe.sana_pipeline_ready) return { ok: false, state: 'diffusers_pipeline_missing', probe };
+	if (!probe.qwen_pipeline_ready && !probe.qwen_image_pipeline_ready && !probe.flux2_pipeline_ready && !probe.sana_pipeline_ready && !probe.ideogram_pipeline_ready) return { ok: false, state: 'diffusers_pipeline_missing', probe };
 	return { ok: true, state: 'ready', probe };
 }
 
@@ -614,7 +700,7 @@ async function setup(options = {}) {
 	const torchConstraintFile = constraintPath(venvDir);
 	fs.writeFileSync(torchConstraintFile, constraintText);
 
-	const packages = ['transformers>=5.17', 'git+https://github.com/huggingface/diffusers', 'accelerate', 'pillow', 'huggingface_hub', ...(modelProfile.required_packages || [])];
+	const packages = ['transformers>=5.17', 'git+https://github.com/huggingface/diffusers', 'accelerate', 'pillow', 'huggingface_hub', ...(modelProfile.required_packages || []), ...(modelProfile.python_packages || [])];
 	emit('stdout', 'Installing Diffusers and dependencies with CUDA PyTorch pinned...\n');
 	const pkgsResult = await run(venvPython, ['-m', 'pip', 'install', '--disable-pip-version-check', '--progress-bar', 'off', '--constraint', torchConstraintFile, ...packages], { timeout: SETUP_TIMEOUT_MS, onOutput: emit });
 	if (pkgsResult.error || pkgsResult.status !== 0) {
@@ -625,25 +711,42 @@ async function setup(options = {}) {
 	const updatedRecords = { ...(current.model_records || {}) };
 
 	if (downloadModel) {
-		emit('stdout', `Prefetching full model snapshot for ${modelProfile.repo_id} from Hugging Face...\n`);
+		const repos = [{ repo_id: modelProfile.repo_id, required_snapshot_paths: modelProfile.required_snapshot_paths || ['processor/chat_template.jinja'] }, ...(modelProfile.dependency_repos || [])];
+		emit('stdout', `Prefetching ${repos.length} model snapshot${repos.length === 1 ? '' : 's'} from Hugging Face...\n`);
 		const downloadScript = [
 			'import os',
 			'from huggingface_hub import snapshot_download',
-			`path = snapshot_download(repo_id="${modelProfile.repo_id}")`,
-			`required_paths = ${JSON.stringify(modelProfile.required_snapshot_paths || ['processor/chat_template.jinja'])}`,
-			'missing = [item for item in required_paths if not os.path.exists(os.path.join(path, item))]',
-			'if missing:',
-			'\traise SystemExit("Incomplete snapshot: missing required model paths: " + ", ".join(missing))',
-			'print("MODEL_SNAPSHOT_OK=" + path)',
+			`repos = ${JSON.stringify(repos)}`,
+			'for repo in repos:',
+			'    repo_id = repo["repo_id"]',
+			'    print("Downloading " + repo_id, flush=True)',
+			'    path = snapshot_download(repo_id=repo_id)',
+			'    missing = [item for item in repo.get("required_snapshot_paths", []) if not os.path.exists(os.path.join(path, item))]',
+			'    if missing:',
+			'        raise SystemExit("Incomplete snapshot for " + repo_id + ": missing required paths: " + ", ".join(missing))',
+			'    print("MODEL_SNAPSHOT_OK=" + repo_id + "=" + path, flush=True)',
 		].join('\n');
-		const dlResult = await run(venvPython, ['-c', downloadScript], { timeout: SETUP_TIMEOUT_MS, onOutput: emit });
+		const dlResult = await run(venvPython, ['-c', downloadScript], { timeout: Number(modelProfile.download_timeout_ms || SETUP_TIMEOUT_MS), onOutput: emit });
 		if (dlResult.error || dlResult.status !== 0) {
-			return { success: false, category: 'configuration', code: 'local_image_model_download_failed', message: `Failed to download model weights for ${modelProfile.repo_id}.`, details: { error: dlResult.stderr || dlResult.stdout, log: collectedLog() } };
+			const errorText = String(dlResult.stderr || dlResult.stdout || '');
+			const gated = /GatedRepoError|401 Client Error|403 Client Error|Access to model|gated repo/i.test(errorText);
+			const gatedRepo = (modelProfile.dependency_repos || []).find((repo) => errorText.includes(repo.repo_id));
+			const repoName = gatedRepo ? gatedRepo.repo_id : modelProfile.repo_id;
+			return {
+				success: false,
+				category: 'configuration',
+				code: gated ? 'local_image_model_access_required' : 'local_image_model_download_failed',
+				message: gated
+					? `Hugging Face access is required for ${repoName}. Accept the model terms on its Hugging Face page and sign in with an authorized token, then run Setup again.`
+					: `Failed to download model weights or components for ${repoName}.`,
+				details: { error: errorText, log: collectedLog() },
+			};
 		}
 		updatedRecords[modelId] = {
 			installed: true,
 			installed_at: new Date().toISOString(),
 			repo_id: modelProfile.repo_id,
+			dependency_repo_ids: (modelProfile.dependency_repos || []).map((repo) => repo.repo_id),
 		};
 	}
 
@@ -704,16 +807,21 @@ function createLocalImageDriver(options = {}) {
 			const modelProbe = probe.probe || {};
 			const missingRequirements = (profile.probe_requirements || []).filter((key) => modelProbe[key] !== true);
 			const pipelineReady = runtimeReady && modelPipelineReady(profile, modelProbe);
+			const vramTotalMb = Number(modelProbe.vram_total_mb) || 0;
+			const hardwareSupported = !vramTotalMb || !profile.min_vram_mb || vramTotalMb >= profile.min_vram_mb;
 			return {
 				id,
 				label: profile.label,
-				ready: pipelineReady && installed,
-				state: !pipelineReady ? missingRequirements.includes('bitsandbytes_ready') ? 'dependency_missing' : 'runtime_unavailable' : installed ? 'installed' : 'not_installed',
+				ready: pipelineReady && installed && hardwareSupported,
+				state: !hardwareSupported ? 'vram_insufficient' : !pipelineReady ? missingRequirements.includes('bitsandbytes_ready') || missingRequirements.includes('gguf_ready') ? 'dependency_missing' : 'runtime_unavailable' : installed ? 'installed' : 'not_installed',
 				missing_requirements: missingRequirements,
+				vram_total_mb: vramTotalMb,
 				precision: profile.default_precision,
 				min_vram_mb: profile.min_vram_mb,
 				recommended_vram_mb: profile.recommended_vram_mb,
 				vram_note: profile.vram_note,
+				prompt_note: profile.prompt_note,
+				license: profile.license,
 			};
 		});
 		const ready = runtimeReady && models.some((model) => model.ready);
@@ -722,10 +830,16 @@ function createLocalImageDriver(options = {}) {
 				? 'CUDA is not available in the local image environment.'
 				: 'Use Setup on the Status Page to configure the local image runtime.')
 			: !ready
-				? (models.find((model) => model.state === 'dependency_missing')
-					? `${models.find((model) => model.state === 'dependency_missing').label} requires bitsandbytes. Run Setup for this model to install the missing package.`
+				? (models.find((model) => model.state === 'vram_insufficient')
+					? `${models.find((model) => model.state === 'vram_insufficient').label} needs more GPU memory than the detected device provides. See the model VRAM note before installing its weights.`
+					: models.find((model) => model.state === 'dependency_missing')
+					? (() => {
+						const missing = models.find((model) => model.state === 'dependency_missing');
+						const missingPackage = (missing.missing_requirements || []).includes('gguf_ready') ? 'gguf' : 'bitsandbytes';
+						return `${missing.label} requires ${missingPackage}. Run Setup for this model.`;
+					})()
 					: 'The local image runtime is ready, but no supported model weights are installed. Run Setup and install a model.')
-				: 'CUDA PyTorch, Diffusers, and at least one local image model are ready.';
+				: 'CUDA PyTorch, local image pipelines, and at least one local image model are ready.';
 
 		snapshot = {
 			id: 'local-image',
@@ -780,12 +894,13 @@ function createLocalImageDriver(options = {}) {
 				reference_images_max: profile.reference_images_max,
 				missing_requirements: modelState ? modelState.missing_requirements : [],
 				default_resolution: profile.default_resolution,
-				test_options: id === 'model-relay:local-image:flux-2-dev-nf4' ? FLUX2_TEST_OPTIONS : id === 'model-relay:local-image:sana-1600m-4k' ? SANA_TEST_OPTIONS : profile.reference_images_max > 1 ? QWEN_IMAGE_TEST_OPTIONS : QWEN_IMAGE_2512_TEST_OPTIONS,
-				image_capabilities: id === 'model-relay:local-image:flux-2-dev-nf4' ? FLUX2_CAPABILITIES : id === 'model-relay:local-image:sana-1600m-4k' ? SANA_CAPABILITIES : profile.reference_images_max > 1 ? QWEN_IMAGE_CAPABILITIES : QWEN_IMAGE_2512_CAPABILITIES,
+				test_options: id === 'model-relay:local-image:flux-2-dev-nf4' ? FLUX2_TEST_OPTIONS : id === 'model-relay:local-image:sana-1600m-4k' ? SANA_TEST_OPTIONS : id === 'model-relay:local-image:ideogram-4-gguf-q4-k' ? IDEOGRAM_TEST_OPTIONS : profile.reference_images_max > 1 ? QWEN_IMAGE_TEST_OPTIONS : QWEN_IMAGE_2512_TEST_OPTIONS,
+				image_capabilities: id === 'model-relay:local-image:flux-2-dev-nf4' ? FLUX2_CAPABILITIES : id === 'model-relay:local-image:sana-1600m-4k' ? SANA_CAPABILITIES : id === 'model-relay:local-image:ideogram-4-gguf-q4-k' ? IDEOGRAM_CAPABILITIES : profile.reference_images_max > 1 ? QWEN_IMAGE_CAPABILITIES : QWEN_IMAGE_2512_CAPABILITIES,
 				license: profile.license,
 				min_vram_mb: profile.min_vram_mb,
 				recommended_vram_mb: profile.recommended_vram_mb,
 				vram_note: profile.vram_note,
+				prompt_note: profile.prompt_note,
 			};
 		}),
 		refresh: async (refreshOptions = {}) => inspect(refreshOptions.forceProbe === true),
@@ -807,7 +922,16 @@ function createLocalImageDriver(options = {}) {
 			}
 			const modelState = state.models.find((model) => model.id === modelId);
 			if (!modelState || !modelState.ready) {
-				return { success: false, category: 'configuration', code: 'local_image_model_not_ready', message: `${modelProfile.label} is not installed or its Diffusers pipeline is unavailable. Install this model from the Status Page first.`, details: { model: modelId, state: modelState || null } };
+				const insufficientVram = modelState && modelState.state === 'vram_insufficient';
+				return {
+					success: false,
+					category: 'configuration',
+					code: insufficientVram ? 'local_image_vram_insufficient' : 'local_image_model_not_ready',
+					message: insufficientVram
+						? `${modelProfile.label} needs approximately ${Math.ceil(modelProfile.min_vram_mb / 1024)} GB VRAM with this loader; the detected GPU has ${Math.floor(modelState.vram_total_mb / 1024)} GB.`
+						: `${modelProfile.label} is not installed or its required pipeline is unavailable. Install this model from the Status Page first.`,
+					details: { model: modelId, state: modelState || null },
+				};
 			}
 
 			const prompt = String(payload.prompt || '').trim();
@@ -824,11 +948,12 @@ function createLocalImageDriver(options = {}) {
 			const missingPrecisionRequirement = (modelProfile.precision_requirements && modelProfile.precision_requirements[precision] || [])
 				.find((requirement) => !state.probe || !state.probe.probe || state.probe.probe[requirement] !== true);
 			if (missingPrecisionRequirement) {
+				const missingPackage = missingPrecisionRequirement === 'gguf_ready' ? 'gguf' : 'bitsandbytes';
 				return {
 					success: false,
 					category: 'configuration',
 					code: 'local_image_dependency_missing',
-					message: `${modelProfile.label} ${precision} mode requires bitsandbytes. Run Setup for this model to install the optional GPU quantization dependency.`,
+					message: `${modelProfile.label} ${precision} mode requires ${missingPackage}. Run Setup for this model to install the required dependency.`,
 					details: { model: modelId, precision, missing_requirement: missingPrecisionRequirement },
 				};
 			}
@@ -840,12 +965,20 @@ function createLocalImageDriver(options = {}) {
 				? { ...current, default_resolution: modelProfile.default_resolution }
 				: current;
 			const outputSize = resolveOutputSize(payload, resolutionSettings, modelId);
+			const sizeError = validateModelOutputSize(modelProfile, outputSize);
+			if (sizeError) {
+				return { success: false, category: 'validation', code: 'local_image_resolution_unsupported', message: sizeError, details: { width: outputSize.width, height: outputSize.height } };
+			}
 			const aspectRatio = String(payload.aspect_ratio || '').trim();
 			const configuredSteps = Number(current.default_steps || 40);
 			const steps = Number(payload.steps || payload.num_inference_steps || (configuredSteps === 40 ? modelProfile.preferred_steps || configuredSteps : configuredSteps));
 			const configuredGuidance = Number(current.guidance_scale ?? 1.0);
 			const guidanceScale = Number(payload.true_cfg_scale ?? payload.guidance_scale ?? (configuredGuidance === 1.0 ? modelProfile.preferred_guidance_scale ?? configuredGuidance : configuredGuidance));
 			const seed = payload.seed !== undefined ? Number(payload.seed) : undefined;
+			const samplerPreset = String(payload.sampler_preset || modelProfile.default_sampler_preset || '').trim();
+			if (samplerPreset && modelProfile.sampler_presets && !modelProfile.sampler_presets.includes(samplerPreset)) {
+				return { success: false, category: 'validation', code: 'local_image_sampler_unsupported', message: `Sampler preset ${samplerPreset} is not supported by ${modelProfile.label}.`, details: { model: modelId, supported: modelProfile.sampler_presets } };
+			}
 
 			// Handle reference images
 			const referenceImages = [];
@@ -866,6 +999,7 @@ function createLocalImageDriver(options = {}) {
 				height: outputSize.height,
 				aspect_ratio: aspectRatio,
 				steps,
+				sampler_preset: samplerPreset || undefined,
 				true_cfg_scale: guidanceScale,
 				guidance_scale: guidanceScale,
 				seed,
@@ -1051,6 +1185,8 @@ module.exports = {
 	SANA_RESOLUTION_CHOICES,
 	SANA_TEST_OPTIONS,
 	SANA_CAPABILITIES,
+	IDEOGRAM_TEST_OPTIONS,
+	IDEOGRAM_CAPABILITIES,
 	createLocalImageDriver,
 	imageJobTimeoutMs,
 	parseWxH,
@@ -1063,4 +1199,5 @@ module.exports = {
 	setup,
 	sizeFromAspect,
 	validateRunnerProbe,
+	validateModelOutputSize,
 };

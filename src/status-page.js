@@ -2856,7 +2856,7 @@ function statusPageHtml() {
 		}
 
                 function providerTestControls(model, jobType) {
-                        const options = Array.isArray(model.test_options) ? model.test_options.filter((entry) => entry && entry.key && Array.isArray(entry.choices) && entry.choices.length) : [];
+                        const options = Array.isArray(model.test_options) ? model.test_options.filter((entry) => entry && entry.key && ((Array.isArray(entry.choices) && entry.choices.length) || (entry.input && entry.input.type === 'text'))) : [];
                         if (!options.length) return '';
                         const deliveryLabel = (entry) => {
                                 if (entry.delivery === 'direct') return 'sent directly';
@@ -2870,6 +2870,10 @@ function statusPageHtml() {
                         };
                         const controls = options.map((entry) => {
                                 const key = String(entry.key || '').trim();
+                                if (key && entry.input && entry.input.type === 'text') {
+                                        const field = entry.input;
+                                        return '<label class="field"><span>' + escapeHtml(entry.label || key) + ' · ' + deliveryLabel(entry) + '</span><input type="text" data-test-option="' + escapeHtml(key) + '" value="' + escapeHtml(field.default_value || '') + '" placeholder="' + escapeHtml(field.placeholder || '') + '"></label>';
+                                }
                                 const choices = entry.choices.filter((choice) => choice && choice.value !== undefined);
                                 if (!key || !choices.length) return '';
                                 const selected = key === 'model' ? model.id : String(choices[0].value);

@@ -46,6 +46,7 @@ assert.ok(html.includes("const videoModels = readyMediaModels(models, backends, 
 assert.ok(html.includes('function providerTestControls(model, jobType)'));
 assert.ok(html.includes('model.test_options'));
 assert.ok(html.includes('data-test-option'));
+assert.ok(html.includes("entry.input.type === 'text'"), 'Status page must support free-form model test options');
 assert.ok(html.includes('generation guidance'));
 assert.ok(html.includes('sent directly'));
 assert.ok(html.includes('Video analysis'));

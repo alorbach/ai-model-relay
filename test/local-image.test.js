@@ -18,6 +18,8 @@ const {
 	SANA_RESOLUTION_CHOICES,
 	SANA_TEST_OPTIONS,
 	SANA_CAPABILITIES,
+	IDEOGRAM_TEST_OPTIONS,
+	IDEOGRAM_CAPABILITIES,
 	createLocalImageDriver,
 	imageJobTimeoutMs,
 	probeRunnerStatus,
@@ -28,6 +30,7 @@ const {
 	settings,
 	setup,
 	validateRunnerProbe,
+	validateModelOutputSize,
 } = require('../src/local-image');
 
 (async () => {
@@ -80,6 +83,34 @@ const {
 	assert.strictEqual(sanaModel.license.spdx, 'Apache-2.0');
 	assert.strictEqual(sanaModel.min_vram_mb, 12288);
 	assert.strictEqual(sanaModel.recommended_vram_mb, 16384);
+	const ideogramModelId = 'model-relay:local-image:ideogram-4-gguf-q4-k';
+	const ideogramModel = MODELS[ideogramModelId];
+	assert.ok(ideogramModel, 'Ideogram 4 Q4_K model must exist');
+	assert.strictEqual(ideogramModel.repo_id, 'transformerlab/ideogram-4-gguf-q4_k');
+	assert.strictEqual(ideogramModel.base_weights_repo_id, 'ideogram-ai/ideogram-4-fp8');
+	assert.strictEqual(ideogramModel.pipeline, 'Ideogram4Pipeline');
+	assert.strictEqual(ideogramModel.weights_quantization, 'q4_k');
+	assert.strictEqual(ideogramModel.default_precision, 'q4-k-bf16');
+	assert.strictEqual(ideogramModel.default_sampler_preset, 'V4_DEFAULT_20');
+	assert.deepStrictEqual(ideogramModel.sampler_presets, ['V4_TURBO_12', 'V4_DEFAULT_20', 'V4_QUALITY_48']);
+	assert.deepStrictEqual(ideogramModel.dependency_repos.map((repo) => repo.repo_id), ['ideogram-ai/ideogram-4-fp8']);
+	assert.ok(ideogramModel.required_packages.includes('gguf'));
+	assert.strictEqual(ideogramModel.reference_images_max, 0);
+	assert.strictEqual(ideogramModel.license.spdx, 'ideogram-4-non-commercial');
+	assert.strictEqual(ideogramModel.license.commercial_use, false);
+	assert.strictEqual(ideogramModel.min_vram_mb, 65536);
+	assert.match(ideogramModel.vram_note, /12 GB is unsupported/i);
+	assert.strictEqual(IDEOGRAM_TEST_OPTIONS.find((option) => option.key === 'resolution').input.default_value, '1024x1024');
+	assert.match(IDEOGRAM_TEST_OPTIONS.find((option) => option.key === 'resolution').label, /multiples of 16/);
+	assert.deepStrictEqual(resolveOutputSize({ resolution: '1024x1536' }, {}, ideogramModelId), { width: 1024, height: 1536 });
+	assert.strictEqual(validateModelOutputSize(ideogramModel, { width: 1024, height: 1536 }), null);
+	assert.match(validateModelOutputSize(ideogramModel, { width: 1000, height: 1024 }), /multiples of 16/);
+	assert.match(validateModelOutputSize(ideogramModel, { width: 2048, height: 256 }), /aspect ratios up to 6:1/);
+	assert.strictEqual(validateModelOutputSize(ideogramModel, { width: 2048, height: 2048 }), null);
+	assert.ok(IDEOGRAM_TEST_OPTIONS.find((option) => option.key === 'sampler_preset').choices.some((choice) => choice.value === 'V4_TURBO_12'));
+	assert.strictEqual(IDEOGRAM_CAPABILITIES.reference_images, false);
+	assert.strictEqual(IDEOGRAM_CAPABILITIES.reference_images_max, 0);
+	assert.strictEqual(imageJobTimeoutMs({}, ideogramModel, { width: 1024, height: 1024 }), 3600000);
 	assert.strictEqual(SANA_RESOLUTION_CHOICES.length, 21, 'Sana must offer 1K, 2K, and 4K presets in multiple aspect ratios');
 	assert.strictEqual(SANA_RESOLUTION_CHOICES[0].value, '2048x2048', 'Keep 2K square as the default choice');
 	assert.ok(SANA_RESOLUTION_CHOICES.some((choice) => choice.value === '1024x1024'), 'Offer 1K output for faster generation');
@@ -138,11 +169,11 @@ const {
 	assert.strictEqual(QWEN_IMAGE_CAPABILITIES.candidate_count_max, 1);
 
 	// --- runtime probe requires the imports used by actual generation ---
-	const readyProbe = { cuda_available: true, diffusers_ready: true, transformers_ready: true, qwen_pipeline_ready: true, qwen_image_pipeline_ready: true, qwen_image_img2img_pipeline_ready: true, flux2_pipeline_ready: true, sana_pipeline_ready: true, bitsandbytes_ready: true };
+	const readyProbe = { cuda_available: true, diffusers_ready: true, transformers_ready: true, qwen_pipeline_ready: true, qwen_image_pipeline_ready: true, qwen_image_img2img_pipeline_ready: true, flux2_pipeline_ready: true, sana_pipeline_ready: true, ideogram_pipeline_ready: true, gguf_ready: true, bitsandbytes_ready: true };
 	assert.strictEqual(validateRunnerProbe(readyProbe).ok, true);
 	assert.strictEqual(validateRunnerProbe({ ...readyProbe, transformers_ready: false }).state, 'transformers_missing');
 	assert.strictEqual(validateRunnerProbe({ ...readyProbe, qwen_pipeline_ready: false }).ok, true, 'Runtime may be ready through the newer QwenImage pipeline');
-	assert.strictEqual(validateRunnerProbe({ ...readyProbe, qwen_pipeline_ready: false, qwen_image_pipeline_ready: false, flux2_pipeline_ready: false, sana_pipeline_ready: false }).state, 'diffusers_pipeline_missing');
+	assert.strictEqual(validateRunnerProbe({ ...readyProbe, qwen_pipeline_ready: false, qwen_image_pipeline_ready: false, flux2_pipeline_ready: false, sana_pipeline_ready: false, ideogram_pipeline_ready: false }).state, 'diffusers_pipeline_missing');
 
 	// --- settings / saveSettings round-trip (isolated) ---
 	const originalSecurity = require('../src/security');
@@ -239,6 +270,13 @@ const {
 	assert.strictEqual(sanaPublicModel.pipeline, 'SanaPipeline');
 	assert.deepStrictEqual(sanaPublicModel.test_options.find((option) => option.key === 'resolution').choices.map((choice) => choice.value), SANA_RESOLUTION_CHOICES.map((choice) => choice.value));
 	assert.strictEqual(sanaPublicModel.recommended_vram_mb, 16384);
+	const ideogramPublicModel = models.find((model) => model.id === ideogramModelId);
+	assert.ok(ideogramPublicModel, 'Ideogram 4.0 must appear in the model catalog');
+	assert.strictEqual(ideogramPublicModel.image_capabilities.reference_images_max, 0);
+	assert.strictEqual(ideogramPublicModel.precision, 'q4-k-bf16');
+	assert.strictEqual(ideogramPublicModel.license.commercial_use, false);
+	assert.match(ideogramPublicModel.prompt_note, /JSON/);
+	assert.strictEqual(ideogramPublicModel.test_options.find((option) => option.key === 'sampler_preset').choices[1].value, 'V4_DEFAULT_20');
 
 	// --- images() - not-ready path ---
 	const notReadyResult = await driver.images({ prompt: 'test' });
@@ -260,7 +298,7 @@ const {
 		getSettings: () => readyRuntimeSettings,
 		probeRuntime: () => {
 			readinessProbeCalls += 1;
-			return { ok: true, state: 'ready', probe: { cuda_available: true, diffusers_ready: true, transformers_ready: true, qwen_pipeline_ready: true, qwen_image_pipeline_ready: true, qwen_image_img2img_pipeline_ready: true, flux2_pipeline_ready: true, sana_pipeline_ready: true, bitsandbytes_ready: true } };
+			return { ok: true, state: 'ready', probe: { cuda_available: true, diffusers_ready: true, transformers_ready: true, qwen_pipeline_ready: true, qwen_image_pipeline_ready: true, qwen_image_img2img_pipeline_ready: true, flux2_pipeline_ready: true, sana_pipeline_ready: true, ideogram_pipeline_ready: true, gguf_ready: true, vram_total_mb: 81920, bitsandbytes_ready: true } };
 		},
 	};
 	const noWeightsDriver = createLocalImageDriver(readinessOptions);
@@ -274,6 +312,7 @@ const {
 	assert.strictEqual((await noWeightsDriver.images({ prompt: 'test' })).code, 'local_image_model_not_ready');
 	assert.strictEqual((await noWeightsDriver.images({ model: quantizedModelId, prompt: 'test' })).code, 'local_image_model_not_ready');
 	assert.strictEqual((await noWeightsDriver.images({ model: sanaModelId, prompt: 'test' })).code, 'local_image_model_not_ready');
+	assert.strictEqual(noWeightsDriver.models().find((model) => model.id === ideogramModelId).ready, false, 'Ideogram must remain unavailable until its snapshots are installed');
 	const missingBitsandbytesDriver = createLocalImageDriver({
 		getSettings: () => ({ ...readyRuntimeSettings, model_records: { [quantizedModelId]: { installed: true } } }),
 		probeRuntime: () => ({ ok: true, state: 'ready', probe: { cuda_available: true, diffusers_ready: true, transformers_ready: true, qwen_pipeline_ready: true, qwen_image_pipeline_ready: true, qwen_image_img2img_pipeline_ready: true } }),
@@ -298,6 +337,12 @@ const {
 	assert.match(missingSanaNf4.message, /requires bitsandbytes/i);
 	assert.strictEqual(missingSanaStatus.state, 'runtime_unavailable');
 	assert.deepStrictEqual(missingSanaStatus.missing_requirements, ['sana_pipeline_ready']);
+	const missingIdeogramGgufDriver = createLocalImageDriver({
+		getSettings: () => ({ ...readyRuntimeSettings, model_records: { [ideogramModelId]: { installed: true, repo_id: ideogramModel.repo_id } } }),
+		probeRuntime: () => ({ ok: true, state: 'ready', probe: { cuda_available: true, diffusers_ready: true, transformers_ready: true, ideogram_pipeline_ready: true, gguf_ready: false, vram_total_mb: 81920 } }),
+	});
+	assert.strictEqual(missingIdeogramGgufDriver.models().find((model) => model.id === ideogramModelId).state, 'dependency_missing');
+	assert.strictEqual(missingIdeogramGgufDriver.models().find((model) => model.id === ideogramModelId).missing_requirements[0], 'gguf_ready');
 	await noWeightsDriver.refresh();
 	assert.strictEqual(readinessProbeCalls, 1, 'Ordinary refresh should use the cached runtime probe');
 	await noWeightsDriver.refresh({ forceProbe: true });
@@ -307,6 +352,7 @@ const {
 	readyRuntimeSettings.model_records[modelId] = { installed: true, repo_id: MODELS[modelId].repo_id };
 	readyRuntimeSettings.model_records[quantizedModelId] = { installed: true, repo_id: MODELS[quantizedModelId].repo_id };
 	readyRuntimeSettings.model_records[sanaModelId] = { installed: true, repo_id: sanaModel.repo_id };
+	readyRuntimeSettings.model_records[ideogramModelId] = { installed: true, repo_id: ideogramModel.repo_id, dependency_repo_ids: ['ideogram-ai/ideogram-4-fp8'] };
 	readyRuntimeSettings.allow_model_downloads = true;
 	let capturedJob = null;
 	const inputReference = 'data:image/png;base64,aGVsbG8=';
@@ -408,9 +454,34 @@ const {
 		const sanaImageToImage = await readyDriver.images({ model: sanaModelId, prompt: 'Sana edit request', input_reference_data_url: inputReference });
 		assert.strictEqual(sanaImageToImage.code, 'local_image_reference_limit');
 		assert.match(sanaImageToImage.message, /text-to-image only/i);
+		const ideogramPrompt = '{"high_level_description":"A poster with exact text HELLO"}';
+		const ideogramTextToImage = await readyDriver.images({ model: ideogramModelId, prompt: ideogramPrompt, resolution: '1024x1024' });
+		assert.strictEqual(ideogramTextToImage.success, true);
+		assert.strictEqual(capturedJob.model_id, ideogramModelId);
+		assert.strictEqual(capturedJob.model_path, ideogramModel.repo_id);
+		assert.strictEqual(capturedJob.prompt, ideogramPrompt, 'Ideogram prompts must pass through unchanged');
+		assert.strictEqual(capturedJob.precision, 'q4-k-bf16');
+		assert.strictEqual(capturedJob.cpu_offload, false, 'The reference Q4_K loader must not claim unsupported Diffusers CPU offload');
+		assert.strictEqual(capturedJob.sampler_preset, 'V4_DEFAULT_20');
+		assert.strictEqual(capturedJob.steps, 20);
+		assert.deepStrictEqual([capturedJob.width, capturedJob.height], [1024, 1024]);
+		assert.deepStrictEqual(capturedJob.reference_images, []);
+		const ideogramTurbo = await readyDriver.images({ model: ideogramModelId, prompt: 'a small poster', sampler_preset: 'V4_TURBO_12', resolution: '1536x1024' });
+		assert.strictEqual(ideogramTurbo.success, true);
+		assert.strictEqual(capturedJob.sampler_preset, 'V4_TURBO_12');
+		assert.deepStrictEqual([capturedJob.width, capturedJob.height], [1536, 1024]);
+		const ideogramInvalidSize = await readyDriver.images({ model: ideogramModelId, prompt: 'invalid dimensions', resolution: '1000x1024' });
+		assert.strictEqual(ideogramInvalidSize.code, 'local_image_resolution_unsupported');
+		const ideogramInvalidAspect = await readyDriver.images({ model: ideogramModelId, prompt: 'too wide', resolution: '2048x256' });
+		assert.strictEqual(ideogramInvalidAspect.code, 'local_image_resolution_unsupported');
+		const ideogramInvalidPreset = await readyDriver.images({ model: ideogramModelId, prompt: 'bad preset', sampler_preset: 'UNKNOWN' });
+		assert.strictEqual(ideogramInvalidPreset.code, 'local_image_sampler_unsupported');
+		const ideogramImageToImage = await readyDriver.images({ model: ideogramModelId, prompt: 'edit reference', input_reference_data_url: inputReference });
+		assert.strictEqual(ideogramImageToImage.code, 'local_image_reference_limit');
+		assert.match(ideogramImageToImage.message, /text-to-image only/i);
 		const tooManyReferences = await readyDriver.images({ model: quantizedModelId, prompt: 'too many refs', reference_images: [inputReference, secondInputReference] });
 		assert.strictEqual(tooManyReferences.code, 'local_image_reference_limit');
-		assert.strictEqual(imageSpawnCount, 8, 'Reference-limit errors must not start the runner');
+		assert.strictEqual(imageSpawnCount, 10, 'Validation errors must not start extra runner processes');
 		const unknownModel = await readyDriver.images({ model: 'model-relay:local-image:unknown', prompt: 'unknown model' });
 		assert.strictEqual(unknownModel.code, 'local_image_model_unknown');
 		assert.strictEqual(readinessProbeCalls, 3, 'Image jobs must not spawn a synchronous Python readiness probe');
@@ -451,11 +522,51 @@ const {
 	assert.strictEqual(setupVenvFail.success, false);
 	assert.strictEqual(setupVenvFail.code, 'local_image_venv_failed');
 
+	// --- Ideogram setup installs its custom runtime and explains the gated base repository ---
+	const ideogramSetupRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-ideogram-setup-'));
+	const ideogramVenv = path.join(ideogramSetupRoot, 'venv');
+	fs.mkdirSync(ideogramVenv, { recursive: true });
+	let ideogramDownloadScript = '';
+	let ideogramPackages = [];
+	let ideogramSetupSaved = null;
+	try {
+		const gatedSetup = await setup({
+			model: ideogramModelId,
+			download_model: true,
+			pythonCommand: process.execPath,
+			settings: { venv_path: ideogramVenv },
+			saveSettings: (value) => { ideogramSetupSaved = value; return value; },
+			runCommand: async (_command, args) => {
+				if (args[0] === '-m' && args[1] === 'venv') return { status: 0, stdout: '', stderr: '' };
+				if (args[0] === '-V') return { status: 0, stdout: 'Python 3.12.2', stderr: '' };
+				if (args[1] === 'freeze') return { status: 0, stdout: 'torch==2.11.0+cu128\ntorchvision==0.26.0+cu128\ntorchaudio==2.11.0+cu128\n', stderr: '' };
+				if (args[0] === '-c' && String(args[1]).includes('torch.cuda.is_available')) return { status: 0, stdout: '{"available":true,"version":"2.11.0+cu128","cuda_version":"12.8","device_count":1}', stderr: '' };
+				if (args[0] === '-m' && args[1] === 'pip' && args.includes('install')) ideogramPackages = args;
+				if (args[0] === '-c' && String(args[1]).includes('snapshot_download')) {
+					ideogramDownloadScript = String(args[1]);
+					return { status: 1, stdout: '', stderr: 'GatedRepoError: access to ideogram-ai/ideogram-4-fp8 is restricted' };
+				}
+				return { status: 0, stdout: '', stderr: '' };
+			},
+		});
+		assert.strictEqual(gatedSetup.success, false);
+		assert.strictEqual(gatedSetup.code, 'local_image_model_access_required');
+		assert.match(gatedSetup.message, /accept the model terms/i);
+		assert.ok(ideogramPackages.includes('gguf'), 'Ideogram setup must install the GGUF reader');
+		assert.ok(ideogramPackages.some((pkg) => String(pkg).includes('github.com/ideogram-oss/ideogram4')), 'Ideogram setup must install the official pipeline package');
+		assert.ok(ideogramDownloadScript.includes('transformerlab/ideogram-4-gguf-q4_k'));
+		assert.ok(ideogramDownloadScript.includes('ideogram-ai/ideogram-4-fp8'));
+		assert.strictEqual(ideogramSetupSaved, null, 'A gated download failure must not mark the model installed');
+	} finally {
+		fs.rmSync(ideogramSetupRoot, { recursive: true, force: true });
+	}
+
 	// --- backend-registry integration: local-image model routing ---
 	const { providerFromPayload } = require('../src/backend-registry');
 	assert.strictEqual(providerFromPayload({ model: 'model-relay:local-image:qwen-image-2.1' }), 'local-image');
 	assert.strictEqual(providerFromPayload({ model: quantizedModelId }), 'local-image');
 	assert.strictEqual(providerFromPayload({ model: sanaModelId }), 'local-image');
+	assert.strictEqual(providerFromPayload({ model: ideogramModelId }), 'local-image');
 
 	// --- backend-registry integration: createLocalImageDriver exported ---
 	const { createLocalImageDriver: registryExport } = require('../src/backend-registry');
@@ -471,6 +582,16 @@ const {
 	assert.ok(runnerContent.includes('from diffusers import QwenImagePipeline'), 'Runtime probe must import the quantized text-to-image pipeline');
 	assert.ok(runnerContent.includes('from diffusers import QwenImageImg2ImgPipeline'), 'Runtime probe must import the quantized image-to-image pipeline');
 	assert.ok(runnerContent.includes('from diffusers import SanaPipeline'), 'Runtime probe must check SanaPipeline readiness');
+	assert.ok(runnerContent.includes('from ideogram4 import Ideogram4Pipeline, PRESETS'), 'Runtime probe and runner must use the official Ideogram 4 pipeline');
+	assert.ok(runnerContent.includes('import gguf'), 'Runtime probe must check for the GGUF reader');
+	assert.ok(runnerContent.includes('load_ideogram_gguf_tensors'), 'Runner must load the TransformerLab Q4_K GGUF tensors');
+	assert.ok(runnerContent.includes('swap_ideogram_gguf_branch'), 'Runner must replace both Ideogram DiT branches from GGUF');
+	assert.ok(runnerContent.includes('V4_DEFAULT_20'), 'Runner must use Ideogram sampler presets');
+	assert.ok(runnerContent.includes('HF_HUB_OFFLINE'), 'Installed local jobs must not silently download missing model files');
+	assert.ok(runnerContent.includes('IDEOGRAM_RESOLUTION_MULTIPLE = 16'), 'Runner must enforce Ideogram resolution limits in 16-pixel increments');
+	assert.ok(runnerContent.includes('gguf_file_missing'), 'Runner must explain when the local Q4_K checkpoint is absent');
+	assert.ok(runnerContent.includes('base_components_missing'), 'Runner must explain when the gated encoder, tokenizer, transformer, or VAE files are absent');
+	assert.ok(runnerContent.includes('reference-image editing is unavailable') || runnerContent.includes('supports text-to-image only'), 'Runner must describe Ideogram text-to-image-only behavior');
 	assert.ok(runnerContent.includes('"variant": "bf16"'), 'Sana must load the BF16 variant explicitly');
 	assert.ok(runnerContent.includes('"gpu_only_precisions": ("nf4-bf16",)'), 'Sana NF4 must be designated as GPU-only');
 	assert.ok(runnerContent.includes('PipelineQuantizationConfig('), 'Runner must configure pipeline-level NF4 quantization');
