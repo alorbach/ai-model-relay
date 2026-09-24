@@ -1,0 +1,59 @@
+src/status-page.js
+  s_4c49eb5e31e5b8::t_af6841e847b7a4 2859,2873-2876
+test/status-page.test.js
+  s_4c49eb5e31e5b8::t_fc3dadedf2482b 49
+src/image-qwen-runner.py
+  s_4c49eb5e31e5b8::t_050c81418bbec8 325-326
+  s_4c49eb5e31e5b8::t_f7005c8c39cf9a 303-311
+  s_4c49eb5e31e5b8::t_ef7bf6fda10dc8 299-302,476-480
+  s_4c49eb5e31e5b8::t_9499d8c18772db 58-59,107-119,197-209,213-298,312-324,327-385
+  s_3c069281552f1d::t_27d9bdfa9df943 386-387,481
+test/local-image.test.js
+  s_4c49eb5e31e5b8::t_bcb1c8f4ee5ff1 21-22,33,86-102,105-113,172,176
+  s_4c49eb5e31e5b8::t_d5e5ab3952389d 591
+  s_4c49eb5e31e5b8::t_005e6d47a5ff0a 592-593
+  s_4c49eb5e31e5b8::t_78738203c06914 569,585-590,594
+  s_4c49eb5e31e5b8::t_a41dd1862600c7 103-104
+  s_4c49eb5e31e5b8::t_ac0cd2a505cbf5 457-481,484
+  s_4c49eb5e31e5b8::t_88472fa55c423d 273-279,301,315,340-345,355
+  s_4c49eb5e31e5b8::t_62b2202bdc9bfe 525-563
+src/local-image.js
+  s_4c49eb5e31e5b8::t_5f323388f9a00e 134-136,149
+  s_4c49eb5e31e5b8::t_f806efbe3d26fc 951,956,968-971,978-981,1002
+  s_4c49eb5e31e5b8::t_1224424891c3a0 1188-1189,1202
+  s_4c49eb5e31e5b8::t_94ed1fa4d8f24d 343,345
+  s_4c49eb5e31e5b8::t_737936778844a9 903
+  s_4c49eb5e31e5b8::t_c58296d1559b4c 810-811,815-816,818,925-934
+  s_4c49eb5e31e5b8::t_820a918b93ffa6 833-835
+  s_4c49eb5e31e5b8::t_1b3f9c7dd4351d 836-840
+  s_4c49eb5e31e5b8::t_698ababcbf83a9 128-133,137-143,145-148,150-171,340-342,344,346-364,418,433,452-464
+  s_4c49eb5e31e5b8::t_a3396c6a49a905 714-715,719-727,731-743,749
+  s_4c49eb5e31e5b8::t_58e5701ce5dbd3 144,823
+  s_4c49eb5e31e5b8::t_607bf67696c8fd 567,703,824,842,897-898
+  s_4c49eb5e31e5b8::t_9510b4e8cd3061 729
+  s_4c49eb5e31e5b8::t_411ebcac7b95bd 465-466
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "8f7c815b586f03b912657f343fb4e955f21e37b4",
+  "prompts": {},
+  "sessions": {
+    "s_3c069281552f1d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0d274-fc4b-7c02-a91b-1af6fcb10865",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_4c49eb5e31e5b8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0ccb5-e70f-7e53-a36d-47e1403f8d46",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
