@@ -1,0 +1,47 @@
+test/status-page.test.js
+  s_4c49eb5e31e5b8::t_99086e32a6ae89 94,106-107
+  s_4c49eb5e31e5b8::t_460bff2103b014 108
+src/local-image.js
+  s_4c49eb5e31e5b8::t_a5bde40816394a 1003-1005
+  s_4c49eb5e31e5b8::t_1f88886ef51ff0 737,740-745
+  s_4c49eb5e31e5b8::t_342af650b9be87 94-122,244,247-268,311,328,444,746-747,836
+  s_4c49eb5e31e5b8::t_0c22b20f291071 245-246
+src/status-page.js
+  s_4c49eb5e31e5b8::t_6f2ad19af22d62 3439
+  s_4c49eb5e31e5b8::t_f6eb5353332446 2902-2903
+test/local-image.test.js
+  s_4c49eb5e31e5b8::t_e32af685b533d8 125
+  s_4c49eb5e31e5b8::t_6d2f05650017dc 121,194,208,215-217,220-221,242,251,255,280
+  s_4c49eb5e31e5b8::t_d616339930b524 18-20,60-81
+  s_4c49eb5e31e5b8::t_9403223f41c0e1 218-219,252,264-271
+  s_4c49eb5e31e5b8::t_e42b50c8067f02 359-373,376,421,436-441,455
+src/image-qwen-runner.py
+  s_4c49eb5e31e5b8::t_249c3b47a104ad 296-308,321
+  s_4c49eb5e31e5b8::t_833782ae5135f8 50,241
+  s_4c49eb5e31e5b8::t_4d915f4c65679d 93-97,156-173,233,238,257,274-275
+  s_2cd28d5cc9a74f::t_7b5d35bb30a79e 92
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d366b8d1f50c29657b4384364140c3b959d555fb",
+  "prompts": {},
+  "sessions": {
+    "s_2cd28d5cc9a74f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0909c-6cb6-7ba2-9c85-11abfdf7ecd0",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_4c49eb5e31e5b8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0ccb5-e70f-7e53-a36d-47e1403f8d46",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
