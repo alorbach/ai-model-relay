@@ -1,0 +1,36 @@
+src/status-page.js
+  s_4c49eb5e31e5b8::t_0c1fb02e5fb1aa 3433-3434
+test/local-image.test.js
+  s_4c49eb5e31e5b8::t_2f16697e5d97e3 83-87,94-95,240,402-405,407
+  s_4c49eb5e31e5b8::t_9ec934f09f16fe 98-99
+  s_4c49eb5e31e5b8::t_ebb845ac6b822d 22,74-75,96-97,100-101
+  s_4c49eb5e31e5b8::t_788b6e3e438e46 254
+  s_4c49eb5e31e5b8::t_a849d44319cd61 296-298
+  s_4c49eb5e31e5b8::t_4dd0785ea6670f 68-70,77-78,89,291-295,393,398-401,413,475-480
+  s_4c49eb5e31e5b8::t_00bc24002925aa 481-485
+src/image-qwen-runner.py
+  s_4c49eb5e31e5b8::t_5644139ee15711 167-168,240-241,286-305
+  s_4c49eb5e31e5b8::t_4dd0785ea6670f 314-316,318-320
+  s_4c49eb5e31e5b8::t_6ed60e34d0ba00 14,29-34,307,321,391-422,428-437,440,442
+src/local-image.js
+  s_4c49eb5e31e5b8::t_ebb845ac6b822d 105-106,305-314,919,1055
+  s_4c49eb5e31e5b8::t_0b74a2932c58cf 102,108-109,118,283-286,824-834,873
+  s_4c49eb5e31e5b8::t_9ec934f09f16fe 107
+  s_4c49eb5e31e5b8::t_4c7d02833e4160 251-263,265-270
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "af8e30ada50cbd1c8abcc18347d082cf758b0106",
+  "prompts": {},
+  "sessions": {
+    "s_4c49eb5e31e5b8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0ccb5-e70f-7e53-a36d-47e1403f8d46",
+        "model": "gpt-6-luna"
+      },
+      "human_author": null
+    }
+  }
+}
