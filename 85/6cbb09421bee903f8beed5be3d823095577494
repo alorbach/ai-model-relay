@@ -1,0 +1,47 @@
+test/status-page.test.js
+  s_ec45f83817ba5a::t_42e79ff417a9a0 177-179
+src/server.js
+  s_ec45f83817ba5a::t_8171a7e85c319d 26,29-56,66,127-179,189-240,303,344-346,881-900,976-977,982-983,988-989,1020,1047,1050-1052,1063-1064,1160,1192,1345,1575,1577,1620-1631,1646-1661,1663-1671,1673-1677,1681-1682,1686-1687,1690-1714,1729-1731,1747-1748,1750,1752
+  s_ec45f83817ba5a::t_db461c209c00f8 180-188
+src/main.js
+  s_ec45f83817ba5a::t_7af246c57fedfb 81-84
+  s_ec45f83817ba5a::t_7abfe52a9b37dc 25
+  s_ec45f83817ba5a::t_ea2a6980400644 413
+  s_ec45f83817ba5a::t_36455e2ff76ea0 296-298
+  s_ec45f83817ba5a::t_2bd1603fb6e61c 516
+docs/architecture.md
+  s_ec45f83817ba5a::t_892054b1d4157f 91
+  s_ec45f83817ba5a::t_9c6eb0d81e6a7e 55
+  s_ec45f83817ba5a::t_9209f3a92ea85b 25
+  s_ec45f83817ba5a::t_e86f104a8ee9ca 111
+docs/operations.md
+  s_ec45f83817ba5a::t_a2be1c8c1d7e3c 209
+  s_ec45f83817ba5a::t_6492cfa0ed0c7c 27
+README.md
+  s_ec45f83817ba5a::t_072261d72e003b 247-248
+  s_ec45f83817ba5a::t_d560e33ce08186 18-19
+  s_ec45f83817ba5a::t_32d1a907763176 165-167
+  s_ec45f83817ba5a::t_f3ccd6b16c29a5 260-261
+test/relay-routes.test.js
+  s_ec45f83817ba5a::t_a9c06dbe2209a6 10-11,72-81,104-133,358-359,593-619,625-711
+src/status-page.js
+  s_ec45f83817ba5a::t_106529f20c8e15 2839-2840
+docs/local-bridge-api.md
+  s_ec45f83817ba5a::t_d6ae3c18f5aa82 11,13,122,140,311,326,405,431-442,879
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "856cbb09421bee903f8beed5be3d823095577494",
+  "prompts": {},
+  "sessions": {
+    "s_ec45f83817ba5a": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "7bcb3b6f-a9d1-4f5f-b1b0-b582451f10ac",
+        "model": "grok-4.7"
+      },
+      "human_author": null
+    }
+  }
+}
