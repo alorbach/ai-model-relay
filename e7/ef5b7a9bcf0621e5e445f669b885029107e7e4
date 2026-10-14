@@ -1,0 +1,36 @@
+package.json
+  s_ba19acfccc260c::t_59f3af6003ef61 12-13
+README.md
+  s_ba19acfccc260c::t_3628dc239d067c 18
+src/main.js
+  s_ba19acfccc260c::t_4facb3c294c556 635-639
+  s_ba19acfccc260c::t_56c77e86551261 14
+  s_ba19acfccc260c::t_f439a6f9eab35c 498-505
+  s_ba19acfccc260c::t_af35ecff4a1b3b 575
+  s_ba19acfccc260c::t_c0888f80a431f4 592-608
+  s_ba19acfccc260c::t_411d2c9a4dadb2 396-445
+test/launch-on-login.test.js
+  s_ba19acfccc260c::t_34afccce6efc33 1-64
+build/installer.nsh
+  s_ba19acfccc260c::t_44d1c2034e9df1 32-36
+docs/architecture.md
+  s_ba19acfccc260c::t_e3401ca874ecdb 17
+src/launch-on-login.js
+  s_ba19acfccc260c::t_5a0eb2be6e49ed 1-51
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e7ef5b7a9bcf0621e5e445f669b885029107e7e4",
+  "prompts": {},
+  "sessions": {
+    "s_ba19acfccc260c": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "b8ad50bd-783a-421a-ac43-44839a679e5d",
+        "model": "grok-4.7"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
