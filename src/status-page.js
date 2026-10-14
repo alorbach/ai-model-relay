@@ -1722,7 +1722,7 @@ function statusPageHtml() {
 			const enabledValue = enabledSelect ? enabledSelect.value : '';
 			const runtime = { timeouts };
 			if (maxConcurrent) runtime.max_concurrent_jobs = maxConcurrent.value.trim();
-			const codexImageToolValue = (document.getElementById('relayCodexImageTool') || {}).value === 'image_gen' ? 'image_gen' : 'generations';
+			const codexImageToolValue = (document.getElementById('relayCodexImageTool') || {}).value === 'generations' ? 'generations' : 'image_gen';
 			const payload = {
 				defaults,
 				cli_paths,
@@ -1829,7 +1829,7 @@ function statusPageHtml() {
 			setValue('relayGrokImagineSkill', (providers.grok && providers.grok.imagine_skill) || '');
 			setValue('relayAntigravityStateDir', (providers.antigravity && providers.antigravity.state_dir) || '');
 			const imageTool = document.getElementById('relayCodexImageTool');
-			if (imageTool && Object.prototype.hasOwnProperty.call(preserved, 'codex_image_tool')) imageTool.value = preserved.codex_image_tool === 'image_gen' ? 'image_gen' : 'generations';
+			if (imageTool && Object.prototype.hasOwnProperty.call(preserved, 'codex_image_tool')) imageTool.value = preserved.codex_image_tool === 'generations' ? 'generations' : 'image_gen';
 		}
 
 		function normalizeSettingsSection(section) {
@@ -2774,8 +2774,8 @@ function statusPageHtml() {
 				{ id: 'cursor-cli', label: 'Cursor Agent executable', placeholder: 'cursor-agent or C:\\Tools\\cursor-agent.exe' },
 				{ id: 'cli-process', label: 'CLI Process executable', placeholder: 'Optional generic command path' },
 			];
-			const codexImageTool = settings.codex_image_tool === 'image_gen' ? 'image_gen' : 'generations';
-			const codexImageToolField = '<label class="field"><span>Codex image route</span><select id="relayCodexImageTool"><option value="generations"' + (codexImageTool === 'generations' ? ' selected' : '') + '>Direct Sunburst image route</option><option value="image_gen"' + (codexImageTool === 'image_gen' ? ' selected' : '') + '>Codex exec image_gen tool</option></select><small class="muted">generations posts size, quality, and format to the ChatGPT Codex images API. image_gen keeps the existing codex exec tool and sends those choices as prompt guidance.</small></label>';
+			const codexImageTool = settings.codex_image_tool === 'generations' ? 'generations' : 'image_gen';
+			const codexImageToolField = '<label class="field"><span>Codex image route</span><select id="relayCodexImageTool"><option value="image_gen"' + (codexImageTool === 'image_gen' ? ' selected' : '') + '>Codex exec image_gen tool</option><option value="generations"' + (codexImageTool === 'generations' ? ' selected' : '') + '>Codex login images request</option></select><small class="muted">image_gen is the default. It asks Codex exec to pass size and quality inside the image_gen prompt. The built-in tool still sends size auto and quality auto and returns PNG. generations posts those fields on the Codex login images request; that endpoint does not apply them.</small></label>';
 			fields.relayCliPaths.innerHTML = cliPathFields.map((entry) => '<label class="field"><span>' + escapeHtml(entry.label) + '</span><input type="text" autocomplete="off" spellcheck="false" data-relay-cli-path="' + escapeHtml(entry.id) + '" value="' + escapeHtml(cliPaths[entry.id] || '') + '" placeholder="' + escapeHtml(entry.placeholder) + '">' + (entry.hint ? '<small class="muted">' + escapeHtml(entry.hint) + '</small>' : '') + '</label>').join('') + codexImageToolField;
 			const labels = { chat: 'Chat and coding', images: 'Image generation', videos: 'Video generation', transcribe: 'Transcription', 'media.analyze': 'Media analysis', 'music.analyze': 'Music analysis' };
 			fields.relayDefaultSettings.innerHTML = Object.keys(labels).map((jobType) => {

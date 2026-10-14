@@ -86,11 +86,9 @@ const tinyPng = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8
 		};
 		const generated = await images({
 			prompt: 'a glass orb',
-			size: '2048x1152',
+			size: '1536x1024',
 			quality: 'high',
-			background: 'transparent',
 			output_format: 'image/png',
-			n: 2,
 		});
 		assert.strictEqual(generated.success, true);
 		assert.strictEqual(generated.response.data[0].mime_type, 'image/png');
@@ -98,31 +96,32 @@ const tinyPng = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8
 		assert.strictEqual(logged[0].url, 'https://example.test/backend-api/codex/images/generations');
 		assert.strictEqual(logged[0].body.model, 'gpt-image-2.5-sunburst');
 		assert.strictEqual(logged[0].body.prompt, 'a glass orb');
-		assert.strictEqual(logged[0].body.size, '2048x1152');
+		assert.strictEqual(logged[0].body.size, '1536x1024');
 		assert.strictEqual(logged[0].body.quality, 'high');
-		assert.strictEqual(logged[0].body.background, 'transparent');
 		assert.strictEqual(logged[0].body.output_format, 'png');
-		assert.strictEqual(logged[0].body.n, 2);
+		assert.strictEqual(logged[0].body.background, undefined);
 		assert.ok(!logged[0].body.prompt.includes('image_gen'));
 		assert.strictEqual(JSON.stringify(logged).includes('Authorization'), false);
 		assert.strictEqual(JSON.stringify(logged).includes(accessToken), false);
 		assert.strictEqual(JSON.stringify(generated).includes(accessToken), false);
-		const callsBeforeReject = logged.length;
-		const badSize = await images({ prompt: 'too small', size: '1000x1000', output_format: 'image/png' });
-		assert.strictEqual(badSize.code, 'relay_image_options_unsupported');
-		const badBackground = await images({ prompt: 'clear jpeg', size: '1024x1024', background: 'transparent', output_format: 'image/jpeg' });
-		assert.strictEqual(badBackground.code, 'relay_image_options_unsupported');
-		const goodBackground = await images({ prompt: 'clear png', size: '1024x1024', background: 'transparent', output_format: 'image/png' });
-		assert.strictEqual(goodBackground.success, true);
-		assert.strictEqual(logged.length, callsBeforeReject + 1);
-		const omitted = await images({ prompt: 'provider chooses', size: 'auto', quality: 'auto', background: 'auto', output_format: 'image/jpeg' });
+		const lowQuality = await images({ prompt: 'soft orb', size: '1024x1024', quality: 'low', output_format: 'image/png' });
+		assert.strictEqual(lowQuality.success, true);
+		assert.strictEqual(logged[logged.length - 1].body.quality, 'low');
+		assert.strictEqual(logged[logged.length - 1].body.output_format, 'png');
+		const mediumQuality = await images({ prompt: 'medium orb', size: '1024x1536', quality: 'medium', output_format: 'png' });
+		assert.strictEqual(mediumQuality.success, true);
+		assert.strictEqual(logged[logged.length - 1].body.quality, 'medium');
+		assert.strictEqual(logged[logged.length - 1].url, 'https://example.test/backend-api/codex/images/generations');
+		const omitted = await images({ prompt: 'provider chooses', size: 'auto', quality: 'auto', output_format: 'image/png' });
 		assert.strictEqual(omitted.success, true);
 		const omittedBody = logged[logged.length - 1].body;
 		assert.strictEqual(omittedBody.model, 'gpt-image-2.5-sunburst');
+		assert.strictEqual(omittedBody.prompt, 'provider chooses');
 		assert.strictEqual(omittedBody.size, 'auto');
 		assert.strictEqual(omittedBody.quality, undefined);
 		assert.strictEqual(omittedBody.background, undefined);
-		assert.strictEqual(omittedBody.output_format, 'jpeg');
+		assert.strictEqual(omittedBody.output_format, 'png');
+		assert.ok(!omittedBody.prompt.includes('image_gen'));
 		const edited = await images({
 			prompt: 'edit the orb',
 			size: '1024x1024',

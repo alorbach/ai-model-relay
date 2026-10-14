@@ -10,7 +10,7 @@ const { attachProcessAbort, killProcessTree } = require('./cuda-torch-venv');
 const { beginLocalModelDebugLog } = require('./temp-debug-logs');
 const { resolveMaxTokens } = require('./token-policy');
 const relaySettings = require('./relay-settings');
-const { SUNBURST_IMAGE_SIZE_CONSTRAINTS, canonicalConstrainedImageSize, imageOptionsError } = require('./image-capabilities');
+const { imageOptionsError } = require('./image-capabilities');
 
 const defaultCodexBinary = process.env.ALORBACH_CODEX_BINARY || 'codex';
 let configuredCodexBinary = '';
@@ -1126,9 +1126,9 @@ function activeCodexHome() {
 
 function codexImageToolMode() {
 	try {
-		return relaySettings.settings().codex_image_tool === 'image_gen' ? 'image_gen' : 'generations';
+		return relaySettings.settings().codex_image_tool === 'generations' ? 'generations' : 'image_gen';
 	} catch (error) {
-		return 'generations';
+		return 'image_gen';
 	}
 }
 
@@ -1174,10 +1174,7 @@ function readCodexImageAuth(homeDir) {
 
 function codexProviderOutputFormat(value) {
 	const format = String(value || '').trim().toLowerCase();
-	if (!format) return '';
 	if (format === 'png' || format === 'image/png') return 'png';
-	if (format === 'jpg' || format === 'jpeg' || format === 'image/jpg' || format === 'image/jpeg') return 'jpeg';
-	if (format === 'webp' || format === 'image/webp') return 'webp';
 	return '';
 }
 
@@ -1261,22 +1258,13 @@ async function imagesWithGenerations(payload, session = {}) {
 			success: false,
 			category: 'configuration',
 			code: 'codex_login_required',
-			message: 'Log in with the Codex CLI before using the direct Sunburst image route.',
+			message: 'Log in with the Codex CLI before using the Codex login images request.',
 		};
 	}
 	const sizeText = String(payload.size || '').trim();
-	let size = '';
-	if (sizeText) {
-		size = canonicalConstrainedImageSize(sizeText, SUNBURST_IMAGE_SIZE_CONSTRAINTS);
-		if (!size) return imageOptionsError(payload.model || 'model-relay:codex:image', 'The requested resolution is not supported by the selected Relay image model.');
-	}
 	const qualityText = String(payload.quality || '').trim().toLowerCase();
-	if (qualityText && !['low', 'medium', 'high', 'xhigh', 'max', 'auto'].includes(qualityText)) {
+	if (qualityText && !['low', 'medium', 'high', 'auto'].includes(qualityText)) {
 		return imageOptionsError(payload.model || 'model-relay:codex:image', 'The requested image quality is not supported by the selected Relay image model.');
-	}
-	const backgroundText = String(payload.background || '').trim().toLowerCase();
-	if (backgroundText && !['auto', 'opaque', 'transparent'].includes(backgroundText)) {
-		return imageOptionsError(payload.model || 'model-relay:codex:image', 'The requested image background is not supported by the selected Relay image model.');
 	}
 	const suppliedFormat = String(payload.output_format || '').trim();
 	let outputFormat = '';
@@ -1284,21 +1272,17 @@ async function imagesWithGenerations(payload, session = {}) {
 		outputFormat = codexProviderOutputFormat(suppliedFormat);
 		if (!outputFormat) return imageOptionsError(payload.model || 'model-relay:codex:image', 'The requested image output format is not supported by the selected Relay image model.');
 	}
-	if (backgroundText === 'transparent' && outputFormat === 'jpeg') {
-		return imageOptionsError(payload.model || 'model-relay:codex:image', 'Transparent backgrounds are only supported with PNG or WebP output.');
-	}
 	const countSource = payload.n !== undefined ? payload.n : payload.candidate_count;
 	let count;
 	if (countSource !== undefined && countSource !== null && String(countSource).trim() !== '') {
 		count = Number(countSource);
-		if (!Number.isInteger(count) || count < 1 || count > 10) return imageOptionsError(payload.model || 'model-relay:codex:image', 'The requested image candidate count is not supported by the selected Relay image model.');
+		if (!Number.isInteger(count) || count < 1 || count > 1) return imageOptionsError(payload.model || 'model-relay:codex:image', 'The requested image candidate count is not supported by the selected Relay image model.');
 	}
-	const references = codexGenerationReferences(payload, 16);
+	const references = codexGenerationReferences(payload, 4);
 	if (references.error) return { success: false, category: 'validation', code: 'codex_image_reference_invalid', message: references.error };
 	const body = { model: 'gpt-image-2.5-sunburst', prompt };
-	if (size) body.size = size;
+	if (sizeText) body.size = sizeText;
 	if (qualityText && qualityText !== 'auto') body.quality = qualityText;
-	if (backgroundText && backgroundText !== 'auto') body.background = backgroundText;
 	if (outputFormat) body.output_format = outputFormat;
 	if (count !== undefined) body.n = count;
 	if (references.images.length) body.images = references.images;
@@ -1311,7 +1295,7 @@ async function imagesWithGenerations(payload, session = {}) {
 	const headers = { Authorization: `Bearer ${auth.accessToken}`, 'Content-Type': 'application/json' };
 	if (auth.accountId) headers['chatgpt-account-id'] = auth.accountId;
 	if (session && session.signal && session.signal.aborted) return codexImageCancelled();
-	if (typeof session.appendSessionOutput === 'function') session.appendSessionOutput('stdout', 'Submitting Codex Sunburst image request.\n');
+	if (typeof session.appendSessionOutput === 'function') session.appendSessionOutput('stdout', 'Submitting Codex login image request.\n');
 	let response;
 	try {
 		response = await fetchImpl(endpoint, {

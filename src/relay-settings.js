@@ -109,7 +109,7 @@ function optionalString(value, previous = '', maxLength = 32767) {
 }
 
 function normalizeCodexImageTool(value) {
-	return String(value || '').trim() === 'image_gen' ? 'image_gen' : 'generations';
+	return String(value || '').trim() === 'generations' ? 'generations' : 'image_gen';
 }
 
 function optionalBoolean(value, previous = null) {

@@ -11,8 +11,7 @@ const { detectCli, detectCliAsync, materializeChatImages, messagesToPromptJson, 
 const { createLocalUpscaleDriver } = require('./local-upscale');
 const { createLocalImageDriver } = require('./local-image');
 const { resolveMaxTokens } = require('./token-policy');
-const { IMAGE_CAPABILITY_CONTRACT_VERSION, SUNBURST_IMAGE_SIZE_CONSTRAINTS, imageCapabilityContract, isCompleteImageCapabilityContract, findRelayImageModel, normalizeImageOutputFormat, normalizeImagePayloadForModel, relayCatalogEntrySupportsImages } = require('./image-capabilities');
-const relaySettings = require('./relay-settings');
+const { IMAGE_CAPABILITY_CONTRACT_VERSION, imageCapabilityContract, isCompleteImageCapabilityContract, findRelayImageModel, normalizeImageOutputFormat, normalizeImagePayloadForModel, relayCatalogEntrySupportsImages } = require('./image-capabilities');
 const { readImageDimensions } = require('./image-dimensions');
 const { antigravityAuthenticationFailure, antigravityResultText, createAntigravityImageArtifactResolver, findAntigravityImagePath, isAntigravityAuthenticationError } = require('./antigravity-cli');
 
@@ -525,12 +524,6 @@ const CODEX_IMAGE_SIZE_CHOICES = [
 	{ value: '2160x3840', label: '4K portrait · 2160 × 3840 (requested, not guaranteed)' },
 ];
 
-const CODEX_GENERATIONS_SIZE_CHOICES = [
-	...CODEX_IMAGE_SIZE_CHOICES.slice(0, 5).map((choice) => ({ ...choice, label: choice.label.replace(/ \(requested, not guaranteed\)$/, '') })),
-	{ value: '2048x1152', label: '2K wide · 2048 × 1152' },
-	...CODEX_IMAGE_SIZE_CHOICES.slice(5).map((choice) => ({ ...choice, label: choice.label.replace(/ \(requested, not guaranteed\)$/, '') })),
-];
-
 const CODEX_IMAGE_QUALITY_CHOICES = [
 	{ value: 'auto', label: 'Auto · provider chooses' },
 	{ value: 'low', label: 'Low' },
@@ -543,47 +536,16 @@ const CODEX_IMAGE_TEST_OPTIONS = [
 	testOption('quality', 'Quality', 'guidance', CODEX_IMAGE_QUALITY_CHOICES),
 ];
 
-const CODEX_GENERATIONS_TEST_OPTIONS = [
-	testOption('size', 'Resolution', 'direct', CODEX_GENERATIONS_SIZE_CHOICES),
-	testOption('quality', 'Quality', 'direct', [
-		...CODEX_IMAGE_QUALITY_CHOICES,
-		{ value: 'xhigh', label: 'Extra high' },
-		{ value: 'max', label: 'Max' },
-	]),
-	testOption('background', 'Background', 'direct', [
-		{ value: 'auto', label: 'Auto · provider chooses' },
-		{ value: 'opaque', label: 'Opaque' },
-		{ value: 'transparent', label: 'Transparent' },
-	]),
-];
-
-function codexImageToolMode() {
-	try {
-		return relaySettings.settings().codex_image_tool === 'image_gen' ? 'image_gen' : 'generations';
-	} catch (error) {
-		return 'generations';
-	}
-}
-
 function codexImageTestOptions() {
-	return codexImageToolMode() === 'image_gen' ? CODEX_IMAGE_TEST_OPTIONS : CODEX_GENERATIONS_TEST_OPTIONS;
+	return CODEX_IMAGE_TEST_OPTIONS;
 }
 
 function codexImageCapabilities() {
-	if (codexImageToolMode() === 'image_gen') {
-		return imageCapabilityContract(CODEX_IMAGE_TEST_OPTIONS, {
-			resolutionKey: 'size',
-			referenceImagesMax: 4,
-			candidateCountMax: 1,
-			outputFormats: ['image/png'],
-		});
-	}
-	return imageCapabilityContract(CODEX_GENERATIONS_TEST_OPTIONS, {
+	return imageCapabilityContract(CODEX_IMAGE_TEST_OPTIONS, {
 		resolutionKey: 'size',
-		referenceImagesMax: 16,
-		candidateCountMax: 10,
-		outputFormats: ['image/png', 'image/jpeg', 'image/webp'],
-		sizeConstraints: SUNBURST_IMAGE_SIZE_CONSTRAINTS,
+		referenceImagesMax: 4,
+		candidateCountMax: 1,
+		outputFormats: ['image/png'],
 	});
 }
 

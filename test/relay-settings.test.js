@@ -20,9 +20,9 @@ try {
 	};
 
 	const initial = relaySettings.settings();
-	assert.strictEqual(initial.codex_image_tool, 'generations');
-	assert.strictEqual(relaySettings.publicSettings().codex_image_tool, 'generations');
-	assert.strictEqual(relaySettings.resolved().codex_image_tool, 'generations');
+	assert.strictEqual(initial.codex_image_tool, 'image_gen');
+	assert.strictEqual(relaySettings.publicSettings().codex_image_tool, 'image_gen');
+	assert.strictEqual(relaySettings.resolved().codex_image_tool, 'image_gen');
 	assert.deepStrictEqual(initial.cli_paths, {
 		'codex-cli': '',
 		'grok-cli': '',
@@ -153,7 +153,7 @@ try {
 	}
 
 	state = {};
-	assert.strictEqual(relaySettings.settings().codex_image_tool, 'generations');
+	assert.strictEqual(relaySettings.settings().codex_image_tool, 'image_gen');
 	const savedTool = relaySettings.saveSettings({ codex_image_tool: 'image_gen' });
 	assert.strictEqual(savedTool.codex_image_tool, 'image_gen');
 	assert.strictEqual(state.relay.codex_image_tool, 'image_gen');
@@ -174,10 +174,17 @@ try {
 	assert.strictEqual(keptTool.codex_image_tool, 'image_gen');
 	assert.strictEqual(keptTool.cli_paths['codex-cli'], 'C:\\Tools\\codex.exe');
 	const invalidTool = relaySettings.saveSettings({ codex_image_tool: 'shell' });
-	assert.strictEqual(invalidTool.codex_image_tool, 'generations');
-	assert.strictEqual(relaySettings.publicSettings().codex_image_tool, 'generations');
+	assert.strictEqual(invalidTool.codex_image_tool, 'image_gen');
+	assert.strictEqual(relaySettings.publicSettings().codex_image_tool, 'image_gen');
 	const missingTool = relaySettings.saveSettings({ defaults: { chat: 'model-relay:codex:auto' } });
-	assert.strictEqual(missingTool.codex_image_tool, 'generations');
+	assert.strictEqual(missingTool.codex_image_tool, 'image_gen');
+	const explicitGenerations = relaySettings.saveSettings({ codex_image_tool: 'generations' });
+	assert.strictEqual(explicitGenerations.codex_image_tool, 'generations');
+	assert.strictEqual(state.relay.codex_image_tool, 'generations');
+	assert.strictEqual(relaySettings.publicSettings().codex_image_tool, 'generations');
+	assert.strictEqual(relaySettings.resolved().codex_image_tool, 'generations');
+	const keptGenerations = relaySettings.saveSettings({ defaults: { chat: 'model-relay:codex:auto' } });
+	assert.strictEqual(keptGenerations.codex_image_tool, 'generations');
 
 	console.log('relay settings tests passed');
 } finally {
