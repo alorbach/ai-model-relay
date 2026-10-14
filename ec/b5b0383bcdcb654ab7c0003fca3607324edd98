@@ -1,0 +1,39 @@
+test/status-page.test.js
+  s_78e9d5423fed76::t_7bee53d479bdf7 178-189
+src/status-page.js
+  s_78e9d5423fed76::t_7720673d8f64ad 168-180
+  s_78e9d5423fed76::t_fa2a02883fd8cd 1422
+  s_78e9d5423fed76::t_cfa7444b2fd39c 1291-1292
+  s_78e9d5423fed76::t_0f6f501d0cda25 106-108
+  s_78e9d5423fed76::t_ce9a92e6050e52 2680
+  s_78e9d5423fed76::t_0cddb4d7491b3c 1577-1578
+  s_78e9d5423fed76::t_fa436786bbf33d 1202-1205
+  s_78e9d5423fed76::t_9d4377629bc0ed 2557-2592,2596
+  s_78e9d5423fed76::t_44c466ee2ed4e8 4070
+test/server-jobs.test.js
+  s_78e9d5423fed76::t_2369e1bdbdb7a8 286
+  s_78e9d5423fed76::t_ce7dbca43c6b1a 379-394
+  s_78e9d5423fed76::t_fd266694aaa0c5 298
+  s_78e9d5423fed76::t_28da665b6d1cdf 369
+src/server.js
+  s_78e9d5423fed76::t_7ba6b40a6432f4 203-207,210
+  s_78e9d5423fed76::t_d3da54d4c86348 504-527,540,546
+test/relay-routes.test.js
+  s_78e9d5423fed76::t_d366b16d230f94 355
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "ecb5b0383bcdcb654ab7c0003fca3607324edd98",
+  "prompts": {},
+  "sessions": {
+    "s_78e9d5423fed76": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "746b4253-f6bc-4403-a90f-10bc52168a7f",
+        "model": "grok-4.7"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
