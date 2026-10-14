@@ -452,7 +452,7 @@ function exposeOrigin(req, bridgeSecurity) {
 function requirePairing(req, res, bridgeSecurity) {
 	const origin = exposeOrigin(req, bridgeSecurity);
 	const token = req.headers['x-alorbach-bridge-token'];
-	const allowedOrigin = corsOrigin(req, bridgeSecurity);
+	const allowedOrigin = origin && bridgeSecurity.getPairing(origin) ? origin : corsOrigin(req, bridgeSecurity);
 	if (!origin || !bridgeSecurity.validateBridgeToken(origin, token)) {
 		sendErrorJson(req, res, 403, { success: false, message: 'This WordPress origin is not paired with the local Codex bridge.' }, allowedOrigin);
 		return null;

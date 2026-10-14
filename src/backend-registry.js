@@ -344,6 +344,25 @@ function openAiCompatText(response) {
 }
 
 function normalizeChatResponse(provider, model, parsed, fallbackText = '') {
+	const stopReason = String(parsed && (parsed.stopReason || parsed.stop_reason) || '').trim().toLowerCase();
+	if (stopReason === 'cancelled' || stopReason === 'canceled') {
+		return {
+			success: false,
+			category: 'cancelled',
+			code: 'provider_chat_cancelled',
+			message: 'The chat provider cancelled generation before completing its response.',
+			details: { provider, stop_reason: stopReason },
+		};
+	}
+	if (stopReason === 'timeout' || stopReason === 'timed_out') {
+		return {
+			success: false,
+			category: 'timeout',
+			code: 'provider_chat_timeout',
+			message: 'The chat provider timed out before completing its response.',
+			details: { provider, stop_reason: stopReason },
+		};
+	}
 	if (parsed && Array.isArray(parsed.choices)) {
 		return {
 			success: true,
@@ -986,7 +1005,7 @@ function createGrokCliDriver(options = {}) {
 				if (session.appendSessionInput) {
 					session.appendSessionInput('grok cli request', `Tool: ${toolName}\nWorkspace: ${workspace}\n\nPrompt (passed with --single; stdin is empty):\n${prompt}`);
 				}
-				const result = await runTextCommand(state.command, ['--single', prompt, '--output-format', 'json', '--cwd', workspace, '--tools', toolName, '--disallowed-tools', 'run_terminal_cmd', '--permission-mode', 'dontAsk', '--no-subagents', '--disable-web-search', '--max-turns', '2'], '', session, { ...options, timeoutMs: mediaTimeoutMs, signal: session.signal });
+				const result = await runTextCommand(state.command, ['--single', prompt, '--output-format', 'json', '--cwd', workspace, '--tools', toolName, '--disallowed-tools', 'run_terminal_cmd', '--permission-mode', 'bypassPermissions', '--no-subagents', '--disable-web-search', '--max-turns', '2'], '', session, { ...options, timeoutMs: mediaTimeoutMs, signal: session.signal });
 				if (result.success) {
 					const upstreamTimeout = upstreamGrokMediaTimeout(result.text, toolName);
 					if (upstreamTimeout) return upstreamTimeout;

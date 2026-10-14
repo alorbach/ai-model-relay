@@ -200,7 +200,7 @@ function createFakeGrok(options = {}) {
 		assertExactToolAllowlist(referenceToVideoArgs, 'reference_to_video');
 		const mediaArgs = fixture.calls.find((args) => toolForArgs(args) === 'image_edit');
 		assertExactToolAllowlist(mediaArgs, 'image_edit');
-		assert.strictEqual(mediaArgs[mediaArgs.indexOf('--permission-mode') + 1], 'dontAsk');
+		assert.strictEqual(mediaArgs[mediaArgs.indexOf('--permission-mode') + 1], 'bypassPermissions');
 		assert.strictEqual(mediaArgs[mediaArgs.indexOf('--disallowed-tools') + 1], 'run_terminal_cmd');
 		assert.ok(mediaArgs.includes('--no-subagents'));
 		assert.ok(mediaArgs.includes('--disable-web-search'));

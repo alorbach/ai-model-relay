@@ -18,13 +18,13 @@ function requestJson(port, method, pathname, body, headers = {}) {
 			port,
 			path: pathname,
 			method,
-			headers: {
+			headers: Object.fromEntries(Object.entries({
 				Origin: 'http://127.0.0.1:8787',
 				'Content-Type': 'application/json',
 				'Content-Length': Buffer.byteLength(data),
 				'X-Alorbach-Bridge-Token': 'test-token',
 				...headers,
-			},
+			}).filter(([, value]) => value !== null)),
 		}, (res) => {
 			let raw = '';
 			res.setEncoding('utf8');
@@ -283,6 +283,27 @@ function createMockSecurity() {
 
 		const models = await requestJson(port, 'GET', '/v1/relay/models');
 		assert.strictEqual(models.statusCode, 200);
+		const staleTokenModels = await requestJson(port, 'GET', '/v1/relay/models', null, { Origin: 'http://127.0.0.1:8787', 'X-Alorbach-Bridge-Token': 'expired-token' });
+		assert.strictEqual(staleTokenModels.statusCode, 403);
+		assert.strictEqual(staleTokenModels.headers['access-control-allow-origin'], 'http://127.0.0.1:8787');
+		assert.strictEqual(staleTokenModels.headers['access-control-allow-private-network'], 'true');
+		assert.ok(staleTokenModels.headers['access-control-allow-headers'].toLowerCase().includes('x-alorbach-bridge-token'));
+		assert.strictEqual(staleTokenModels.body.message, 'This WordPress origin is not paired with the local Codex bridge.');
+
+		const missingTokenModels = await requestJson(port, 'GET', '/v1/relay/models', null, { Origin: 'http://127.0.0.1:8787', 'X-Alorbach-Bridge-Token': null });
+		assert.strictEqual(missingTokenModels.statusCode, 403);
+		assert.strictEqual(missingTokenModels.headers['access-control-allow-origin'], 'http://127.0.0.1:8787');
+		assert.strictEqual(missingTokenModels.headers['access-control-allow-private-network'], 'true');
+
+		const pairedModelsPreflight = await requestJson(port, 'OPTIONS', '/v1/relay/models', null, { Origin: 'http://127.0.0.1:8787', 'X-Alorbach-Bridge-Token': null });
+		assert.strictEqual(pairedModelsPreflight.statusCode, 204);
+		assert.strictEqual(pairedModelsPreflight.headers['access-control-allow-origin'], 'http://127.0.0.1:8787');
+		assert.strictEqual(pairedModelsPreflight.headers['access-control-allow-private-network'], 'true');
+		assert.ok(pairedModelsPreflight.headers['access-control-allow-headers'].toLowerCase().includes('x-alorbach-bridge-token'));
+
+		const unpairedOriginModels = await requestJson(port, 'GET', '/v1/relay/models', null, { Origin: 'https://unpaired.example', 'X-Alorbach-Bridge-Token': 'invalid-token' });
+		assert.strictEqual(unpairedOriginModels.statusCode, 403);
+		assert.ok(!unpairedOriginModels.headers['access-control-allow-origin']);
 		assert.ok(models.body.models.text.includes('codex-local:auto'));
 		assert.ok(models.body.models.relay.includes('model-relay:xai:grok-4.3'));
 		assert.ok(models.body.models.relay.includes('model-relay:xai:grok-4.6'));

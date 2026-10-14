@@ -18,7 +18,7 @@
   "license": "GPL-2.0-or-later",
   "devDependencies": {
     "electron": "^42.0.1",
-    "electron-builder": "^26.8.1"
+    "electron-builder": "^26.5.0"
   },
   "build": {
     "appId": "com.alorbach.aimodelrelay",
@@ -34,11 +34,11 @@
       "package.json"
     ],
     "asarUnpack": [
-    "src/asr-runner.py",
-    "src/asr-qwen-runner.py",
-    "src/music-analysis-runner.py",
-    "src/upscale-runner.py",
-    "src/image-qwen-runner.py"
+      "src/asr-runner.py",
+      "src/asr-qwen-runner.py",
+      "src/music-analysis-runner.py",
+      "src/upscale-runner.py",
+      "src/image-qwen-runner.py"
     ],
     "win": {
       "icon": "assets/favicon.ico",
