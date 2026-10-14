@@ -1,0 +1,33 @@
+src/main.js
+  s_ba19acfccc260c::t_83d2686d22189b 14,396-457,510-517,587,604-620,647-651
+build/installer.nsh
+  s_ba19acfccc260c::t_61155ba8e58e60 32-41
+src/launch-on-login.js
+  s_ba19acfccc260c::t_06abb32767a2e6 1-18,23-56,60-65
+  s_ba19acfccc260c::t_c396bace3e7ba7 19-22
+  s_ba19acfccc260c::t_ab9b5cee8fc9af 57-59
+README.md
+  s_ba19acfccc260c::t_3628dc239d067c 18
+package.json
+  s_ba19acfccc260c::t_59f3af6003ef61 12-13
+docs/architecture.md
+  s_ba19acfccc260c::t_e3401ca874ecdb 17
+test/launch-on-login.test.js
+  s_ba19acfccc260c::t_a9b26bb72b8704 1-70
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "1ae745694cb2298afd7ae8e85d69c21720b13904",
+  "prompts": {},
+  "sessions": {
+    "s_ba19acfccc260c": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "b8ad50bd-783a-421a-ac43-44839a679e5d",
+        "model": "grok-4.7"
+      },
+      "human_author": null
+    }
+  }
+}
