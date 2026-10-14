@@ -15,7 +15,7 @@
 
 The Settings page shows every supported local/API driver with an installed, ready, checking, not-authenticated, or unavailable state; executable path, version, supported operations, and concise safe diagnostics are shown separately so long paths do not distort the card layout.
 
-- **Codex CLI**: chat, image generation, and media analysis. Chat uses stdin plus `--ephemeral` and, when advertised, `--sandbox read-only`.
+- **Codex CLI**: chat, image generation, and media analysis. Chat uses stdin plus `--ephemeral` and, when advertised, `--sandbox read-only`. Image jobs use the saved relay setting `codex_image_tool`. `generations` (default) POSTs to the Codex login images endpoint with the existing `codex login` session (`CODEX_HOME/auth.json`); it does not use `OPENAI_API_KEY` or `image_gen.py`. `image_gen` keeps the previous `codex exec` path.
 - **Grok CLI**: isolated Gateway chat (`--prompt-file` / `--prompt-json`, no shell/subagents/web search) plus Grok Imagine image generation and experimental image-reference video generation only when `%USERPROFILE%\.grok\skills\imagine\SKILL.md` or `%USERPROFILE%\.grok\bundled\skills\imagine\SKILL.md` declares the matching local tools. Imagine allowlists one tool per request.
 - **Cursor Agent**: Gateway chat through `cursor-agent --print --output-format json --mode=ask --trust` in a temp workspace. The transcript is in `prompt.txt`, not on argv.
 - **Antigravity CLI**: chat, images (`IMAGE_PATH:` import with state-root fallback), and media analysis through authenticated `agy`.
@@ -216,11 +216,11 @@ Open **Settings**, press **Refresh detection**, and read the provider card's saf
 
 Grok CLI media requires `%USERPROFILE%\.grok\skills\imagine\SKILL.md` or `%USERPROFILE%\.grok\bundled\skills\imagine\SKILL.md` to declare the relevant Imagine tools. Press **Refresh detection** after installing/updating Grok. Image/video jobs fail explicitly when the Imagine tools are unavailable, no output artifact is generated, the request is moderated, or the bounded Grok process times out. Video remains experimental until a local video request succeeds; if Grok confirms that a video tool is unavailable, refresh detection and update Grok before selecting it again.
 
-xAI Imagine HTTP image and video jobs (`model-relay:xai:imagine-image`, `model-relay:xai:imagine-video`) need an xAI API key in **Settings → Providers** or `XAI_API_KEY` / `AI_MODEL_RELAY_XAI_API_KEY` when that field is blank. Native request fields include aspect ratio (including `21:9` and `5:2` for images), image resolution `1k`/`2k`, video resolution `480p`/`720p`/`1080p`, clip length 1–15 seconds, and `generate_audio`. These upload the prompt and any reference images to xAI. When that key is set and no video default has been saved, Settings defaults video routing to Imagine video.
+xAI Imagine HTTP image and video jobs (`model-relay:xai:imagine-image`, `model-relay:xai:imagine-video`) need an xAI API key in **Settings → Providers** or `XAI_API_KEY` / `AI_MODEL_RELAY_XAI_API_KEY` when that field is blank. Native image fields remain the existing aspect ratios (including `21:9` and `5:2`) and native resolution `1k`/`2k`. Image `quality` is `low`, `medium`, or explicit `auto`; omitting `quality` leaves the provider default. Image jobs accept up to 5 reference images and `n` from 1 to 10. The image API returns JPEG only: the relay accepts `image/jpeg`, normalizes an omitted `output_format` to `image/jpeg`, and rejects `png`, `webp`, and other formats. `response_format` stays `b64_json` and is not a file format. Video fields remain resolution `480p`/`720p`/`1080p`, clip length 1–15 seconds, and `generate_audio`. These upload the prompt and any reference images to xAI. When that key is set and no video default has been saved, Settings defaults video routing to Imagine video.
 
 ### Image resolution expectations on status-page tests
 
-Codex CLI and Grok CLI image tests send size or resolution choices as **generation guidance** only. Codex built-in `image_gen` does not accept explicit `size`/`quality` tool parameters, and Grok Imagine `image_gen` accepts `aspect_ratio` but not `resolution`. A Grok `image_edit` with one reference keeps that source canvas; when the requested ratio differs, Relay duplicates the reference so Imagine applies `aspect_ratio` as a multi-image edit. The Live tab shows the measured artifact width × height so you can compare a requested size against what the provider actually returned. xAI Imagine HTTP (`model-relay:xai:imagine-image`) is the only built-in image test path that sends `resolution` directly to the provider API.
+Codex image tests follow `codex_image_tool`. `generations` (default) sends `size`, `quality`, `background`, and `output_format` on the Sunburst request; `size`, `quality`, and `output_format` are native fields. The pixel `size` rule is in the local bridge API. `image_gen` still sends size, quality, and output format as prompt guidance only, because the built-in tool hardcodes `size=auto` and `quality=auto` and returns PNG. Grok CLI still passes `aspect_ratio` as an `image_gen` / `image_edit` tool argument and keeps resolution and `output_format` as prompt guidance. A Grok `image_edit` with one reference keeps that source canvas; when the requested ratio differs, Relay duplicates the reference so Imagine applies `aspect_ratio` as a multi-image edit. Antigravity `generate_image` guidance is unchanged. The Live tab shows the measured artifact width × height so you can compare a requested size against what the provider actually returned. xAI Imagine HTTP (`model-relay:xai:imagine-image`) sends `resolution` `1k`/`2k` natively. Codex `generations` sends pixel `size` natively; it does not use the xAI `resolution` field.
 
 ### Cursor Agent is unavailable
 
@@ -236,9 +236,9 @@ Clear the browser's stored token for the origin and pair again. Also check the t
 
 ### Image request succeeds in Codex but bridge returns no image
 
-The bridge detects new files under `CODEX_HOME\generated_images`. Confirm Codex writes generated images there for the current `CODEX_HOME`.
+This applies to `codex_image_tool` `image_gen`. That path detects new files under `CODEX_HOME\generated_images`. Confirm Codex writes generated images there for the current `CODEX_HOME`. `generations` returns bytes from the Codex login endpoint and does not use that directory.
 
-Only one image job runs at a time because image result detection uses the shared generated-images directory. Chat jobs may still run beside an image job up to the **Settings → Runtime** concurrency value, or `ALORBACH_CODEX_MAX_CONCURRENT_JOBS` when that field is blank.
+Only one `image_gen` job runs at a time because image result detection uses the shared generated-images directory. Chat jobs may still run beside an image job up to the **Settings → Runtime** concurrency value, or `ALORBACH_CODEX_MAX_CONCURRENT_JOBS` when that field is blank.
 
 ### WordPress retry says duplicate request
 

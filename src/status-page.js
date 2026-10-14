@@ -1722,11 +1722,13 @@ function statusPageHtml() {
 			const enabledValue = enabledSelect ? enabledSelect.value : '';
 			const runtime = { timeouts };
 			if (maxConcurrent) runtime.max_concurrent_jobs = maxConcurrent.value.trim();
+			const codexImageToolValue = (document.getElementById('relayCodexImageTool') || {}).value === 'image_gen' ? 'image_gen' : 'generations';
 			const payload = {
 				defaults,
 				cli_paths,
 				token_defaults,
 				runtime,
+				codex_image_tool: codexImageToolValue,
 				providers: {
 					xai: {
 						api_key: (document.getElementById('relayXaiApiKey') || {}).value || '',
@@ -1764,6 +1766,7 @@ function statusPageHtml() {
 					cli_paths: payload.cli_paths,
 					token_defaults: payload.token_defaults,
 					providers: payload.providers,
+					codex_image_tool: payload.codex_image_tool,
 				};
 			}
 			return payload;
@@ -1825,6 +1828,8 @@ function statusPageHtml() {
 			setValue('relayCliProcessArgs', (providers.cli_process && providers.cli_process.args) || '');
 			setValue('relayGrokImagineSkill', (providers.grok && providers.grok.imagine_skill) || '');
 			setValue('relayAntigravityStateDir', (providers.antigravity && providers.antigravity.state_dir) || '');
+			const imageTool = document.getElementById('relayCodexImageTool');
+			if (imageTool && Object.prototype.hasOwnProperty.call(preserved, 'codex_image_tool')) imageTool.value = preserved.codex_image_tool === 'image_gen' ? 'image_gen' : 'generations';
 		}
 
 		function normalizeSettingsSection(section) {
@@ -2769,7 +2774,9 @@ function statusPageHtml() {
 				{ id: 'cursor-cli', label: 'Cursor Agent executable', placeholder: 'cursor-agent or C:\\Tools\\cursor-agent.exe' },
 				{ id: 'cli-process', label: 'CLI Process executable', placeholder: 'Optional generic command path' },
 			];
-			fields.relayCliPaths.innerHTML = cliPathFields.map((entry) => '<label class="field"><span>' + escapeHtml(entry.label) + '</span><input type="text" autocomplete="off" spellcheck="false" data-relay-cli-path="' + escapeHtml(entry.id) + '" value="' + escapeHtml(cliPaths[entry.id] || '') + '" placeholder="' + escapeHtml(entry.placeholder) + '">' + (entry.hint ? '<small class="muted">' + escapeHtml(entry.hint) + '</small>' : '') + '</label>').join('');
+			const codexImageTool = settings.codex_image_tool === 'image_gen' ? 'image_gen' : 'generations';
+			const codexImageToolField = '<label class="field"><span>Codex image route</span><select id="relayCodexImageTool"><option value="generations"' + (codexImageTool === 'generations' ? ' selected' : '') + '>Direct Sunburst image route</option><option value="image_gen"' + (codexImageTool === 'image_gen' ? ' selected' : '') + '>Codex exec image_gen tool</option></select><small class="muted">generations posts size, quality, and format to the ChatGPT Codex images API. image_gen keeps the existing codex exec tool and sends those choices as prompt guidance.</small></label>';
+			fields.relayCliPaths.innerHTML = cliPathFields.map((entry) => '<label class="field"><span>' + escapeHtml(entry.label) + '</span><input type="text" autocomplete="off" spellcheck="false" data-relay-cli-path="' + escapeHtml(entry.id) + '" value="' + escapeHtml(cliPaths[entry.id] || '') + '" placeholder="' + escapeHtml(entry.placeholder) + '">' + (entry.hint ? '<small class="muted">' + escapeHtml(entry.hint) + '</small>' : '') + '</label>').join('') + codexImageToolField;
 			const labels = { chat: 'Chat and coding', images: 'Image generation', videos: 'Video generation', transcribe: 'Transcription', 'media.analyze': 'Media analysis', 'music.analyze': 'Music analysis' };
 			fields.relayDefaultSettings.innerHTML = Object.keys(labels).map((jobType) => {
 				const current = defaults[jobType] || '';

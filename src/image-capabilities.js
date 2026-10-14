@@ -2,10 +2,51 @@
 
 const IMAGE_CAPABILITY_CONTRACT_VERSION = 1;
 const DEFAULT_IMAGE_OUTPUT_FORMATS = Object.freeze(['image/png', 'image/jpeg', 'image/webp']);
+const SUNBURST_IMAGE_SIZE_CONSTRAINTS = Object.freeze({
+	multiple_of: 16,
+	long_edge_max: 3840,
+	aspect_ratio_max: 3,
+	min_pixels: 655360,
+	max_pixels: 8294400,
+});
 
 function normalizeImageOutputFormat(value) {
 	const format = String(value || 'image/png').trim().toLowerCase();
 	return format === 'png' ? 'image/png' : (format === 'jpg' || format === 'jpeg' ? 'image/jpeg' : format === 'webp' ? 'image/webp' : format);
+}
+
+function defaultImageOutputFormat(capabilities) {
+	const formats = capabilities && Array.isArray(capabilities.supported_output_formats) ? capabilities.supported_output_formats : [];
+	for (const value of formats) {
+		const normalized = normalizeImageOutputFormat(value);
+		if (normalized) return normalized;
+	}
+	return normalizeImageOutputFormat('');
+}
+
+function canonicalConstrainedImageSize(value, constraints = SUNBURST_IMAGE_SIZE_CONSTRAINTS) {
+	const text = String(value == null ? '' : value).trim();
+	if (!text) return '';
+	if (/^auto$/i.test(text)) return 'auto';
+	const match = text.match(/^(\d+)x(\d+)$/i);
+	if (!match || !constraints || typeof constraints !== 'object') return '';
+	const width = Number(match[1]);
+	const height = Number(match[2]);
+	if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width <= 0 || height <= 0) return '';
+	const multiple = Number(constraints.multiple_of);
+	const longEdgeMax = Number(constraints.long_edge_max);
+	const ratioMax = Number(constraints.aspect_ratio_max);
+	const minPixels = Number(constraints.min_pixels);
+	const maxPixels = Number(constraints.max_pixels);
+	if (!Number.isInteger(multiple) || multiple <= 0) return '';
+	if (width % multiple !== 0 || height % multiple !== 0) return '';
+	const longEdge = Math.max(width, height);
+	const shortEdge = Math.min(width, height);
+	if (!Number.isFinite(longEdgeMax) || longEdge > longEdgeMax) return '';
+	if (!Number.isFinite(ratioMax) || ratioMax <= 0 || longEdge > shortEdge * ratioMax) return '';
+	const pixels = width * height;
+	if (!Number.isSafeInteger(pixels) || pixels < minPixels || pixels > maxPixels) return '';
+	return `${width}x${height}`;
 }
 
 function optionValues(testOptions, key) {
@@ -34,10 +75,13 @@ function imageCapabilityContract(testOptions, options = {}) {
 	const resolutionDelivery = optionDelivery(testOptions, resolutionKey, 'guidance');
 	const qualityDelivery = optionDelivery(testOptions, 'quality', '');
 	const aspectRatioDelivery = optionDelivery(testOptions, 'aspect_ratio', '');
+	const supportedBackgrounds = optionValues(testOptions, 'background');
+	const backgroundDelivery = optionDelivery(testOptions, 'background', '');
 	const providerOptions = {};
 	addProviderOption(providerOptions, resolutionKey, supportedSizes, resolutionDelivery);
 	if (qualityDelivery === 'native') addProviderOption(providerOptions, 'quality', supportedQualities, qualityDelivery);
 	if (aspectRatioDelivery === 'native') addProviderOption(providerOptions, 'aspect_ratio', supportedAspectRatios, aspectRatioDelivery);
+	if (backgroundDelivery === 'native') addProviderOption(providerOptions, 'background', supportedBackgrounds, backgroundDelivery);
 	const supportedOutputFormats = Array.isArray(options.outputFormats) && options.outputFormats.length
 		? options.outputFormats.map(normalizeImageOutputFormat)
 		: DEFAULT_IMAGE_OUTPUT_FORMATS.slice();
@@ -57,9 +101,13 @@ function imageCapabilityContract(testOptions, options = {}) {
 		quality_delivery: qualityDelivery,
 		supported_aspect_ratios: supportedAspectRatios,
 		aspect_ratio_delivery: aspectRatioDelivery,
+		supported_backgrounds: supportedBackgrounds,
+		background_delivery: backgroundDelivery,
 		supported_output_formats: supportedOutputFormats,
 		provider_options: providerOptions,
 		...(options.cloudUpload ? { cloud_upload: true } : {}),
+		...(options.sizeConstraints ? { size_constraints: options.sizeConstraints } : {}),
+		...(options.preserveAutoQuality ? { preserve_auto_quality: true } : {}),
 	};
 }
 
@@ -95,6 +143,7 @@ function isCompleteImageCapabilityContract(model) {
 	if (capabilities.resolution_mode === 'native_scale' && !nativeProviderOption(schema, resolutionKey)) return false;
 	if (capabilities.aspect_ratio_delivery === 'native' && !nativeProviderOption(schema, 'aspect_ratio')) return false;
 	if (capabilities.quality_delivery === 'native' && !nativeProviderOption(schema, 'quality')) return false;
+	if (capabilities.background_delivery === 'native' && !nativeProviderOption(schema, 'background')) return false;
 	return true;
 }
 
@@ -141,18 +190,26 @@ function normalizeImagePayloadForModel(payload, modelEntry) {
 		const value = nested[key];
 		if (!option || !option.values || !hasValue(value) || !['string', 'number', 'boolean'].includes(typeof value)) return { error: imageOptionsError(model, `The provider option ${key} is not supported by the selected Relay image model.`) };
 		const text = String(value).trim();
-		const canonical = canonicalChoice(text, option.values);
+		const constrainedSize = key === 'size' && capabilities.size_constraints ? canonicalConstrainedImageSize(text, capabilities.size_constraints) : '';
+		const canonical = constrainedSize || canonicalChoice(text, option.values);
 		if (!isAuto(value) && !canonical) return { error: imageOptionsError(model, `The provider option ${key} does not support ${text} for the selected Relay image model.`) };
 		if (isAuto(value)) {
 			continue;
 		}
-		if (hasValue(requested[key]) && !isAuto(requested[key]) && canonicalChoice(requested[key], option.values) !== canonical) return { error: imageOptionsError(model, `Conflicting values were supplied for the Relay image option ${key}.`) };
+		if (hasValue(requested[key]) && !isAuto(requested[key])) {
+			const existing = key === 'size' && capabilities.size_constraints
+				? canonicalConstrainedImageSize(requested[key], capabilities.size_constraints)
+				: canonicalChoice(requested[key], option.values);
+			if (existing !== canonical) return { error: imageOptionsError(model, `Conflicting values were supplied for the Relay image option ${key}.`) };
+		}
 		requested[key] = canonical;
 	}
 	const resolutionKey = providerKeys.find((key) => ['size', 'resolution', 'image_size'].includes(key)) || '';
 	const supportedSizes = Array.isArray(capabilities.supported_sizes) ? capabilities.supported_sizes.map((value) => String(value)) : [];
 	const supportedQualities = Array.isArray(capabilities.supported_qualities) ? capabilities.supported_qualities.map((value) => String(value)) : [];
 	const supportedRatios = Array.isArray(capabilities.supported_aspect_ratios) ? capabilities.supported_aspect_ratios.map((value) => String(value)) : [];
+	const supportedBackgrounds = Array.isArray(capabilities.supported_backgrounds) ? capabilities.supported_backgrounds.map((value) => String(value)) : [];
+	const sizeConstraints = capabilities.size_constraints && typeof capabilities.size_constraints === 'object' ? capabilities.size_constraints : null;
 	const validateChoice = (value, choices) => !hasValue(value) || isAuto(value) || !!canonicalChoice(value, choices);
 	if (resolutionKey !== 'size' && hasValue(requested.size) && !isAuto(requested.size)) {
 		// Older Gateway clients sent their global pixel default alongside a
@@ -161,17 +218,28 @@ function normalizeImagePayloadForModel(payload, modelEntry) {
 		if (hasValue(requested[resolutionKey]) && !isAuto(requested[resolutionKey])) delete requested.size;
 		else return { error: imageOptionsError(model, `Pixel size is not a supported option for the selected Relay image model; use ${resolutionKey}.`) };
 	}
-	if (!validateChoice(requested[resolutionKey] || requested.size, supportedSizes)) return { error: imageOptionsError(model, 'The requested resolution is not supported by the selected Relay image model.') };
+	if (resolutionKey === 'size' && sizeConstraints) {
+		if (hasValue(requested.size) && !isAuto(requested.size) && !canonicalConstrainedImageSize(requested.size, sizeConstraints)) return { error: imageOptionsError(model, 'The requested resolution is not supported by the selected Relay image model.') };
+	} else if (!validateChoice(requested[resolutionKey] || requested.size, supportedSizes)) return { error: imageOptionsError(model, 'The requested resolution is not supported by the selected Relay image model.') };
 	if (!supportedQualities.length && hasValue(requested.quality) && !isAuto(requested.quality)) return { error: imageOptionsError(model, 'The selected Relay image model does not support image quality selection.') };
 	if (supportedQualities.length && !validateChoice(requested.quality, supportedQualities)) return { error: imageOptionsError(model, 'The requested image quality is not supported by the selected Relay image model.') };
 	if (!supportedRatios.length && hasValue(requested.aspect_ratio) && !isAuto(requested.aspect_ratio)) return { error: imageOptionsError(model, 'The selected Relay image model does not support aspect-ratio selection.') };
 	if (supportedRatios.length && !validateChoice(requested.aspect_ratio, supportedRatios)) return { error: imageOptionsError(model, 'The requested aspect ratio is not supported by the selected Relay image model.') };
-	if (hasValue(requested[resolutionKey]) && !isAuto(requested[resolutionKey])) requested[resolutionKey] = canonicalChoice(requested[resolutionKey], supportedSizes);
+	if (resolutionKey === 'size' && sizeConstraints && hasValue(requested.size) && !isAuto(requested.size)) requested.size = canonicalConstrainedImageSize(requested.size, sizeConstraints);
+	else if (hasValue(requested[resolutionKey]) && !isAuto(requested[resolutionKey])) requested[resolutionKey] = canonicalChoice(requested[resolutionKey], supportedSizes);
 	if (hasValue(requested.quality) && !isAuto(requested.quality)) requested.quality = canonicalChoice(requested.quality, supportedQualities);
 	if (hasValue(requested.aspect_ratio) && !isAuto(requested.aspect_ratio)) requested.aspect_ratio = canonicalChoice(requested.aspect_ratio, supportedRatios);
-	for (const key of ['quality', 'aspect_ratio']) if (isAuto(requested[key])) delete requested[key];
-	const normalizedFormat = normalizeImageOutputFormat(requested.output_format);
+	if (!supportedBackgrounds.length && hasValue(requested.background) && !isAuto(requested.background)) return { error: imageOptionsError(model, 'The selected Relay image model does not support background selection.') };
+	if (supportedBackgrounds.length && !validateChoice(requested.background, supportedBackgrounds)) return { error: imageOptionsError(model, 'The requested image background is not supported by the selected Relay image model.') };
+	if (hasValue(requested.background) && !isAuto(requested.background)) requested.background = canonicalChoice(requested.background, supportedBackgrounds);
+	for (const key of ['aspect_ratio', 'background']) if (isAuto(requested[key])) delete requested[key];
+	if (isAuto(requested.quality)) {
+		if (capabilities.preserve_auto_quality) requested.quality = 'auto';
+		else delete requested.quality;
+	}
+	const normalizedFormat = hasValue(requested.output_format) ? normalizeImageOutputFormat(requested.output_format) : defaultImageOutputFormat(capabilities);
 	if (!Array.isArray(capabilities.supported_output_formats) || !capabilities.supported_output_formats.includes(normalizedFormat)) return { error: imageOptionsError(model, 'The requested image output format is not supported by the selected Relay image model.') };
+	if (requested.background === 'transparent' && normalizedFormat === 'image/jpeg') return { error: imageOptionsError(model, 'Transparent backgrounds are only supported with PNG or WebP output.') };
 	requested.output_format = normalizedFormat;
 	const countValue = requested.candidate_count !== undefined ? requested.candidate_count : (requested.n !== undefined ? requested.n : 1);
 	const count = Number(countValue);
@@ -189,6 +257,7 @@ function normalizeImagePayloadForModel(payload, modelEntry) {
 		'prompt',
 		'size',
 		'quality',
+		'background',
 		'aspect_ratio',
 		'output_format',
 		'n',
@@ -213,7 +282,10 @@ function normalizeImagePayloadForModel(payload, modelEntry) {
 module.exports = {
 	DEFAULT_IMAGE_OUTPUT_FORMATS,
 	IMAGE_CAPABILITY_CONTRACT_VERSION,
+	SUNBURST_IMAGE_SIZE_CONSTRAINTS,
+	canonicalConstrainedImageSize,
 	imageCapabilityContract,
+	imageOptionsError,
 	isCompleteImageCapabilityContract,
 	findRelayImageModel,
 	relayCatalogEntrySupportsImages,

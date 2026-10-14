@@ -108,6 +108,10 @@ function optionalString(value, previous = '', maxLength = 32767) {
 	return value.trim().slice(0, maxLength);
 }
 
+function normalizeCodexImageTool(value) {
+	return String(value || '').trim() === 'image_gen' ? 'image_gen' : 'generations';
+}
+
 function optionalBoolean(value, previous = null) {
 	if (value === undefined) return previous === true || previous === false ? previous : null;
 	if (value === null || value === '') return null;
@@ -212,6 +216,7 @@ function settings() {
 		token_defaults: normalizeTokenDefaults(relay.token_defaults),
 		runtime: normalizeRuntime(relay.runtime, emptyRuntime()),
 		providers,
+		codex_image_tool: normalizeCodexImageTool(relay.codex_image_tool),
 	};
 }
 
@@ -259,6 +264,7 @@ function publicSettings() {
 		token_defaults: stored.token_defaults,
 		runtime: stored.runtime,
 		providers: publicProviders(stored.providers),
+		codex_image_tool: stored.codex_image_tool,
 	};
 }
 
@@ -317,6 +323,7 @@ function resolved() {
 		timeouts[key] = resolvedTimeout(key, stored.runtime);
 	}
 	return {
+		codex_image_tool: stored.codex_image_tool,
 		runtime: {
 			max_concurrent_jobs: stored.runtime.max_concurrent_jobs
 				? clampConcurrent(stored.runtime.max_concurrent_jobs)
@@ -411,7 +418,8 @@ function saveSettings(next = {}) {
 		const hasTokenDefaults = Object.prototype.hasOwnProperty.call(next, 'token_defaults');
 		const hasRuntime = Object.prototype.hasOwnProperty.call(next, 'runtime');
 		const hasProviders = Object.prototype.hasOwnProperty.call(next, 'providers');
-		const keepExisting = hasCliPaths || hasTokenDefaults || hasRuntime || hasProviders;
+		const hasCodexImageTool = Object.prototype.hasOwnProperty.call(next, 'codex_image_tool');
+		const keepExisting = hasCliPaths || hasTokenDefaults || hasRuntime || hasProviders || hasCodexImageTool;
 		const defaultsSource = hasDefaults
 			? next.defaults
 			: (keepExisting ? relay.defaults : next);
@@ -430,6 +438,7 @@ function saveSettings(next = {}) {
 				? normalizeRuntime(next.runtime, relay.runtime)
 				: normalizeRuntime(relay.runtime, emptyRuntime()),
 			providers,
+			codex_image_tool: normalizeCodexImageTool(hasCodexImageTool ? next.codex_image_tool : relay.codex_image_tool),
 		};
 		return state;
 	});
@@ -443,6 +452,7 @@ module.exports = {
 	driverOptions,
 	maskSecret,
 	normalizeCliPaths,
+	normalizeCodexImageTool,
 	normalizeDefaults,
 	normalizeProviders,
 	normalizeRuntime,

@@ -27,6 +27,21 @@ const {
 	providerFromPayload,
 } = require('../src/backend-registry');
 const mediaAnalysis = require('../src/media-analysis');
+const security = require('../src/security');
+const relaySettings = require('../src/relay-settings');
+
+const originalReadState = security.readState;
+const originalUpdateState = security.updateState;
+let relayState = {};
+security.readState = () => JSON.parse(JSON.stringify(relayState));
+security.updateState = (mutator) => {
+	relayState = mutator(JSON.parse(JSON.stringify(relayState)));
+	return relayState;
+};
+function restoreRelayStateMocks() {
+	security.readState = originalReadState;
+	security.updateState = originalUpdateState;
+}
 
 function readyCli(definition) {
 	return { id: definition.id, label: definition.label, command: `${definition.id}-test`, installed: true, ready: true, authenticated: true, state: 'ready', diagnostic: 'Ready.', models: ['auto'] };
@@ -143,13 +158,25 @@ function captureCliSpawn(calls) {
 	assert.ok(models.some((model) => model.id === 'model-relay:music-analysis:core' && model.type === 'audio'));
 	assert.ok(models.some((model) => model.id === 'model-relay:openai-videos:sora-2'));
 	const codexImageModel = models.find((model) => model.id === 'model-relay:codex:image');
-	assert.deepStrictEqual(codexImageModel.test_options.map((option) => option.key), ['size', 'quality']);
+	assert.deepStrictEqual(codexImageModel.test_options.map((option) => option.key), ['size', 'quality', 'background']);
 	assert.strictEqual(codexImageModel.image_capabilities.contract_version, 1);
-	assert.deepStrictEqual(codexImageModel.image_capabilities.supported_sizes, ['1024x1024', '1536x1024', '1024x1536', '2048x2048', '2560x1440', '1440x2560', '3840x2160', '2160x3840']);
-	assert.deepStrictEqual(Object.keys(codexImageModel.image_capabilities.provider_options), ['size']);
-	assert.deepStrictEqual(codexImageModel.test_options[0].choices.map((choice) => choice.value), ['auto', '1024x1024', '1536x1024', '1024x1536', '2048x2048', '2560x1440', '1440x2560', '3840x2160', '2160x3840']);
-	assert.deepStrictEqual(codexImageModel.test_options[1].choices.map((choice) => choice.value), ['auto', 'low', 'medium', 'high']);
-	assert.ok(codexImageModel.test_options.every((option) => option.delivery === 'guidance'));
+	assert.deepStrictEqual(codexImageModel.image_capabilities.supported_sizes, ['1024x1024', '1536x1024', '1024x1536', '2048x2048', '2048x1152', '2560x1440', '1440x2560', '3840x2160', '2160x3840']);
+	assert.deepStrictEqual(Object.keys(codexImageModel.image_capabilities.provider_options).sort(), ['background', 'quality', 'size']);
+	assert.deepStrictEqual(codexImageModel.test_options[0].choices.map((choice) => choice.value), ['auto', '1024x1024', '1536x1024', '1024x1536', '2048x2048', '2048x1152', '2560x1440', '1440x2560', '3840x2160', '2160x3840']);
+	assert.deepStrictEqual(codexImageModel.test_options[1].choices.map((choice) => choice.value), ['auto', 'low', 'medium', 'high', 'xhigh', 'max']);
+	assert.deepStrictEqual(codexImageModel.test_options[2].choices.map((choice) => choice.value), ['auto', 'opaque', 'transparent']);
+	assert.ok(codexImageModel.test_options.every((option) => option.delivery === 'direct'));
+	assert.deepStrictEqual(codexImageModel.image_capabilities.supported_output_formats, ['image/png', 'image/jpeg', 'image/webp']);
+	assert.strictEqual(codexImageModel.image_capabilities.candidate_count_max, 10);
+	assert.strictEqual(codexImageModel.image_capabilities.reference_images_max, 16);
+	assert.strictEqual(codexImageModel.image_capabilities.provider_options.size.delivery, 'native');
+	assert.strictEqual(codexImageModel.image_capabilities.provider_options.quality.delivery, 'native');
+	assert.strictEqual(codexImageModel.image_capabilities.provider_options.background.delivery, 'native');
+	assert.strictEqual(codexImageModel.image_capabilities.size_constraints.long_edge_max, 3840);
+	assert.strictEqual(codexImageModel.image_capabilities.size_constraints.min_pixels, 655360);
+	assert.strictEqual(codexImageModel.image_capabilities.size_constraints.max_pixels, 8294400);
+	assert.strictEqual(codexImageModel.image_capabilities.size_constraints.aspect_ratio_max, 3);
+	assert.strictEqual(codexImageModel.image_capabilities.size_constraints.multiple_of, 16);
 	const openAiVideoModel = models.find((model) => model.id === 'model-relay:openai-videos:sora-2');
 	assert.deepStrictEqual(openAiVideoModel.test_options.map((option) => option.key), ['size', 'seconds', 'model']);
 	assert.ok(openAiVideoModel.test_options.every((option) => option.delivery === 'direct'));
@@ -184,6 +211,9 @@ function captureCliSpawn(calls) {
 	assert.deepStrictEqual(antigravityImageModel.image_capabilities.supported_sizes, ['2K', '4K', '1K']);
 	assert.deepStrictEqual(Object.keys(antigravityImageModel.image_capabilities.provider_options), ['image_size']);
 	assert.deepStrictEqual(models.find((model) => model.id === 'model-relay:xai:imagine-image').image_capabilities.supported_qualities, ['medium', 'low']);
+	assert.ok(xaiImageModel.test_options.find((option) => option.key === 'quality').choices.some((choice) => choice.value === 'auto'));
+	assert.strictEqual(xaiImageModel.image_capabilities.candidate_count_max, 10);
+	assert.strictEqual(xaiImageModel.image_capabilities.reference_images_max, 5);
 	assert.deepStrictEqual(Object.keys(xaiImageModel.image_capabilities.provider_options).sort(), ['aspect_ratio', 'quality', 'resolution']);
 	assert.ok(isCompleteImageCapabilityContract(codexImageModel));
 	assert.ok(isCompleteImageCapabilityContract(antigravityImageModel));
@@ -197,6 +227,37 @@ function captureCliSpawn(calls) {
 	const nestedAutoKeepsSize = normalizeImagePayloadForModel({ model: codexImageModel.id, prompt: 'x', size: '1536x1024', provider_options: { size: 'auto' }, output_format: 'image/png' }, codexImageModel);
 	assert.strictEqual(nestedAutoKeepsSize.error, undefined);
 	assert.strictEqual(nestedAutoKeepsSize.payload.size, '1536x1024');
+	const sunburstWide = normalizeImagePayloadForModel({ model: codexImageModel.id, prompt: 'x', size: '2048x1152', output_format: 'image/png' }, codexImageModel);
+	assert.strictEqual(sunburstWide.error, undefined);
+	assert.strictEqual(sunburstWide.payload.size, '2048x1152');
+	const sunburstCustom = normalizeImagePayloadForModel({ model: codexImageModel.id, prompt: 'x', size: '1920x1088', output_format: 'image/png' }, codexImageModel);
+	assert.strictEqual(sunburstCustom.error, undefined);
+	assert.strictEqual(sunburstCustom.payload.size, '1920x1088');
+	const sunburstSquare = normalizeImagePayloadForModel({ model: codexImageModel.id, prompt: 'x', size: '1000x1000', output_format: 'image/png' }, codexImageModel);
+	assert.strictEqual(sunburstSquare.error.code, 'relay_image_options_unsupported');
+	const transparentJpeg = normalizeImagePayloadForModel({ model: codexImageModel.id, prompt: 'x', size: '1024x1024', background: 'transparent', output_format: 'image/jpeg' }, codexImageModel);
+	assert.strictEqual(transparentJpeg.error.code, 'relay_image_options_unsupported');
+	const transparentPng = normalizeImagePayloadForModel({ model: codexImageModel.id, prompt: 'x', size: '1024x1024', background: 'transparent', output_format: 'image/png' }, codexImageModel);
+	assert.strictEqual(transparentPng.error, undefined);
+	assert.strictEqual(transparentPng.payload.background, 'transparent');
+	assert.strictEqual(transparentPng.payload.output_format, 'image/png');
+	const codexAutoQuality = normalizeImagePayloadForModel({ model: codexImageModel.id, prompt: 'x', quality: 'auto', output_format: 'image/png' }, codexImageModel);
+	assert.strictEqual(codexAutoQuality.payload.quality, undefined);
+	const codexConcreteQuality = normalizeImagePayloadForModel({ model: codexImageModel.id, prompt: 'x', quality: 'xhigh', output_format: 'image/webp' }, codexImageModel);
+	assert.strictEqual(codexConcreteQuality.payload.quality, 'xhigh');
+	relaySettings.saveSettings({ codex_image_tool: 'image_gen' });
+	const imageGenModel = registry.models().find((model) => model.id === 'model-relay:codex:image');
+	assert.deepStrictEqual(imageGenModel.test_options.map((option) => option.key), ['size', 'quality']);
+	assert.ok(imageGenModel.test_options.every((option) => option.delivery === 'guidance'));
+	assert.deepStrictEqual(imageGenModel.test_options[1].choices.map((choice) => choice.value), ['auto', 'low', 'medium', 'high']);
+	assert.deepStrictEqual(imageGenModel.image_capabilities.supported_output_formats, ['image/png']);
+	assert.strictEqual(imageGenModel.image_capabilities.reference_images_max, 4);
+	assert.strictEqual(imageGenModel.image_capabilities.candidate_count_max, 1);
+	assert.strictEqual(imageGenModel.image_capabilities.size_constraints, undefined);
+	assert.deepStrictEqual(Object.keys(imageGenModel.image_capabilities.provider_options), ['size']);
+	assert.strictEqual(normalizeImagePayloadForModel({ model: imageGenModel.id, prompt: 'x', output_format: 'image/jpeg' }, imageGenModel).error.code, 'relay_image_options_unsupported');
+	assert.strictEqual(normalizeImagePayloadForModel({ model: imageGenModel.id, prompt: 'x', output_format: 'image/png' }, imageGenModel).payload.output_format, 'image/png');
+	relaySettings.saveSettings({ codex_image_tool: 'generations' });
 	const candidateCountOnly = normalizeImagePayloadForModel({ model: xaiImageModel.id, prompt: 'x', candidate_count: 3, cloud_upload_confirmed: true }, xaiImageModel);
 	assert.strictEqual(candidateCountOnly.error, undefined);
 	assert.strictEqual(candidateCountOnly.payload.candidate_count, 3);
@@ -215,18 +276,30 @@ function captureCliSpawn(calls) {
 	assert.match(grokImageToolGuidance({ aspect_ratio: '16:9' }, 'image_edit', { referenceCount: 2 }), /not as the output canvas/);
 	assert.doesNotMatch(grokImageToolGuidance({ aspect_ratio: '16:9' }, 'image_gen', { referenceCount: 2 }), /multi-image edit/);
 	assert.match(antigravityImageToolGuidance({ output_format: 'image/jpeg' }), /output_format "image\/jpeg"/);
-	const providerOnlyImage = registry.resolve('images', { provider: 'xai-api', prompt: 'x', output_format: 'png', candidate_count: 3, cloud_upload_confirmed: true });
+	const providerOnlyImage = registry.resolve('images', { provider: 'xai-api', prompt: 'x', output_format: 'jpeg', candidate_count: 10, cloud_upload_confirmed: true });
 	assert.strictEqual(providerOnlyImage.error, undefined);
 	assert.strictEqual(providerOnlyImage.payload.model, 'model-relay:xai:imagine-image');
-	assert.strictEqual(providerOnlyImage.payload.output_format, 'image/png');
-	assert.strictEqual(providerOnlyImage.payload.n, 3);
-	assert.deepStrictEqual(xaiImageModel.image_capabilities.supported_output_formats, ['image/png']);
-	const xaiJpegUnsupported = await registry.run('images', { provider: 'xai-api', prompt: 'x', output_format: 'image/jpeg', cloud_upload_confirmed: true });
-	assert.strictEqual(xaiJpegUnsupported.code, 'relay_image_options_unsupported');
+	assert.strictEqual(providerOnlyImage.payload.output_format, 'image/jpeg');
+	assert.strictEqual(providerOnlyImage.payload.n, 10);
+	assert.deepStrictEqual(xaiImageModel.image_capabilities.supported_output_formats, ['image/jpeg']);
+	const omittedXaiFormat = normalizeImagePayloadForModel({ model: xaiImageModel.id, prompt: 'x', cloud_upload_confirmed: true }, xaiImageModel);
+	assert.strictEqual(omittedXaiFormat.payload.output_format, 'image/jpeg');
+	const xaiAutoQuality = normalizeImagePayloadForModel({ model: xaiImageModel.id, prompt: 'x', quality: 'auto', cloud_upload_confirmed: true }, xaiImageModel);
+	assert.strictEqual(xaiAutoQuality.payload.quality, 'auto');
+	const xaiCountTooHigh = normalizeImagePayloadForModel({ model: xaiImageModel.id, prompt: 'x', n: 11, cloud_upload_confirmed: true }, xaiImageModel);
+	assert.strictEqual(xaiCountTooHigh.error.code, 'relay_image_options_unsupported');
+	const xaiPngUnsupported = await registry.run('images', { provider: 'xai-api', prompt: 'x', output_format: 'image/png', cloud_upload_confirmed: true });
+	assert.strictEqual(xaiPngUnsupported.code, 'relay_image_options_unsupported');
+	const xaiWebpUnsupported = await registry.run('images', { provider: 'xai-api', prompt: 'x', output_format: 'image/webp', cloud_upload_confirmed: true });
+	assert.strictEqual(xaiWebpUnsupported.code, 'relay_image_options_unsupported');
+	const xaiJpeg = registry.resolve('images', { provider: 'xai-api', prompt: 'x', output_format: 'image/jpeg', n: 10, cloud_upload_confirmed: true });
+	assert.strictEqual(xaiJpeg.error, undefined);
+	assert.strictEqual(xaiJpeg.payload.output_format, 'image/jpeg');
+	assert.strictEqual(xaiJpeg.payload.n, 10);
 	const foldedAntigravitySize = normalizeImagePayloadForModel({ model: antigravityImageModel.id, prompt: 'x', image_size: '2k', output_format: 'image/png' }, antigravityImageModel);
 	assert.strictEqual(foldedAntigravitySize.error, undefined);
 	assert.strictEqual(foldedAntigravitySize.payload.image_size, '2K');
-	const foldedXaiResolution = normalizeImagePayloadForModel({ model: xaiImageModel.id, prompt: 'x', resolution: '2K', cloud_upload_confirmed: true, output_format: 'image/png' }, xaiImageModel);
+	const foldedXaiResolution = normalizeImagePayloadForModel({ model: xaiImageModel.id, prompt: 'x', resolution: '2K', cloud_upload_confirmed: true, output_format: 'image/jpeg' }, xaiImageModel);
 	assert.strictEqual(foldedXaiResolution.error, undefined);
 	assert.strictEqual(foldedXaiResolution.payload.resolution, '2k');
 	const providerOnlyUnsupportedOption = await registry.run('images', { provider: 'xai-api', prompt: 'x', output_format: 'image/tiff', cloud_upload_confirmed: true });
@@ -465,6 +538,14 @@ function captureCliSpawn(calls) {
 	assert.strictEqual(generateCall.body.n, 2);
 	assert.strictEqual(generateCall.body.response_format, 'b64_json');
 	assert.strictEqual(generateCall.body.output_format, undefined);
+	const autoQualityImage = await xaiImagine.images({ prompt: 'auto quality cat', quality: 'auto' });
+	assert.strictEqual(autoQualityImage.success, true);
+	const autoQualityCall = xaiImagineCalls.filter((entry) => entry.target.endsWith('/images/generations')).pop();
+	assert.strictEqual(autoQualityCall.body.quality, 'auto');
+	const defaultQualityImage = await xaiImagine.images({ prompt: 'default quality cat' });
+	assert.strictEqual(defaultQualityImage.success, true);
+	const defaultQualityCall = xaiImagineCalls.filter((entry) => entry.target.endsWith('/images/generations')).pop();
+	assert.strictEqual(defaultQualityCall.body.quality, undefined);
 	assert.strictEqual(generateCall.body.image, undefined);
 	const oversizedXai = createXaiApiDriver({
 		apiKey: 'secret-xai-key',
@@ -542,7 +623,10 @@ function captureCliSpawn(calls) {
 	assert.strictEqual(refCreate.body.reference_images.length, 2);
 	assert.ok(String(refCreate.body.reference_images[0].url).startsWith('data:image/png;base64,'));
 	const fourRefs = Array.from({ length: 4 }, () => ({ b64_json: pngBytes.toString('base64'), mime_type: 'image/png' }));
-	const tooManyImageRefs = await xaiImagine.images({ prompt: 'too many', reference_images: fourRefs });
+	const fourImageRefs = await xaiImagine.images({ prompt: 'four refs', reference_images: fourRefs });
+	assert.strictEqual(fourImageRefs.success, true);
+	const sixRefs = Array.from({ length: 6 }, () => ({ b64_json: pngBytes.toString('base64'), mime_type: 'image/png' }));
+	const tooManyImageRefs = await xaiImagine.images({ prompt: 'too many', reference_images: sixRefs });
 	assert.strictEqual(tooManyImageRefs.success, false);
 	assert.strictEqual(tooManyImageRefs.code, 'xai_image_reference_invalid');
 	const fourRefVideo = await xaiImagine.videos({ prompt: 'animate four refs', reference_images: fourRefs });
@@ -1097,8 +1181,10 @@ function captureCliSpawn(calls) {
 		fs.rmSync(antigravityRoot, { recursive: true, force: true });
 	}
 
+	restoreRelayStateMocks();
 	console.log('backend registry tests passed');
 })().catch((error) => {
+	restoreRelayStateMocks();
 	console.error(error);
 	process.exit(1);
 });

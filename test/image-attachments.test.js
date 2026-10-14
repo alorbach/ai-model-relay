@@ -4,15 +4,17 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const security = require('../src/security');
 const {
 	collectImageAttachments,
 	imagePrompt,
+	images,
 	capabilities,
 } = require('../src/codex');
 
 const tinyPng = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=';
 
-(() => {
+(async () => {
 	const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'alorbach-codex-image-attachments-'));
 	const imagePath = path.join(tempDir, 'ref.png');
 	fs.writeFileSync(imagePath, Buffer.from(tinyPng, 'base64'));
@@ -62,6 +64,101 @@ const tinyPng = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8
 	const caps = capabilities();
 	assert.strictEqual(caps.bridge_features.image_reference_attachments, true);
 
+	const previousHome = process.env.CODEX_HOME;
+	const previousFetch = global.fetch;
+	const previousReadState = security.readState;
+	const codexHome = fs.mkdtempSync(path.join(os.tmpdir(), 'alorbach-codex-generations-'));
+	const logged = [];
+	const accessToken = 'test-access-token';
+	try {
+		process.env.CODEX_HOME = codexHome;
+		fs.writeFileSync(path.join(codexHome, 'config.toml'), 'model_provider = "relaytest"\n[model_providers.relaytest]\nbase_url = "https://example.test/backend-api/codex"\n');
+		fs.writeFileSync(path.join(codexHome, 'auth.json'), JSON.stringify({ tokens: { access_token: accessToken, account_id: 'acct-1' } }));
+		security.readState = () => ({ relay: { codex_image_tool: 'generations' } });
+		global.fetch = async (url, options) => {
+			const body = JSON.parse(options.body);
+			logged.push({ url: String(url), body });
+			const authorization = options.headers && options.headers.Authorization;
+			assert.strictEqual(typeof authorization === 'string' && authorization.startsWith('Bearer ') && authorization.slice('Bearer '.length) === accessToken, true);
+			assert.strictEqual(options.headers['chatgpt-account-id'], 'acct-1');
+			assert.strictEqual(options.headers['Content-Type'], 'application/json');
+			return { ok: true, status: 200, text: async () => JSON.stringify({ data: [{ b64_json: tinyPng }] }) };
+		};
+		const generated = await images({
+			prompt: 'a glass orb',
+			size: '2048x1152',
+			quality: 'high',
+			background: 'transparent',
+			output_format: 'image/png',
+			n: 2,
+		});
+		assert.strictEqual(generated.success, true);
+		assert.strictEqual(generated.response.data[0].mime_type, 'image/png');
+		assert.strictEqual(logged.length, 1);
+		assert.strictEqual(logged[0].url, 'https://example.test/backend-api/codex/images/generations');
+		assert.strictEqual(logged[0].body.model, 'gpt-image-2.5-sunburst');
+		assert.strictEqual(logged[0].body.prompt, 'a glass orb');
+		assert.strictEqual(logged[0].body.size, '2048x1152');
+		assert.strictEqual(logged[0].body.quality, 'high');
+		assert.strictEqual(logged[0].body.background, 'transparent');
+		assert.strictEqual(logged[0].body.output_format, 'png');
+		assert.strictEqual(logged[0].body.n, 2);
+		assert.ok(!logged[0].body.prompt.includes('image_gen'));
+		assert.strictEqual(JSON.stringify(logged).includes('Authorization'), false);
+		assert.strictEqual(JSON.stringify(logged).includes(accessToken), false);
+		assert.strictEqual(JSON.stringify(generated).includes(accessToken), false);
+		const callsBeforeReject = logged.length;
+		const badSize = await images({ prompt: 'too small', size: '1000x1000', output_format: 'image/png' });
+		assert.strictEqual(badSize.code, 'relay_image_options_unsupported');
+		const badBackground = await images({ prompt: 'clear jpeg', size: '1024x1024', background: 'transparent', output_format: 'image/jpeg' });
+		assert.strictEqual(badBackground.code, 'relay_image_options_unsupported');
+		const goodBackground = await images({ prompt: 'clear png', size: '1024x1024', background: 'transparent', output_format: 'image/png' });
+		assert.strictEqual(goodBackground.success, true);
+		assert.strictEqual(logged.length, callsBeforeReject + 1);
+		const omitted = await images({ prompt: 'provider chooses', size: 'auto', quality: 'auto', background: 'auto', output_format: 'image/jpeg' });
+		assert.strictEqual(omitted.success, true);
+		const omittedBody = logged[logged.length - 1].body;
+		assert.strictEqual(omittedBody.model, 'gpt-image-2.5-sunburst');
+		assert.strictEqual(omittedBody.size, 'auto');
+		assert.strictEqual(omittedBody.quality, undefined);
+		assert.strictEqual(omittedBody.background, undefined);
+		assert.strictEqual(omittedBody.output_format, 'jpeg');
+		const edited = await images({
+			prompt: 'edit the orb',
+			size: '1024x1024',
+			output_format: 'image/png',
+			reference_images: [{ b64_json: tinyPng, mime_type: 'image/png' }],
+		});
+		assert.strictEqual(edited.success, true);
+		const editCall = logged[logged.length - 1];
+		assert.strictEqual(editCall.url, 'https://example.test/backend-api/codex/images/edits');
+		assert.strictEqual(editCall.body.images.length, 1);
+		assert.ok(String(editCall.body.images[0].image_url).startsWith('data:image/png;base64,'));
+		assert.strictEqual(editCall.body.images[0].path, undefined);
+		global.fetch = async () => ({ ok: false, status: 401, text: async () => `Bearer ${accessToken}` });
+		const authFailure = await images({ prompt: 'rejected', size: '1024x1024' });
+		assert.strictEqual(authFailure.code, 'codex_image_auth_failed');
+		assert.strictEqual(JSON.stringify(authFailure).includes(accessToken), false);
+		assert.strictEqual(JSON.stringify(authFailure).includes('Authorization'), false);
+		fs.writeFileSync(path.join(codexHome, 'auth.json'), JSON.stringify({ tokens: {} }));
+		let fetchCalled = false;
+		global.fetch = async () => { fetchCalled = true; return { ok: true, status: 200, text: async () => '{}' }; };
+		const missingLogin = await images({ prompt: 'needs login', size: '1024x1024' });
+		assert.strictEqual(fetchCalled, false);
+		assert.strictEqual(missingLogin.category, 'configuration');
+		assert.match(missingLogin.message, /Codex CLI/);
+		assert.strictEqual(JSON.stringify(missingLogin).includes(accessToken), false);
+	} finally {
+		if (previousHome === undefined) delete process.env.CODEX_HOME;
+		else process.env.CODEX_HOME = previousHome;
+		global.fetch = previousFetch;
+		security.readState = previousReadState;
+		fs.rmSync(codexHome, { recursive: true, force: true });
+	}
+
 	fs.rmSync(tempDir, { recursive: true, force: true });
 	console.log('image-attachments tests passed');
-})();
+})().catch((error) => {
+	console.error(error);
+	process.exit(1);
+});

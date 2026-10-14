@@ -10,6 +10,7 @@ const { attachProcessAbort, killProcessTree } = require('./cuda-torch-venv');
 const { beginLocalModelDebugLog } = require('./temp-debug-logs');
 const { resolveMaxTokens } = require('./token-policy');
 const relaySettings = require('./relay-settings');
+const { SUNBURST_IMAGE_SIZE_CONSTRAINTS, canonicalConstrainedImageSize, imageOptionsError } = require('./image-capabilities');
 
 const defaultCodexBinary = process.env.ALORBACH_CODEX_BINARY || 'codex';
 let configuredCodexBinary = '';
@@ -1119,7 +1120,270 @@ function imagePrompt(payload, attachments = []) {
 	return lines.join('\n');
 }
 
-async function images(payload, session = {}) {
+function activeCodexHome() {
+	return process.env.CODEX_HOME || codexHome;
+}
+
+function codexImageToolMode() {
+	try {
+		return relaySettings.settings().codex_image_tool === 'image_gen' ? 'image_gen' : 'generations';
+	} catch (error) {
+		return 'generations';
+	}
+}
+
+function codexImageApiBase(homeDir) {
+	const fallback = 'https://chatgpt.com/backend-api/codex';
+	let text = '';
+	try {
+		text = fs.readFileSync(path.join(homeDir, 'config.toml'), 'utf8');
+	} catch (error) {
+		return fallback;
+	}
+	const providerMatch = text.match(/^\s*model_provider\s*=\s*["']?([A-Za-z0-9._-]+)["']?\s*$/m);
+	if (!providerMatch) return fallback;
+	const provider = providerMatch[1];
+	const sectionPattern = new RegExp(`^\\s*\\[\\s*model_providers\\.${provider.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\]\\s*$`, 'm');
+	const sectionMatch = sectionPattern.exec(text);
+	if (!sectionMatch) return fallback;
+	const rest = text.slice(sectionMatch.index + sectionMatch[0].length);
+	const nextSection = rest.search(/^\s*\[/m);
+	const section = nextSection === -1 ? rest : rest.slice(0, nextSection);
+	const baseMatch = section.match(/^\s*base_url\s*=\s*["']([^"']+)["']\s*$/m);
+	if (!baseMatch) return fallback;
+	const base = baseMatch[1].trim().replace(/\/+$/, '');
+	if (!/^https?:\/\//i.test(base) || !base.endsWith('/codex')) return fallback;
+	return base;
+}
+
+function readCodexImageAuth(homeDir) {
+	let parsed;
+	try {
+		parsed = JSON.parse(fs.readFileSync(path.join(homeDir, 'auth.json'), 'utf8'));
+	} catch (error) {
+		return null;
+	}
+	const tokens = parsed && parsed.tokens && typeof parsed.tokens === 'object' ? parsed.tokens : null;
+	const accessToken = tokens ? String(tokens.access_token || '').trim() : '';
+	if (!accessToken) return null;
+	return {
+		accessToken,
+		accountId: String(tokens.account_id || '').trim(),
+	};
+}
+
+function codexProviderOutputFormat(value) {
+	const format = String(value || '').trim().toLowerCase();
+	if (!format) return '';
+	if (format === 'png' || format === 'image/png') return 'png';
+	if (format === 'jpg' || format === 'jpeg' || format === 'image/jpg' || format === 'image/jpeg') return 'jpeg';
+	if (format === 'webp' || format === 'image/webp') return 'webp';
+	return '';
+}
+
+function mimeFromImageBytes(bytes) {
+	if (!bytes || !bytes.length) return 'image/jpeg';
+	if (bytes[0] === 0x89 && bytes[1] === 0x50) return 'image/png';
+	if (bytes[0] === 0xff && bytes[1] === 0xd8) return 'image/jpeg';
+	if (bytes[0] === 0x52 && bytes[1] === 0x49) return 'image/webp';
+	return 'image/jpeg';
+}
+
+function mimeForCodexImage(bytes, outputFormat) {
+	const detected = mimeFromImageBytes(bytes);
+	const expected = outputFormat === 'png' ? 'image/png' : (outputFormat === 'jpeg' ? 'image/jpeg' : (outputFormat === 'webp' ? 'image/webp' : ''));
+	return expected && detected === expected ? expected : detected;
+}
+
+function decodeCodexImageDataUri(value) {
+	const match = String(value || '').match(/^data:(image\/(?:png|jpeg|jpg|webp));base64,([A-Za-z0-9+/=\s]+)$/i);
+	if (!match) return null;
+	const encoded = match[2].replace(/\s+/g, '');
+	if (!encoded || encoded.length % 4 === 1 || encoded.length > Math.ceil(MAX_CODEX_IMAGE_BYTES / 3) * 4 + 8) return null;
+	const bytes = Buffer.from(encoded, 'base64');
+	if (!bytes.length || bytes.length > MAX_CODEX_IMAGE_BYTES) return null;
+	const mime = match[1].toLowerCase() === 'image/jpg' ? 'image/jpeg' : match[1].toLowerCase();
+	return `data:${mime};base64,${bytes.toString('base64')}`;
+}
+
+function codexGenerationReferences(payload, maxCount = 16) {
+	const entries = [
+		payload.input_reference_data_url,
+		payload.input_reference,
+		...(Array.isArray(payload.reference_images) ? payload.reference_images : []),
+		...(Array.isArray(payload.frames) ? payload.frames : []),
+	].filter(Boolean);
+	const images = [];
+	for (const entry of entries) {
+		const uri = typeof entry === 'object' && !Buffer.isBuffer(entry)
+			? decodeCodexImageDataUri(`data:${String(entry.mime_type || 'image/jpeg').toLowerCase()};base64,${String(entry.b64_json || '')}`)
+			: decodeCodexImageDataUri(entry);
+		if (!uri) return { error: 'Codex image references must be PNG, JPEG, or WebP data URLs or { b64_json, mime_type } objects smaller than 20 MB.' };
+		images.push({ image_url: uri });
+	}
+	if (images.length > maxCount) return { error: `Codex image generation accepts at most ${maxCount} reference images.` };
+	return { images };
+}
+
+function decodeBoundedImageBase64(value) {
+	const encoded = String(value || '').replace(/\s+/g, '');
+	if (!encoded || encoded.length > Math.ceil(MAX_CODEX_IMAGE_BYTES / 3) * 4 + 8) return null;
+	const bytes = Buffer.from(encoded, 'base64');
+	if (!bytes.length || bytes.length > MAX_CODEX_IMAGE_BYTES) return null;
+	return bytes;
+}
+
+function codexImageSignal(session) {
+	const timeout = typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
+		? AbortSignal.timeout(codexTimeoutMs('image', 1800000))
+		: null;
+	const jobSignal = session && session.signal ? session.signal : null;
+	if (jobSignal && timeout && typeof AbortSignal.any === 'function') return AbortSignal.any([jobSignal, timeout]);
+	return jobSignal || timeout || undefined;
+}
+
+function codexImageCancelled() {
+	return {
+		success: false,
+		category: 'cancelled',
+		code: 'local_job_cancelled',
+		message: 'The local Relay job was cancelled; source bytes were preserved.',
+	};
+}
+
+async function imagesWithGenerations(payload, session = {}) {
+	const prompt = String(payload.prompt || '').trim();
+	if (!prompt) return { success: false, message: 'No image prompt was provided.' };
+	const homeDir = activeCodexHome();
+	const auth = readCodexImageAuth(homeDir);
+	if (!auth) {
+		return {
+			success: false,
+			category: 'configuration',
+			code: 'codex_login_required',
+			message: 'Log in with the Codex CLI before using the direct Sunburst image route.',
+		};
+	}
+	const sizeText = String(payload.size || '').trim();
+	let size = '';
+	if (sizeText) {
+		size = canonicalConstrainedImageSize(sizeText, SUNBURST_IMAGE_SIZE_CONSTRAINTS);
+		if (!size) return imageOptionsError(payload.model || 'model-relay:codex:image', 'The requested resolution is not supported by the selected Relay image model.');
+	}
+	const qualityText = String(payload.quality || '').trim().toLowerCase();
+	if (qualityText && !['low', 'medium', 'high', 'xhigh', 'max', 'auto'].includes(qualityText)) {
+		return imageOptionsError(payload.model || 'model-relay:codex:image', 'The requested image quality is not supported by the selected Relay image model.');
+	}
+	const backgroundText = String(payload.background || '').trim().toLowerCase();
+	if (backgroundText && !['auto', 'opaque', 'transparent'].includes(backgroundText)) {
+		return imageOptionsError(payload.model || 'model-relay:codex:image', 'The requested image background is not supported by the selected Relay image model.');
+	}
+	const suppliedFormat = String(payload.output_format || '').trim();
+	let outputFormat = '';
+	if (suppliedFormat) {
+		outputFormat = codexProviderOutputFormat(suppliedFormat);
+		if (!outputFormat) return imageOptionsError(payload.model || 'model-relay:codex:image', 'The requested image output format is not supported by the selected Relay image model.');
+	}
+	if (backgroundText === 'transparent' && outputFormat === 'jpeg') {
+		return imageOptionsError(payload.model || 'model-relay:codex:image', 'Transparent backgrounds are only supported with PNG or WebP output.');
+	}
+	const countSource = payload.n !== undefined ? payload.n : payload.candidate_count;
+	let count;
+	if (countSource !== undefined && countSource !== null && String(countSource).trim() !== '') {
+		count = Number(countSource);
+		if (!Number.isInteger(count) || count < 1 || count > 10) return imageOptionsError(payload.model || 'model-relay:codex:image', 'The requested image candidate count is not supported by the selected Relay image model.');
+	}
+	const references = codexGenerationReferences(payload, 16);
+	if (references.error) return { success: false, category: 'validation', code: 'codex_image_reference_invalid', message: references.error };
+	const body = { model: 'gpt-image-2.5-sunburst', prompt };
+	if (size) body.size = size;
+	if (qualityText && qualityText !== 'auto') body.quality = qualityText;
+	if (backgroundText && backgroundText !== 'auto') body.background = backgroundText;
+	if (outputFormat) body.output_format = outputFormat;
+	if (count !== undefined) body.n = count;
+	if (references.images.length) body.images = references.images;
+	const fetchImpl = global.fetch;
+	if (typeof fetchImpl !== 'function') {
+		return { success: false, category: 'configuration', code: 'fetch_unavailable', message: 'This Node runtime does not provide fetch for Codex image generation.' };
+	}
+	const base = codexImageApiBase(homeDir);
+	const endpoint = `${base}${references.images.length ? '/images/edits' : '/images/generations'}`;
+	const headers = { Authorization: `Bearer ${auth.accessToken}`, 'Content-Type': 'application/json' };
+	if (auth.accountId) headers['chatgpt-account-id'] = auth.accountId;
+	if (session && session.signal && session.signal.aborted) return codexImageCancelled();
+	if (typeof session.appendSessionOutput === 'function') session.appendSessionOutput('stdout', 'Submitting Codex Sunburst image request.\n');
+	let response;
+	try {
+		response = await fetchImpl(endpoint, {
+			method: 'POST',
+			headers,
+			body: JSON.stringify(body),
+			signal: codexImageSignal(session),
+		});
+	} catch (error) {
+		if (session && session.signal && session.signal.aborted) return codexImageCancelled();
+		if (error && (error.name === 'AbortError' || error.name === 'TimeoutError')) {
+			return { success: false, category: 'timeout', code: 'codex_image_timeout', message: 'Codex image generation timed out.', retryable: true };
+		}
+		return { success: false, category: 'api', code: 'codex_image_request_failed', message: 'Codex image generation could not be reached.', retryable: true };
+	}
+	if (!response || !response.ok) {
+		const status = response && response.status;
+		try { if (response && typeof response.text === 'function') await response.text(); } catch (error) {}
+		if (status === 401 || status === 403) {
+			return { success: false, category: 'configuration', code: 'codex_image_auth_failed', message: 'Codex image generation rejected the saved login. Log in with the Codex CLI and try again.' };
+		}
+		return {
+			success: false,
+			category: status === 429 ? 'rate_limit' : 'api',
+			code: 'codex_image_request_failed',
+			message: `Codex image generation failed with HTTP ${status || 0}.`,
+			retryable: status === 429 || status >= 500,
+		};
+	}
+	const maxResponseBytes = Math.ceil(MAX_CODEX_IMAGE_BYTES * 4 / 3) * 10 + (1024 * 1024);
+	let raw = '';
+	try {
+		raw = typeof response.text === 'function' ? await response.text() : '';
+	} catch (error) {
+		return { success: false, category: 'api', code: 'codex_image_output_invalid', message: 'Codex image generation returned an unreadable response.' };
+	}
+	if (Buffer.byteLength(raw) > maxResponseBytes) {
+		return { success: false, category: 'validation', code: 'codex_image_output_invalid', message: 'Codex generated image exceeded the 20 MB size limit.' };
+	}
+	let parsed;
+	try {
+		parsed = JSON.parse(raw);
+	} catch (error) {
+		return { success: false, category: 'api', code: 'codex_image_output_invalid', message: 'Codex image generation returned an unreadable response.' };
+	}
+	const items = Array.isArray(parsed && parsed.data) ? parsed.data : [];
+	const data = [];
+	for (const item of items) {
+		const bytes = item && item.b64_json ? decodeBoundedImageBase64(item.b64_json) : null;
+		if (!bytes) continue;
+		const mimeType = mimeForCodexImage(bytes, outputFormat);
+		if (!['image/png', 'image/jpeg', 'image/webp'].includes(mimeType)) continue;
+		data.push({ b64_json: bytes.toString('base64'), mime_type: mimeType });
+	}
+	if (!data.length) {
+		return { success: false, category: 'api', code: 'codex_image_output_invalid', message: 'Codex image generation completed without returning image data.' };
+	}
+	return {
+		success: true,
+		response: {
+			data,
+			usage: parsed && parsed.usage || { total_tokens: 0 },
+			provider_details: {
+				image_route: 'generations',
+				reference_attachment_count: references.images.length,
+				refs_forwarded_to_codex: references.images.length > 0,
+			},
+		},
+	};
+}
+
+async function imagesWithImageGen(payload, session = {}) {
 	const status = await checkStatusAsync();
 	if (!status.success) {
 		return status;
@@ -1240,6 +1504,11 @@ async function images(payload, session = {}) {
 	} finally {
 		try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch (error) {}
 	}
+}
+
+async function images(payload, session = {}) {
+	if (codexImageToolMode() === 'image_gen') return imagesWithImageGen(payload, session);
+	return imagesWithGenerations(payload, session);
 }
 
 function audioExtensionForFormat(format) {

@@ -265,7 +265,8 @@ Returns persisted relay-only operation defaults plus the cached compatible model
     "token_defaults": {
       "chat": "",
       "media.analyze": ""
-    }
+    },
+    "codex_image_tool": "generations"
   },
   "models": [],
   "backends": []
@@ -274,9 +275,11 @@ Returns persisted relay-only operation defaults plus the cached compatible model
 
 Empty `token_defaults` values mean the code defaults (8192 / 4096). A stored integer is the Settings override.
 
+`codex_image_tool` is `generations` or `image_gen`. An omitted or blank value means `generations`. It selects the Codex image tool for `codex-local:image` and `model-relay:codex:image` on both legacy `/v1/images` and relay image jobs. It does not change provider routing.
+
 ## `POST /v1/relay/settings`
 
-Saves the provided relay-only defaults in the existing local state file. Send a `settings` object with any of `defaults`, `cli_paths`, and `token_defaults`. Omitted routing operations retain their built-in defaults. The Settings page keeps an unavailable saved selection visible so it can be corrected; saving it does not make an unavailable provider runnable. Blank `token_defaults.chat` or `token_defaults['media.analyze']` clears that override.
+Saves the provided relay-only defaults in the existing local state file. Send a `settings` object with any of `defaults`, `cli_paths`, `token_defaults`, and `codex_image_tool`. Omitted routing operations retain their built-in defaults. The Settings page keeps an unavailable saved selection visible so it can be corrected; saving it does not make an unavailable provider runnable. Blank `token_defaults.chat` or `token_defaults['media.analyze']` clears that override. `codex_image_tool` accepts `generations` (default) or `image_gen`.
 
 ```json
 {
@@ -534,9 +537,11 @@ Provider-neutral IDs use the `model-relay:<backend>:<model>` form. Existing fron
 
 ### Versioned image capability contract
 
-Relay image clients must use the model-scoped `image_capabilities` returned on each image entry in `backends`. The same `backends` array also includes driver readiness records whose `id` is the backend name (`grok-cli`, `codex-cli`, `antigravity-cli`, `xai-api`). Clients that verify a ready image model must find both the model entry and the matching driver (`entry.backend`) with `job_types` including `images`. The response also includes `image_capability_contract_version` and `image_capability_minimum_relay_version`; clients that rely on provider-specific controls must require contract version `1` and a Relay version of at least `1.0.10`. The contract is the authoritative allowlist for `supported_sizes`, `supported_qualities`, `supported_aspect_ratios`, `supported_output_formats`, `candidate_count_max`, reference limits, and `provider_options`.
+Relay image clients must use the model-scoped `image_capabilities` returned on each image entry in `backends`. The same `backends` array also includes driver readiness records whose `id` is the backend name (`grok-cli`, `codex-cli`, `antigravity-cli`, `xai-api`). Clients that verify a ready image model must find both the model entry and the matching driver (`entry.backend`) with `job_types` including `images`. The response also includes `image_capability_contract_version` and `image_capability_minimum_relay_version`; clients that rely on provider-specific controls must require contract version `1` and a Relay version of at least `1.0.10`. The contract is the authoritative allowlist for `supported_sizes`, `supported_qualities`, `supported_aspect_ratios`, `supported_output_formats`, `candidate_count_max`, reference limits, and `provider_options`, except for the Codex `generations` size rule below: presets in `supported_sizes` are a subset, and any other `WIDTHxHEIGHT` that meets the rule is valid.
 
-Provider-native resolution controls are sent inside `provider_options` using the advertised key: Codex uses `size` with pixel presets, Grok and xAI use `resolution` with `1k`/`2k`, and Antigravity uses `image_size` with `1K`/`2K`/`4K`. Native aspect-ratio and quality controls are also listed in `provider_options`. A generic pixel `size` must not be sent to a model whose contract advertises a native resolution key. Image catalog entries publish `job_types: ["images"]` only; clients should treat mixed chat/image `job_types` as an incomplete image contract. The `/v1/relay/jobs/images` and `/v1/relay/test` routes validate and normalize these fields before invoking a provider; unsupported quality, aspect, format, candidate, or reference selections fail with a validation error instead of reaching the provider.
+Codex image entries follow the saved `codex_image_tool`. `generations` is the default and publishes `size`, `quality`, and `output_format` as native capability fields. `image_gen` remains selectable; in that mode those three fields stay prompt guidance and `supported_output_formats` is only `image/png`. xAI Imagine image (`model-relay:xai:imagine-image`, `grok-imagine-image-2.0`) keeps native `resolution` `1k`/`2k`, sets `candidate_count_max` to 10, sets `reference_images_max` to 5, and sets `supported_output_formats` to `image/jpeg` only. `supported_qualities` for that model are `low`, `medium`, and `auto`. Grok CLI, Antigravity, and Cursor aspect-ratio lists are unchanged. Cursor has no image model.
+
+Provider-native controls use the key advertised in `provider_options`. Codex `generations` uses `size` (a pixel size, not an xAI-style resolution tier). Grok CLI and xAI advertise `resolution` with `1k`/`2k`: xAI sends `resolution` on the HTTP body, and Grok keeps `resolution` and `output_format` as prompt guidance while passing `aspect_ratio` as an `image_gen` / `image_edit` tool argument. Antigravity advertises `image_size` with `1K`/`2K`/`4K` and still sends `aspect_ratio` and `image_size` as `generate_image` guidance. Native aspect-ratio and quality controls are also listed in `provider_options`. A generic pixel `size` must not be sent to a model whose contract advertises a native resolution key other than `size`. Image catalog entries publish `job_types: ["images"]` only; clients should treat mixed chat/image `job_types` as an incomplete image contract. The `/v1/relay/jobs/images` and `/v1/relay/test` routes validate and normalize these fields before invoking a provider; unsupported quality, aspect, format, candidate, or reference selections fail with a validation error instead of reaching the provider.
 
 ## `/v1/relay/jobs/*`
 
@@ -557,13 +562,19 @@ If the selected/default provider is unknown, disabled, unauthenticated, or does 
 
 `model-relay:grok-cli:image` runs the detected Imagine image workflow. `model-relay:grok-cli:video` runs the experimental Imagine image-to-video/reference-to-video workflow. Image references may be data URLs, `{ b64_json, mime_type }` objects, `referenced_image_paths`, or `frames`; the bridge validates and materializes them only in the per-request workspace. With one supplied image, Grok runs image-to-video; with multiple, it runs reference-to-video. Without one, the relay first generates a temporary source image and then runs image-to-video. Each Imagine invocation allowlists only the tool being called (`--tools image_gen`, `image_edit`, `image_to_video`, or `reference_to_video`) and still denies shell, subagents, and web search, with `--max-turns 2`. The bridge collects only final artifacts from that workspace's output directory (imported from the Grok session folder) and fails explicitly if Imagine tooling, generated artifacts, moderation, or the bounded process run fails. Grok CLI video tests expose aspect ratio, `480p`/`720p`/`1080p`, clip length, and soundtrack guidance.
 
-`model-relay:cursor-cli:auto` is Cursor Agent Gateway chat in `--mode=ask` with `--print --output-format json --trust --workspace <temp>`. The transcript lives in `prompt.txt`; argv only tells the agent to read that file. Ask mode is read-only: Gateway chat is not a write/shell coding agent. When `cursor-agent models` or `--list-models` lists IDs, those appear as `model-relay:cursor-cli:<id>` in addition to `auto`. Cursor does not implement transcription.
+`model-relay:cursor-cli:auto` is Cursor Agent Gateway chat in `--mode=ask` with `--print --output-format json --trust --workspace <temp>`. The transcript lives in `prompt.txt`; argv only tells the agent to read that file. Ask mode is read-only: Gateway chat is not a write/shell coding agent. When `cursor-agent models` or `--list-models` lists IDs, those appear as `model-relay:cursor-cli:<id>` in addition to `auto`. Cursor does not implement transcription and has no image model.
 
-`model-relay:xai:imagine-image` and `model-relay:xai:imagine-video` call the xAI Imagine HTTP API with native parameters (`aspect_ratio`, image `resolution` `1k`/`2k`, image `quality` `low`/`medium`, video `resolution` `480p`/`720p`/`1080p`, `seconds` 1–15, `generate_audio`). Image aspect ratios include `21:9` and `5:2`. Text-only image jobs POST to `/images/generations`; jobs with up to 3 references POST to `/images/edits` using a single `{ url, type: "image_url" }` object or an `images` array. Video image-to-video uses `{ image: { url } }`; reference-to-video accepts 2–7 `{ url }` objects on `reference_images` and caps `1080p` at `720p`. Responses return `response.data[].b64_json` for images and `response.b64_video` for videos. These models require `XAI_API_KEY` or `AI_MODEL_RELAY_XAI_API_KEY` and upload the prompt plus any reference images to xAI.
+`model-relay:xai:imagine-image` (`grok-imagine-image-2.0`) and `model-relay:xai:imagine-video` call the xAI Imagine HTTP API. Image aspect ratios are unchanged, including `21:9` and `5:2`. Image `resolution` remains native `1k`/`2k`. Image `quality` accepts `low`, `medium`, and `auto`. Sending `auto` is explicit; omitting `quality` leaves the provider default. `n` is 1–10 (`candidate_count` is the same limit). Text-only image jobs POST to `/images/generations`; jobs with up to 5 reference images POST to `/images/edits` using a single `{ url, type: "image_url" }` object or an `images` array. The image API has no file-format parameter and returns `image/jpeg`. The relay contract accepts only `image/jpeg`. An omitted `output_format` is normalized to `image/jpeg`. Explicit `png`, `webp`, or any other format fails validation before the request is sent. `response_format` on the wire remains `b64_json` and is not a file format. Video parameters are unchanged: `resolution` `480p`/`720p`/`1080p`, `seconds` 1–15, and `generate_audio`. Video image-to-video uses `{ image: { url } }`; reference-to-video accepts 2–7 `{ url }` objects on `reference_images` and caps `1080p` at `720p`. Responses return `response.data[].b64_json` for images and `response.b64_video` for videos. These models require `XAI_API_KEY` or `AI_MODEL_RELAY_XAI_API_KEY` and upload the prompt plus any reference images to xAI.
 
 `model-relay:antigravity-cli:auto` runs non-interactive Antigravity CLI chat. The full transcript is written to a temp file; `-p` only instructs `agy` to read `@prompt.txt`, so chat is not capped at 24 000 characters. Chat image data URLs are materialized in that workspace. `model-relay:antigravity-cli:image` instructs the documented `generate_image` tool exactly once, with a request-unique image name, and asks `agy` to print `IMAGE_PATH: <absolute path>`. The bridge imports that path when it is a non-empty PNG/JPEG/WebP no larger than 20 MB inside the Antigravity state root or the request workspace. If the marker is missing, it falls back to scanning the state root for a matching newly-created file. Status-page image tests send `aspect_ratio` and Gemini-style `image_size` (`1K`/`2K`/`4K`) as generation guidance in the `generate_image` instruction. `model-relay:antigravity-cli:media` analyzes a locally materialized video attachment or bounded visual frames and returns a normal chat-style answer. Configure `AI_MODEL_RELAY_ANTIGRAVITY_BINARY`, use the local Settings panel's **Antigravity CLI executable** field, or install authenticated `agy` on PATH; saving a changed executable path automatically re-probes every CLI provider, and **Refresh detection** always forces a probe. Neither modifies Windows PATH nor restarts the bridge. The bridge never installs it, authenticates it, changes its settings, or falls back to another provider. Antigravity analysis is not local-only: supplied media is handled by the authenticated Antigravity CLI under its Google account and policy.
 
-Codex CLI (`model-relay:codex:image`) and Grok CLI (`model-relay:grok-cli:image`) status-page size controls are generation guidance only. Codex embeds requested pixel sizes in the `image_gen` prompt text; Grok passes `aspect_ratio` as the native `image_gen` / `image_edit` tool argument and keeps 1K/2K asks inside the tool prompt. A Grok `image_edit` with one reference keeps that source canvas and ignores `aspect_ratio`; when the requested ratio differs from the reference, Relay duplicates the reference into a second path so Imagine treats it as a multi-image edit and honors `aspect_ratio`. Completed image jobs in `/v1/status` and on the Live tab may include measured artifact `width` and `height` next to `size_bytes`. Only xAI Imagine HTTP sends image `resolution` directly to the provider API.
+Codex image jobs (`codex-local:image`, `model-relay:codex:image`) use the saved `codex_image_tool`. `generations` is the default. It POSTs to the Codex login endpoint `images/generations`, or `images/edits` when reference images are present. The model is `gpt-image-2.5-sunburst`. The JSON body sets `model`, `prompt`, `size`, `quality`, `background`, and `output_format`. Authentication is the existing Codex CLI login in `CODEX_HOME/auth.json`. This path does not use a separate `OPENAI_API_KEY` and does not run `image_gen.py`. In `generations` mode, `size`, `quality`, and `output_format` are native capability fields. `quality` is `low`, `medium`, `high`, `xhigh`, `max`, or `auto`. `background` is `auto`, `opaque`, or `transparent`. `output_format` is `png`, `jpeg`, or `webp`. `background` `transparent` is rejected when `output_format` is `jpeg`. `n` is 1–10. Edits accept up to 16 reference images.
+
+`size` is `auto`, or `WIDTHxHEIGHT` where both edges are multiples of 16, the long edge is at most 3840, the long/short ratio is at most 3, and the total pixel count is between 655360 and 8294400. Presets are `auto`, `1024x1024`, `1536x1024`, `1024x1536`, `2048x1152`, `2048x2048`, `2560x1440`, `1440x2560`, `3840x2160`, and `2160x3840`. Any other size that meets that rule is valid. Sizes above `2560x1440` are experimental but allowed.
+
+`image_gen` remains selectable and is the previous `codex exec` path. On that path, `size`, `quality`, and output format are prompt guidance only, because the built-in `image_gen` tool hardcodes `size=auto` and `quality=auto` and returns PNG. The only output format is `image/png`. The bridge still snapshots `CODEX_HOME/generated_images` and returns the detected file. Those jobs stay serialized to one running image job because detection uses that shared directory.
+
+Grok CLI (`model-relay:grok-cli:image`) aspect ratios are unchanged. It passes `aspect_ratio` as the native `image_gen` / `image_edit` tool argument and keeps 1K/2K resolution and `output_format` as prompt guidance. A Grok `image_edit` with one reference keeps that source canvas and ignores `aspect_ratio`; when the requested ratio differs from the reference, Relay duplicates the reference into a second path so Imagine treats it as a multi-image edit and honors `aspect_ratio`. Antigravity `generate_image` guidance is unchanged. Cursor has no image model. Completed image jobs in `/v1/status` and on the Live tab may include measured artifact `width` and `height` next to `size_bytes`. xAI Imagine HTTP sends image `resolution` natively. Codex `generations` sends pixel `size`, `quality`, `background`, and `output_format` on the login-endpoint body.
 
 Antigravity CLI 1.1.4 documents non-interactive `-p`/`--print`, but not `-o` or `--output-format`. The Relay therefore accepts print mode and normalizes plain-text output locally. If a later CLI advertises `-o` or `--output-format`, the Relay requests JSON output automatically.
 
@@ -628,7 +639,7 @@ The bridge requires `job_token`, `request_hash`, and `request_id` to be present.
 
 ## `POST /v1/images`
 
-Runs a local Codex image request.
+Runs a Codex image request. The tool is the saved `codex_image_tool`: `generations` (default) or `image_gen`. Field names and validation are the Codex contract under `/v1/relay/jobs/*`. In `generations` mode, `size`, `quality`, and `output_format` are native; `background` is sent on the same JSON body. In `image_gen` mode, `size`, `quality`, and output format stay prompt guidance and the only output format is `image/png`.
 
 Request:
 
@@ -642,6 +653,9 @@ Request:
     "prompt": "A product-style image of a small desktop bridge icon",
     "size": "1024x1024",
     "quality": "high",
+    "background": "auto",
+    "output_format": "png",
+    "n": 1,
     "reference_images": [
       {
         "b64_json": "<base64>",
@@ -653,7 +667,7 @@ Request:
 }
 ```
 
-Reference images may also be supplied as `referenced_image_paths` (local filesystem paths readable by the bridge process) or `frames` (data URLs). When present, the bridge writes them to a temp directory and passes each file to `codex exec --image` before the text prompt, matching the multimodal chat path.
+Reference images may also be supplied as `referenced_image_paths` (local filesystem paths readable by the bridge process) or `frames` (data URLs). In `generations` mode the bridge POSTs them to `images/edits` (at most 16). In `image_gen` mode the bridge writes them to a temp directory and passes each file to `codex exec --image` before the text prompt, matching the multimodal chat path.
 
 Response:
 
@@ -680,9 +694,9 @@ Response:
 }
 ```
 
-The bridge returns exactly one detected generated image. Detection snapshots `CODEX_HOME/generated_images`, prefers a validated path named by a structured JSON event, and otherwise takes the newest file created after that boundary. If Codex completes without a new image, the bridge returns `success: false`. Image jobs that use this shared directory remain serialized to one running image job at a time.
+`provider_details.image_path` and `provider_details.generated_images_dir` in the example are the `image_gen` detection result. `generations` returns image bytes in `response.data[].b64_json` from the Codex login response and does not scan `CODEX_HOME/generated_images`. `image_gen` returns exactly one detected PNG. Detection snapshots `CODEX_HOME/generated_images`, prefers a validated path named by a structured JSON event, and otherwise takes the newest file created after that boundary. If that path completes without a new image, the bridge returns `success: false`. `image_gen` jobs that use this shared directory remain serialized to one running image job at a time.
 
-When the installed Codex CLI supports `codex exec --json`, image and chat jobs use the structured event stream for cleaner progress and error details. If an older CLI rejects `--json`, the bridge reruns the job without structured events and preserves the legacy result shape.
+When the installed Codex CLI supports `codex exec --json`, `image_gen` and chat jobs use the structured event stream for cleaner progress and error details. If an older CLI rejects `--json`, the bridge reruns the job without structured events and preserves the legacy result shape. `generations` does not run `codex exec`.
 
 ## `GET /v1/status/jobs/{jobId}/artifacts/{index}`
 

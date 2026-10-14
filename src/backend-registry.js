@@ -11,7 +11,8 @@ const { detectCli, detectCliAsync, materializeChatImages, messagesToPromptJson, 
 const { createLocalUpscaleDriver } = require('./local-upscale');
 const { createLocalImageDriver } = require('./local-image');
 const { resolveMaxTokens } = require('./token-policy');
-const { IMAGE_CAPABILITY_CONTRACT_VERSION, imageCapabilityContract, isCompleteImageCapabilityContract, findRelayImageModel, normalizeImageOutputFormat, normalizeImagePayloadForModel, relayCatalogEntrySupportsImages } = require('./image-capabilities');
+const { IMAGE_CAPABILITY_CONTRACT_VERSION, SUNBURST_IMAGE_SIZE_CONSTRAINTS, imageCapabilityContract, isCompleteImageCapabilityContract, findRelayImageModel, normalizeImageOutputFormat, normalizeImagePayloadForModel, relayCatalogEntrySupportsImages } = require('./image-capabilities');
+const relaySettings = require('./relay-settings');
 const { readImageDimensions } = require('./image-dimensions');
 const { antigravityAuthenticationFailure, antigravityResultText, createAntigravityImageArtifactResolver, findAntigravityImagePath, isAntigravityAuthenticationError } = require('./antigravity-cli');
 
@@ -214,7 +215,7 @@ const DEFAULT_XAI_CHAT_MODELS = 'grok-4.6,grok-4.5,grok-4.3,latest';
 const XAI_IMAGINE_IMAGE_MODEL = 'grok-imagine-image-2.0';
 const XAI_IMAGINE_VIDEO_MODEL = 'grok-imagine-video-1.5';
 const MAX_IMAGE_REFERENCE_BYTES = 20 * 1024 * 1024;
-const XAI_IMAGE_REFERENCE_LIMIT = 3;
+const XAI_IMAGE_REFERENCE_LIMIT = 5;
 const XAI_VIDEO_REFERENCE_LIMIT = 7;
 const XAI_IMAGE_ASPECT_RATIOS = new Set(['auto', '1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '2:1', '1:2', '19.5:9', '9:19.5', '20:9', '9:20', '21:9', '5:2']);
 const XAI_VIDEO_ASPECT_RATIOS = new Set(['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3']);
@@ -524,15 +525,67 @@ const CODEX_IMAGE_SIZE_CHOICES = [
 	{ value: '2160x3840', label: '4K portrait · 2160 × 3840 (requested, not guaranteed)' },
 ];
 
+const CODEX_GENERATIONS_SIZE_CHOICES = [
+	...CODEX_IMAGE_SIZE_CHOICES.slice(0, 5).map((choice) => ({ ...choice, label: choice.label.replace(/ \(requested, not guaranteed\)$/, '') })),
+	{ value: '2048x1152', label: '2K wide · 2048 × 1152' },
+	...CODEX_IMAGE_SIZE_CHOICES.slice(5).map((choice) => ({ ...choice, label: choice.label.replace(/ \(requested, not guaranteed\)$/, '') })),
+];
+
+const CODEX_IMAGE_QUALITY_CHOICES = [
+	{ value: 'auto', label: 'Auto · provider chooses' },
+	{ value: 'low', label: 'Low' },
+	{ value: 'medium', label: 'Medium' },
+	{ value: 'high', label: 'High' },
+];
+
 const CODEX_IMAGE_TEST_OPTIONS = [
 	testOption('size', 'Resolution', 'guidance', CODEX_IMAGE_SIZE_CHOICES),
-	testOption('quality', 'Quality', 'guidance', [
+	testOption('quality', 'Quality', 'guidance', CODEX_IMAGE_QUALITY_CHOICES),
+];
+
+const CODEX_GENERATIONS_TEST_OPTIONS = [
+	testOption('size', 'Resolution', 'direct', CODEX_GENERATIONS_SIZE_CHOICES),
+	testOption('quality', 'Quality', 'direct', [
+		...CODEX_IMAGE_QUALITY_CHOICES,
+		{ value: 'xhigh', label: 'Extra high' },
+		{ value: 'max', label: 'Max' },
+	]),
+	testOption('background', 'Background', 'direct', [
 		{ value: 'auto', label: 'Auto · provider chooses' },
-		{ value: 'low', label: 'Low' },
-		{ value: 'medium', label: 'Medium' },
-		{ value: 'high', label: 'High' },
+		{ value: 'opaque', label: 'Opaque' },
+		{ value: 'transparent', label: 'Transparent' },
 	]),
 ];
+
+function codexImageToolMode() {
+	try {
+		return relaySettings.settings().codex_image_tool === 'image_gen' ? 'image_gen' : 'generations';
+	} catch (error) {
+		return 'generations';
+	}
+}
+
+function codexImageTestOptions() {
+	return codexImageToolMode() === 'image_gen' ? CODEX_IMAGE_TEST_OPTIONS : CODEX_GENERATIONS_TEST_OPTIONS;
+}
+
+function codexImageCapabilities() {
+	if (codexImageToolMode() === 'image_gen') {
+		return imageCapabilityContract(CODEX_IMAGE_TEST_OPTIONS, {
+			resolutionKey: 'size',
+			referenceImagesMax: 4,
+			candidateCountMax: 1,
+			outputFormats: ['image/png'],
+		});
+	}
+	return imageCapabilityContract(CODEX_GENERATIONS_TEST_OPTIONS, {
+		resolutionKey: 'size',
+		referenceImagesMax: 16,
+		candidateCountMax: 10,
+		outputFormats: ['image/png', 'image/jpeg', 'image/webp'],
+		sizeConstraints: SUNBURST_IMAGE_SIZE_CONSTRAINTS,
+	});
+}
 
 const ANTIGRAVITY_IMAGE_ASPECT_CHOICES = [
 	{ value: 'auto', label: 'Auto · provider chooses' },
@@ -616,15 +669,15 @@ const XAI_IMAGE_TEST_OPTIONS = [
 		{ value: '1k', label: '1K' },
 	]),
 	testOption('quality', 'Quality', 'direct', [
+		{ value: 'auto', label: 'Auto · provider chooses' },
 		{ value: 'medium', label: 'Medium' },
 		{ value: 'low', label: 'Low' },
 	]),
 ];
 
-const CODEX_IMAGE_CAPABILITIES = imageCapabilityContract(CODEX_IMAGE_TEST_OPTIONS, { resolutionKey: 'size', referenceImagesMax: 4 });
 const GROK_IMAGE_CAPABILITIES = imageCapabilityContract(GROK_IMAGE_TEST_OPTIONS, { resolutionKey: 'resolution', referenceImagesMax: 4 });
 const ANTIGRAVITY_IMAGE_CAPABILITIES = imageCapabilityContract(ANTIGRAVITY_IMAGE_TEST_OPTIONS, { resolutionKey: 'image_size', referenceImagesMax: 4 });
-const XAI_IMAGE_CAPABILITIES = imageCapabilityContract(XAI_IMAGE_TEST_OPTIONS, { resolutionKey: 'resolution', referenceImagesMax: XAI_IMAGE_REFERENCE_LIMIT, candidateCountMax: 3, cloudUpload: true, outputFormats: ['image/png'] });
+const XAI_IMAGE_CAPABILITIES = imageCapabilityContract(XAI_IMAGE_TEST_OPTIONS, { resolutionKey: 'resolution', referenceImagesMax: XAI_IMAGE_REFERENCE_LIMIT, candidateCountMax: 10, cloudUpload: true, outputFormats: ['image/jpeg'], preserveAutoQuality: true });
 
 const XAI_VIDEO_TEST_OPTIONS = [
 	testOption('aspect_ratio', 'Aspect ratio', 'direct', [
@@ -680,7 +733,7 @@ function createCodexCliDriver(codex, mediaAnalysis) {
 			const models = payload.models || {};
 			return [
 				...(models.text || []).map((id) => ({ id: relayModel('codex', id), legacy_id: id, type: 'text', backend: 'codex-cli', job_types: ['chat', ...(jobTypes.includes('media.analyze') ? ['media.analyze'] : [])] })),
-				...(models.image || []).map((id) => ({ id: relayModel('codex', id.replace(/^codex-local:/, '')), legacy_id: id, type: 'image', backend: 'codex-cli', job_types: ['images'], test_options: CODEX_IMAGE_TEST_OPTIONS, image_capabilities: CODEX_IMAGE_CAPABILITIES })),
+				...(models.image || []).map((id) => ({ id: relayModel('codex', id.replace(/^codex-local:/, '')), legacy_id: id, type: 'image', backend: 'codex-cli', job_types: ['images'], test_options: codexImageTestOptions(), image_capabilities: codexImageCapabilities() })),
 			];
 		},
 		chat: (payload, session) => codex.chat({ ...payload, model: codexModelFromRelay(payload.model) }, session),
@@ -1590,7 +1643,7 @@ function createXaiApiDriver(options = {}) {
 			const resolution = String(payload.resolution || '').trim().toLowerCase();
 			if (XAI_IMAGE_RESOLUTIONS.has(resolution)) body.resolution = resolution;
 			const quality = String(payload.quality || '').trim().toLowerCase();
-			if (quality === 'low' || quality === 'medium') body.quality = quality;
+			if (quality === 'low' || quality === 'medium' || quality === 'auto') body.quality = quality;
 			Object.assign(body, xaiImagineImageInputs(references.uris));
 			const imagePath = references.uris.length ? '/images/edits' : '/images/generations';
 			if (typeof session.appendSessionOutput === 'function') session.appendSessionOutput('stdout', 'Submitting xAI Imagine image request.\n');

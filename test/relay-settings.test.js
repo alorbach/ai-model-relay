@@ -20,6 +20,9 @@ try {
 	};
 
 	const initial = relaySettings.settings();
+	assert.strictEqual(initial.codex_image_tool, 'generations');
+	assert.strictEqual(relaySettings.publicSettings().codex_image_tool, 'generations');
+	assert.strictEqual(relaySettings.resolved().codex_image_tool, 'generations');
 	assert.deepStrictEqual(initial.cli_paths, {
 		'codex-cli': '',
 		'grok-cli': '',
@@ -148,6 +151,33 @@ try {
 		if (previousChatTimeout === undefined) delete process.env.ALORBACH_CODEX_CHAT_TIMEOUT_MS;
 		else process.env.ALORBACH_CODEX_CHAT_TIMEOUT_MS = previousChatTimeout;
 	}
+
+	state = {};
+	assert.strictEqual(relaySettings.settings().codex_image_tool, 'generations');
+	const savedTool = relaySettings.saveSettings({ codex_image_tool: 'image_gen' });
+	assert.strictEqual(savedTool.codex_image_tool, 'image_gen');
+	assert.strictEqual(state.relay.codex_image_tool, 'image_gen');
+	state.relay.defaults.chat = 'model-relay:antigravity-cli:auto';
+	state.relay.defaults.images = 'model-relay:xai:imagine-image';
+	const beforeToolOnly = relaySettings.settings();
+	const toolOnly = relaySettings.saveSettings({ codex_image_tool: 'image_gen' });
+	assert.strictEqual(toolOnly.codex_image_tool, 'image_gen');
+	assert.strictEqual(toolOnly.defaults.chat, 'model-relay:antigravity-cli:auto');
+	assert.strictEqual(toolOnly.defaults.images, 'model-relay:xai:imagine-image');
+	assert.strictEqual(toolOnly.defaults.videos, beforeToolOnly.defaults.videos);
+	assert.strictEqual(toolOnly.defaults.transcribe, beforeToolOnly.defaults.transcribe);
+	assert.strictEqual(toolOnly.defaults['media.analyze'], beforeToolOnly.defaults['media.analyze']);
+	assert.strictEqual(relaySettings.publicSettings().codex_image_tool, 'image_gen');
+	assert.strictEqual(relaySettings.resolved().codex_image_tool, 'image_gen');
+	assert.strictEqual(Object.prototype.hasOwnProperty.call(savedTool.providers, 'codex_image_tool'), false);
+	const keptTool = relaySettings.saveSettings({ cli_paths: { 'codex-cli': 'C:\\Tools\\codex.exe' } });
+	assert.strictEqual(keptTool.codex_image_tool, 'image_gen');
+	assert.strictEqual(keptTool.cli_paths['codex-cli'], 'C:\\Tools\\codex.exe');
+	const invalidTool = relaySettings.saveSettings({ codex_image_tool: 'shell' });
+	assert.strictEqual(invalidTool.codex_image_tool, 'generations');
+	assert.strictEqual(relaySettings.publicSettings().codex_image_tool, 'generations');
+	const missingTool = relaySettings.saveSettings({ defaults: { chat: 'model-relay:codex:auto' } });
+	assert.strictEqual(missingTool.codex_image_tool, 'generations');
 
 	console.log('relay settings tests passed');
 } finally {

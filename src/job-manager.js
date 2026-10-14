@@ -121,7 +121,7 @@ function collectMediaArtifacts(result) {
 	const response = result && result.response && typeof result.response === 'object' ? result.response : {};
 	const data = Array.isArray(response.data) ? response.data : [];
 	const artifacts = [];
-	for (const item of data.slice(0, 4)) {
+	for (const item of data.slice(0, 10)) {
 		const encoded = String(item && item.b64_json || '').replace(/\s/g, '');
 		if (!encoded) continue;
 		const mimeType = String(item.mime_type || 'image/png').toLowerCase();
