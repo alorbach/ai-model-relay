@@ -1,0 +1,49 @@
+docs/operations.md
+  s_430164e2b7cdf3::t_1c1b176efe6b8d 223
+test/backend-registry.test.js
+  s_430164e2b7cdf3::t_0ea19e54f2873a 180-182
+  s_430164e2b7cdf3::t_03f601cca100e0 206
+  s_430164e2b7cdf3::t_c8128692a0b326 269,271,273-276
+  s_430164e2b7cdf3::t_0298f495f5b230 270
+  s_430164e2b7cdf3::t_2d828f964be388 272
+test/grok-media.test.js
+  s_430164e2b7cdf3::t_3c044bc6b8e646 116
+  s_430164e2b7cdf3::t_6836b10621a03b 156,162-165,169-172
+  s_430164e2b7cdf3::t_ae1a5f0f85afa6 174,181-186
+  s_430164e2b7cdf3::t_6f4fff5daeab7c 115,117
+  s_430164e2b7cdf3::t_7f92d2b9164363 206-209,219-224
+  s_430164e2b7cdf3::t_7f0ca0a38429dd 93-94,97-98,104-107
+src/backend-registry.js
+  s_430164e2b7cdf3::t_cf373a80ab0cd3 624
+  s_430164e2b7cdf3::t_19954c9c66ed57 476
+  s_430164e2b7cdf3::t_f9b44fc811bf46 464-475,477-483
+  s_430164e2b7cdf3::t_0e9fb73f2ff56a 2046
+  s_430164e2b7cdf3::t_cc3474eae63e22 1002
+  s_430164e2b7cdf3::t_32e9e79c77785d 587-596,600-601,605-606
+docs/gateway-integration.md
+  s_430164e2b7cdf3::t_e24123b89bb096 196
+docs/local-bridge-api.md
+  s_430164e2b7cdf3::t_1df8b0d6a0d4ca 577
+  s_430164e2b7cdf3::t_e3de8ee30ab7bf 563
+  s_430164e2b7cdf3::t_6b829f5f4b63f5 544
+  s_430164e2b7cdf3::t_a55fd40aa3f8fd 542
+src/status-page.js
+  s_430164e2b7cdf3::t_2313a1848e466f 2875
+  s_430164e2b7cdf3::t_d98fb9dfc31ac1 2870
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "541c3af85289f9f78f88538ac96d150fcbfe43bb",
+  "prompts": {},
+  "sessions": {
+    "s_430164e2b7cdf3": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "c1400db8-cbe5-447e-b4db-e6e1d17e5db9",
+        "model": "grok-4.7"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
