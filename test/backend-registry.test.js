@@ -177,7 +177,9 @@ function captureCliSpawn(calls) {
 	assert.ok(openAiVideoModel.test_options.every((option) => option.delivery === 'direct'));
 	assert.ok(!models.some((model) => model.backend === 'cursor-cli' && model.type === 'image'));
 	const grokImageModel = { id: 'model-relay:grok-cli:image', type: 'image', backend: 'grok-cli', ready: true, job_types: ['images'], image_capabilities: GROK_IMAGE_CAPABILITIES };
-	assert.deepStrictEqual(Object.keys(grokImageModel.image_capabilities.provider_options).sort(), ['aspect_ratio', 'resolution']);
+	assert.deepStrictEqual(Object.keys(grokImageModel.image_capabilities.provider_options).sort(), ['aspect_ratio']);
+	assert.deepStrictEqual(grokImageModel.image_capabilities.supported_output_formats, ['image/jpeg']);
+	assert.deepStrictEqual(grokImageModel.image_capabilities.supported_sizes, []);
 	assert.strictEqual(grokImageModel.image_capabilities.provider_options.aspect_ratio.delivery, 'native');
 	assert.strictEqual(grokImageModel.image_capabilities.resolution_mode, 'guidance');
 	assert.strictEqual(grokImageModel.image_capabilities.aspect_ratio_delivery, 'native');
@@ -201,7 +203,7 @@ function captureCliSpawn(calls) {
 	assert.strictEqual(findRelayImageModel({ backends: [grokDriverRecord, grokImageModel] }, requestedGrokImageId).id, requestedGrokImageId);
 	assert.strictEqual(findRelayImageModel({ backends: [grokImageModel] }, requestedGrokImageId), null);
 	assert.ok(!isCompleteImageCapabilityContract({ ...grokImageModel, job_types: ['chat', 'images', 'videos'] }), 'mixed chat/image job_types is not a complete image contract');
-	assert.ok(!isCompleteImageCapabilityContract({ ...grokImageModel, image_capabilities: { ...GROK_IMAGE_CAPABILITIES, provider_options: { resolution: GROK_IMAGE_CAPABILITIES.provider_options.resolution } } }), 'native aspect_ratio must appear in provider_options');
+	assert.ok(!isCompleteImageCapabilityContract({ ...grokImageModel, image_capabilities: { ...GROK_IMAGE_CAPABILITIES, provider_options: { resolution: { type: 'enum', delivery: 'guidance', values: ['1k'] } } } }), 'native aspect_ratio must appear in provider_options');
 	const antigravityImageModel = { id: 'model-relay:antigravity-cli:image', type: 'image', backend: 'antigravity-cli', ready: true, job_types: ['images'], image_capabilities: ANTIGRAVITY_IMAGE_CAPABILITIES };
 	assert.deepStrictEqual(antigravityImageModel.image_capabilities.supported_sizes, ['2K', '4K', '1K']);
 	assert.deepStrictEqual(Object.keys(antigravityImageModel.image_capabilities.provider_options), ['image_size']);
@@ -264,9 +266,14 @@ function captureCliSpawn(calls) {
 	const conflictingCandidateCount = normalizeImagePayloadForModel({ model: xaiImageModel.id, prompt: 'x', candidate_count: 3, n: 1, cloud_upload_confirmed: true }, xaiImageModel);
 	assert.strictEqual(conflictingCandidateCount.error, undefined);
 	assert.strictEqual(conflictingCandidateCount.payload.n, 3, 'candidate_count must take precedence over a conflicting n');
-	const grokGuidance = grokImageToolGuidance({ output_format: 'image/webp' }, 'image_gen');
-	assert.match(grokGuidance, /In the tool prompt string, request output_format "image\/webp"/);
-	assert.doesNotMatch(grokGuidance, /Pass output_format .* as the image_gen tool argument/);
+	const grokGuidance = grokImageToolGuidance({ output_format: 'image/webp', resolution: '2k' }, 'image_gen');
+	assert.doesNotMatch(grokGuidance, /request output_format|request 2K|request 1K|long edge/);
+	assert.match(grokGuidance, /only accept prompt and aspect_ratio/);
+	const grokJpegDefault = normalizeImagePayloadForModel({ model: grokImageModel.id, prompt: 'x', resolution: '2k' }, grokImageModel);
+	assert.strictEqual(grokJpegDefault.error, undefined);
+	assert.strictEqual(grokJpegDefault.payload.output_format, 'image/jpeg');
+	assert.strictEqual(grokJpegDefault.payload.resolution, undefined);
+	assert.strictEqual(normalizeImagePayloadForModel({ model: grokImageModel.id, prompt: 'x', resolution: '2k', output_format: 'image/png' }, grokImageModel).error.code, 'relay_image_options_unsupported');
 	assert.match(grokImageToolGuidance({ aspect_ratio: '16:9' }, 'image_edit', { referenceCount: 2 }), /not as the output canvas/);
 	assert.doesNotMatch(grokImageToolGuidance({ aspect_ratio: '16:9' }, 'image_gen', { referenceCount: 2 }), /multi-image edit/);
 	assert.match(antigravityImageToolGuidance({ output_format: 'image/jpeg' }), /output_format "image\/jpeg"/);

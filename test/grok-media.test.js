@@ -90,19 +90,21 @@ function createFakeGrok(options = {}) {
 		assert.ok(grokImageModel);
 		assert.deepStrictEqual(grokImageModel.job_types, ['images']);
 		assert.ok(grokImageModel.image_capabilities);
-		assert.deepStrictEqual(Object.keys(grokImageModel.image_capabilities.provider_options).sort(), ['aspect_ratio', 'resolution']);
+		assert.deepStrictEqual(Object.keys(grokImageModel.image_capabilities.provider_options).sort(), ['aspect_ratio']);
+		assert.deepStrictEqual(grokImageModel.image_capabilities.supported_output_formats, ['image/jpeg']);
 		assert.strictEqual(grokImageModel.image_capabilities.provider_options.aspect_ratio.delivery, 'native');
 		assert.ok(isCompleteImageCapabilityContract(grokImageModel));
-		assert.deepStrictEqual(grokImageModel.test_options.map((option) => option.key), ['aspect_ratio', 'resolution']);
-		assert.ok(grokImageModel.test_options.every((option) => option.key === 'aspect_ratio' ? option.delivery === 'tool-arg' : option.delivery === 'guidance'));
+		assert.deepStrictEqual(grokImageModel.test_options.map((option) => option.key), ['aspect_ratio']);
+		assert.strictEqual(grokImageModel.test_options[0].delivery, 'tool-arg');
 		assert.ok(grokImageModel.test_options[0].choices.some((choice) => choice.value === '21:9'));
 		assert.ok(grokImageModel.test_options[0].choices.some((choice) => choice.value === '5:2'));
 		const grokVideoModel = fixture.driver.models().find((model) => model.id === 'model-relay:grok-cli:video');
 		assert.ok(grokVideoModel);
 		assert.deepStrictEqual(grokVideoModel.job_types, ['videos']);
-		assert.deepStrictEqual(grokVideoModel.test_options.map((option) => option.key), ['aspect_ratio', 'resolution', 'seconds', 'generate_audio']);
-		assert.ok(grokVideoModel.test_options.every((option) => option.delivery === 'guidance'));
-		assert.ok(grokVideoModel.test_options.find((option) => option.key === 'resolution').choices.some((choice) => choice.value === '1080p'));
+		assert.deepStrictEqual(grokVideoModel.test_options.map((option) => option.key), ['aspect_ratio', 'resolution', 'seconds']);
+		assert.ok(grokVideoModel.test_options.every((option) => option.delivery === 'tool-arg'));
+		assert.deepStrictEqual(grokVideoModel.test_options.find((option) => option.key === 'resolution').choices.map((choice) => choice.value), ['480p', '720p']);
+		assert.deepStrictEqual(grokVideoModel.test_options.find((option) => option.key === 'seconds').choices.map((choice) => choice.value), ['6', '10']);
 
 		const image = await fixture.driver.images({ prompt: 'edit', aspect_ratio: '16:9', resolution: '2k', reference_images: [{ b64_json: Buffer.from('input image').toString('base64'), mime_type: 'image/png' }] });
 		assert.strictEqual(image.success, true);
@@ -110,8 +112,9 @@ function createFakeGrok(options = {}) {
 		assert.ok(fixture.calls.some((args) => toolForArgs(args) === 'image_edit'));
 		const imageEditPrompt = fixture.calls.find((args) => toolForArgs(args) === 'image_edit')[fixture.calls.find((args) => toolForArgs(args) === 'image_edit').indexOf('--single') + 1];
 		assert.ok(imageEditPrompt.includes('Pass aspect_ratio "16:9" as the image_edit tool argument.'));
-		assert.ok(imageEditPrompt.includes('request 2K output with the long edge around 2048 pixels.'));
-		assert.ok(imageEditPrompt.includes('Do not pass a resolution or output_format tool parameter'));
+		assert.ok(!imageEditPrompt.includes('2K'));
+		assert.ok(!imageEditPrompt.includes('request output_format'));
+		assert.ok(imageEditPrompt.includes('only accept prompt and aspect_ratio'));
 		assert.ok(imageEditPrompt.includes('reference-aspect'));
 		assert.ok(imageEditPrompt.includes('multi-image edit'));
 		assert.ok(imageEditPrompt.includes('not as the output canvas'));
@@ -150,26 +153,37 @@ function createFakeGrok(options = {}) {
 		assert.match(grokImageToolGuidance({ aspect_ratio: '16:9' }, 'image_edit', { referenceCount: 2 }), /multi-image edit/);
 		assert.doesNotMatch(grokImageToolGuidance({ aspect_ratio: '16:9' }, 'image_edit', { referenceCount: 1 }), /multi-image edit/);
 
-		const noReference = await fixture.driver.videos({ prompt: 'animate' });
+		const noReference = await fixture.driver.videos({ prompt: 'animate', aspect_ratio: '9:16', resolution: '1080p', seconds: 15, generate_audio: true });
 		assert.strictEqual(noReference.success, true);
 		assert.strictEqual(noReference.response.provider_details.generated_source_image, true);
 		const generatedSourceArgs = fixture.calls.find((args) => toolForArgs(args) === 'image_gen');
 		assert.ok(generatedSourceArgs);
 		assertExactToolAllowlist(generatedSourceArgs, 'image_gen');
+		const generatedSourcePrompt = generatedSourceArgs[generatedSourceArgs.indexOf('--single') + 1];
+		assert.ok(generatedSourcePrompt.includes('Pass aspect_ratio "9:16" as the image_gen tool argument.'));
+		assert.ok(!generatedSourcePrompt.includes('1080p'));
+		assert.ok(!generatedSourcePrompt.includes('soundtrack'));
 		const imageToVideoArgs = fixture.calls.find((args) => toolForArgs(args) === 'image_to_video');
 		assert.ok(imageToVideoArgs);
 		assertExactToolAllowlist(imageToVideoArgs, 'image_to_video');
+		const imageToVideoPrompt = imageToVideoArgs[imageToVideoArgs.indexOf('--single') + 1];
+		assert.ok(!imageToVideoPrompt.includes('aspect_ratio'));
+		assert.ok(!imageToVideoPrompt.includes('1080p'));
+		assert.ok(!imageToVideoPrompt.includes('duration'));
 
-		const oneReference = await fixture.driver.videos({ prompt: 'animate', frames: [`data:image/png;base64,${Buffer.from('frame').toString('base64')}`], seconds: 10, resolution: '1080p', generate_audio: false });
+		const oneReference = await fixture.driver.videos({ prompt: 'animate', frames: [`data:image/png;base64,${Buffer.from('frame').toString('base64')}`], seconds: 10, resolution: '720p', aspect_ratio: '16:9', generate_audio: false });
 		assert.strictEqual(oneReference.success, true);
 		assert.strictEqual(Buffer.from(oneReference.response.b64_video, 'base64').toString(), 'generated video');
 		assert.strictEqual(oneReference.response.provider_details.generated_source_image, false);
 		const oneReferenceArgs = fixture.calls.filter((args) => toolForArgs(args) === 'image_to_video').pop();
 		assert.ok(oneReferenceArgs);
 		assertExactToolAllowlist(oneReferenceArgs, 'image_to_video');
-		assert.ok(fixture.calls.some((args) => toolForArgs(args) === 'image_to_video' && args[args.indexOf('--single') + 1].includes('Requested clip length: 10 seconds.')));
-		assert.ok(fixture.calls.some((args) => toolForArgs(args) === 'image_to_video' && args[args.indexOf('--single') + 1].includes('Requested resolution tier: 1080p.')));
-		assert.ok(fixture.calls.some((args) => toolForArgs(args) === 'image_to_video' && args[args.indexOf('--single') + 1].includes('Request a silent video without a soundtrack.')));
+		const oneReferencePrompt = oneReferenceArgs[oneReferenceArgs.indexOf('--single') + 1];
+		assert.ok(oneReferencePrompt.includes('Pass duration 10 as the image_to_video tool argument.'));
+		assert.ok(oneReferencePrompt.includes('Pass resolution_name "720p" as the image_to_video tool argument.'));
+		assert.ok(!oneReferencePrompt.includes('aspect_ratio'));
+		assert.ok(!oneReferencePrompt.includes('1080p'));
+		assert.ok(!oneReferencePrompt.includes('soundtrack'));
 
 		const sessionInput = [];
 		const sessionOutput = [];
@@ -189,6 +203,10 @@ function createFakeGrok(options = {}) {
 		assert.strictEqual(rejectedPaths.code, 'grok_reference_invalid');
 		const multipleReferences = await fixture.driver.videos({
 			prompt: 'animate',
+			aspect_ratio: '16:9',
+			resolution: '480p',
+			seconds: 6,
+			generate_audio: true,
 			reference_images: [
 				{ b64_json: Buffer.from('one').toString('base64'), mime_type: 'image/png' },
 				{ b64_json: Buffer.from('two').toString('base64'), mime_type: 'image/jpeg' },
@@ -198,6 +216,12 @@ function createFakeGrok(options = {}) {
 		const referenceToVideoArgs = fixture.calls.find((args) => toolForArgs(args) === 'reference_to_video');
 		assert.ok(referenceToVideoArgs);
 		assertExactToolAllowlist(referenceToVideoArgs, 'reference_to_video');
+		const referenceToVideoPrompt = referenceToVideoArgs[referenceToVideoArgs.indexOf('--single') + 1];
+		assert.ok(referenceToVideoPrompt.includes('Pass aspect_ratio "16:9" as the reference_to_video tool argument.'));
+		assert.ok(referenceToVideoPrompt.includes('Pass resolution_name "480p" as the reference_to_video tool argument.'));
+		assert.ok(referenceToVideoPrompt.includes('Pass duration 6 as the reference_to_video tool argument.'));
+		assert.ok(!referenceToVideoPrompt.includes('soundtrack'));
+		assert.ok(!referenceToVideoPrompt.includes('1080p'));
 		const mediaArgs = fixture.calls.find((args) => toolForArgs(args) === 'image_edit');
 		assertExactToolAllowlist(mediaArgs, 'image_edit');
 		assert.strictEqual(mediaArgs[mediaArgs.indexOf('--permission-mode') + 1], 'bypassPermissions');

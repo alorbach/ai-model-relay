@@ -2867,12 +2867,12 @@ function statusPageHtml() {
                         if (!options.length) return '';
                         const deliveryLabel = (entry) => {
                                 if (entry.delivery === 'direct') return 'sent directly';
-                                if (entry.delivery === 'tool-arg') return 'image_gen tool argument';
+                                if (entry.delivery === 'tool-arg') return 'Imagine tool argument';
                                 return 'generation guidance';
                         };
                         const deliverySummary = (entry) => {
                                 if (entry.delivery === 'direct') return 'directly to the provider';
-                                if (entry.delivery === 'tool-arg') return 'as an image_gen tool argument';
+                                if (entry.delivery === 'tool-arg') return 'as an Imagine tool argument';
                                 return 'as generation guidance';
                         };
                         const controls = options.map((entry) => {

@@ -412,25 +412,6 @@ function assignChatSampling(body, payload = {}, jobType = 'chat') {
 	return body;
 }
 
-function generationPreferences(payload = {}, kind) {
-	const safeValue = (value, maxLength = 64) => String(value || '').trim().replace(/[\r\n]+/g, ' ').slice(0, maxLength);
-	const preferences = [];
-	const size = safeValue(payload.size);
-	const quality = safeValue(payload.quality);
-	const aspectRatio = safeValue(payload.aspect_ratio);
-	const resolution = safeValue(payload.resolution);
-	const seconds = Number(payload.seconds);
-	if (size) preferences.push(`Requested output resolution: ${size}.`);
-	if (aspectRatio) preferences.push(`Requested aspect ratio: ${aspectRatio}.`);
-	if (resolution) preferences.push(`Requested resolution tier: ${resolution}.`);
-	if (kind === 'videos' && Number.isFinite(seconds) && seconds > 0 && seconds <= 120) preferences.push(`Requested clip length: ${seconds} seconds.`);
-	if (kind === 'videos' && payload.generate_audio !== undefined && payload.generate_audio !== null && payload.generate_audio !== '') {
-		preferences.push(wantsGeneratedAudio(payload) ? 'Include a native audio soundtrack.' : 'Request a silent video without a soundtrack.');
-	}
-	if (quality) preferences.push(`Preferred quality: ${quality}.`);
-	return preferences.join(' ');
-}
-
 function parseAspectRatio(value) {
 	const match = String(value || '').trim().match(/^(\d+(?:\.\d+)?)\s*:\s*(\d+(?:\.\d+)?)$/);
 	if (!match) return 0;
@@ -473,8 +454,6 @@ function grokImageToolGuidance(payload = {}, toolName, options = {}) {
 	const safeValue = (value, maxLength = 64) => String(value || '').trim().replace(/[\r\n]+/g, ' ').slice(0, maxLength);
 	const parts = [];
 	const aspectRatio = safeValue(payload.aspect_ratio);
-	const resolution = safeValue(payload.resolution).toLowerCase();
-	const outputFormat = normalizeImageOutputFormat(payload.output_format);
 	if (aspectRatio && aspectRatio !== 'auto') {
 		parts.push(`Pass aspect_ratio ${JSON.stringify(aspectRatio)} as the ${toolName} tool argument.`);
 	}
@@ -482,13 +461,27 @@ function grokImageToolGuidance(payload = {}, toolName, options = {}) {
 		parts.push(`Pass every listed reference path in the image array so this is a multi-image edit; a single-image ${toolName} call ignores aspect_ratio and keeps the source canvas.`);
 		parts.push(`Compose a new scene at aspect_ratio ${JSON.stringify(aspectRatio)}; use the references only for identity, costume, and likeness, not as the output canvas.`);
 	}
-	if (resolution === '2k') {
-		parts.push('In the tool prompt string, request 2K output with the long edge around 2048 pixels.');
-	} else if (resolution === '1k') {
-		parts.push('In the tool prompt string, request 1K output with the long edge around 1024 pixels.');
+	parts.push('Do not pass resolution, quality, or output_format; Grok Imagine image tools only accept prompt and aspect_ratio.');
+	return parts.join(' ');
+}
+
+function grokVideoToolGuidance(payload = {}, toolName) {
+	const safeValue = (value, maxLength = 64) => String(value || '').trim().replace(/[\r\n]+/g, ' ').slice(0, maxLength);
+	const parts = [];
+	const aspectRatio = safeValue(payload.aspect_ratio);
+	const resolution = safeValue(payload.resolution).toLowerCase();
+	const seconds = Number(payload.seconds);
+	if ((toolName === 'image_gen' || toolName === 'reference_to_video') && aspectRatio && aspectRatio !== 'auto') {
+		parts.push(`Pass aspect_ratio ${JSON.stringify(aspectRatio)} as the ${toolName} tool argument.`);
 	}
-	parts.push(`In the tool prompt string, request output_format ${JSON.stringify(outputFormat)}.`);
-	parts.push('Do not pass a resolution or output_format tool parameter; Grok Imagine image tools only accept prompt and aspect_ratio.');
+	if (toolName === 'image_to_video' || toolName === 'reference_to_video') {
+		if (resolution === '480p' || resolution === '720p') {
+			parts.push(`Pass resolution_name ${JSON.stringify(resolution)} as the ${toolName} tool argument.`);
+		}
+		if (seconds === 6 || seconds === 10) {
+			parts.push(`Pass duration ${seconds} as the ${toolName} tool argument.`);
+		}
+	}
 	return parts.join(' ');
 }
 
@@ -591,36 +584,27 @@ const GROK_IMAGE_ASPECT_CHOICES = [
 
 const GROK_IMAGE_TEST_OPTIONS = [
 	testOption('aspect_ratio', 'Aspect ratio', 'tool-arg', GROK_IMAGE_ASPECT_CHOICES),
-	testOption('resolution', 'Resolution', 'guidance', [
-		{ value: '2k', label: '2K · prompt guidance only' },
-		{ value: '1k', label: '1K · prompt guidance only' },
-	]),
+];
+
+const GROK_VIDEO_ASPECT_CHOICES = [
+	{ value: '16:9', label: 'Landscape · 16:9' },
+	{ value: '9:16', label: 'Portrait · 9:16' },
+	{ value: '1:1', label: 'Square · 1:1' },
+	{ value: '4:3', label: 'Landscape · 4:3' },
+	{ value: '3:4', label: 'Portrait · 3:4' },
+	{ value: '3:2', label: 'Landscape · 3:2' },
+	{ value: '2:3', label: 'Portrait · 2:3' },
 ];
 
 const GROK_VIDEO_TEST_OPTIONS = [
-	testOption('aspect_ratio', 'Aspect ratio', 'guidance', [
-		{ value: '16:9', label: 'Landscape · 16:9' },
-		{ value: '9:16', label: 'Portrait · 9:16' },
-		{ value: '1:1', label: 'Square · 1:1' },
-		{ value: '4:3', label: 'Landscape · 4:3' },
-		{ value: '3:4', label: 'Portrait · 3:4' },
-		{ value: '3:2', label: 'Landscape · 3:2' },
-		{ value: '2:3', label: 'Portrait · 2:3' },
-	]),
-	testOption('resolution', 'Resolution', 'guidance', [
+	testOption('aspect_ratio', 'Aspect ratio', 'tool-arg', GROK_VIDEO_ASPECT_CHOICES),
+	testOption('resolution', 'Resolution', 'tool-arg', [
 		{ value: '480p', label: '480p' },
 		{ value: '720p', label: '720p' },
-		{ value: '1080p', label: '1080p' },
 	]),
-	testOption('seconds', 'Clip length', 'guidance', [
-		{ value: '5', label: '5 seconds' },
-		{ value: '8', label: '8 seconds' },
+	testOption('seconds', 'Clip length', 'tool-arg', [
+		{ value: '6', label: '6 seconds' },
 		{ value: '10', label: '10 seconds' },
-		{ value: '15', label: '15 seconds' },
-	]),
-	testOption('generate_audio', 'Soundtrack', 'guidance', [
-		{ value: 'true', label: 'Native audio' },
-		{ value: 'false', label: 'Silent' },
 	]),
 ];
 
@@ -637,7 +621,7 @@ const XAI_IMAGE_TEST_OPTIONS = [
 	]),
 ];
 
-const GROK_IMAGE_CAPABILITIES = imageCapabilityContract(GROK_IMAGE_TEST_OPTIONS, { resolutionKey: 'resolution', referenceImagesMax: 4 });
+const GROK_IMAGE_CAPABILITIES = imageCapabilityContract(GROK_IMAGE_TEST_OPTIONS, { referenceImagesMax: 4, outputFormats: ['image/jpeg'] });
 const ANTIGRAVITY_IMAGE_CAPABILITIES = imageCapabilityContract(ANTIGRAVITY_IMAGE_TEST_OPTIONS, { resolutionKey: 'image_size', referenceImagesMax: 4 });
 const XAI_IMAGE_CAPABILITIES = imageCapabilityContract(XAI_IMAGE_TEST_OPTIONS, { resolutionKey: 'resolution', referenceImagesMax: XAI_IMAGE_REFERENCE_LIMIT, candidateCountMax: 10, cloudUpload: true, outputFormats: ['image/jpeg'], preserveAutoQuality: true });
 
@@ -1015,7 +999,7 @@ function createGrokCliDriver(options = {}) {
 			}
 			const runImagineTool = async (toolName, targetDir, sourcePaths = [], outputLabel = kind === 'images' ? 'image' : 'video') => {
 				const instruction = `Call the ${toolName} tool exactly once to create the requested ${outputLabel}${sourcePaths.length ? ` using ${sourcePaths.join(', ')}` : ''}.`;
-				const preferences = kind === 'images' ? grokImageToolGuidance(payload, toolName, { referenceCount: sourcePaths.length }) : generationPreferences(payload, kind);
+				const preferences = kind === 'images' ? grokImageToolGuidance(payload, toolName, { referenceCount: sourcePaths.length }) : grokVideoToolGuidance(payload, toolName);
 				const prompt = `${instruction} The tool saves the generated file in its managed Grok session directory; do not search for, copy, or move it. Do not call any other tool.${preferences ? ` ${preferences}` : ''} User request: ${String(payload.prompt || '').trim()}`;
 				if (session.appendSessionInput) {
 					session.appendSessionInput('grok cli request', `Tool: ${toolName}\nWorkspace: ${workspace}\n\nPrompt (passed with --single; stdin is empty):\n${prompt}`);
@@ -2059,7 +2043,7 @@ module.exports = {
 	providerFromPayload,
 	antigravityImageToolGuidance,
 	grokImageToolGuidance,
+	grokVideoToolGuidance,
 	grokImageEditNeedsAspectExpansion,
-	generationPreferences,
 	normalizeImagePayloadForModel,
 };
