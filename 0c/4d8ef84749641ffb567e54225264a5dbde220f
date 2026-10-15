@@ -1,0 +1,33 @@
+src/codex.js
+  s_15d3e25a8305a1::t_01859d50bad210 1089-1098,1101-1106,1109,1111,1126
+docs/architecture.md
+  s_15d3e25a8305a1::t_017ff6a429f4b0 63
+test/image-attachments.test.js
+  s_15d3e25a8305a1::t_98b98bf28aeda6 53-55,57-58,60-62
+docs/operations.md
+  s_15d3e25a8305a1::t_2f457195604bf6 18
+  s_15d3e25a8305a1::t_5fcdb155fa756f 223
+docs/gateway-integration.md
+  s_15d3e25a8305a1::t_a36647aeafbcac 196
+docs/local-bridge-api.md
+  s_15d3e25a8305a1::t_5c0cb11bda6ba8 573
+  s_15d3e25a8305a1::t_28bf81009d3038 669
+src/status-page.js
+  s_15d3e25a8305a1::t_a6e43d5bb2e041 2778
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "0c4d8ef84749641ffb567e54225264a5dbde220f",
+  "prompts": {},
+  "sessions": {
+    "s_15d3e25a8305a1": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "e8865d70-ca30-4878-9232-fb99818e6015",
+        "model": "grok-4.7"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
