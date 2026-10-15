@@ -489,15 +489,10 @@ function antigravityImageToolGuidance(payload = {}) {
 	const safeValue = (value, maxLength = 64) => String(value || '').trim().replace(/[\r\n]+/g, ' ').slice(0, maxLength);
 	const parts = [];
 	const aspectRatio = safeValue(payload.aspect_ratio);
-	const imageSize = safeValue(payload.image_size || payload.imageSize).toUpperCase();
-	const outputFormat = normalizeImageOutputFormat(payload.output_format);
-	if (aspectRatio && aspectRatio !== 'auto') {
+	if (ANTIGRAVITY_IMAGE_ASPECT_CHOICES.some((choice) => choice.value === aspectRatio && aspectRatio !== 'auto')) {
 		parts.push(`Call generate_image with aspectRatio ${JSON.stringify(aspectRatio)}.`);
 	}
-	if (imageSize === '1K' || imageSize === '2K' || imageSize === '4K') {
-		parts.push(`Call generate_image with imageSize ${JSON.stringify(imageSize)}.`);
-	}
-	parts.push(`Call generate_image with output_format ${JSON.stringify(outputFormat)}.`);
+	parts.push('Do not pass imageSize, resolution, quality, or output_format. generate_image accepts prompt, imageName, at most 3 imagePaths, and aspectRatio. It returns one JPEG at about 1 megapixel.');
 	return parts.join(' ');
 }
 
@@ -551,16 +546,10 @@ const ANTIGRAVITY_IMAGE_ASPECT_CHOICES = [
 	{ value: '3:4', label: 'Portrait · 3:4' },
 	{ value: '3:2', label: 'Landscape · 3:2' },
 	{ value: '2:3', label: 'Portrait · 2:3' },
-	{ value: '21:9', label: 'Cinema · 21:9' },
 ];
 
 const ANTIGRAVITY_IMAGE_TEST_OPTIONS = [
-	testOption('aspect_ratio', 'Aspect ratio', 'guidance', ANTIGRAVITY_IMAGE_ASPECT_CHOICES),
-	testOption('image_size', 'Resolution', 'guidance', [
-		{ value: '2K', label: '2K · ~2048px long edge' },
-		{ value: '4K', label: '4K · ~4096px long edge' },
-		{ value: '1K', label: '1K · ~1024px long edge' },
-	]),
+	testOption('aspect_ratio', 'Aspect ratio', 'tool-arg', ANTIGRAVITY_IMAGE_ASPECT_CHOICES),
 ];
 
 const GROK_IMAGE_ASPECT_CHOICES = [
@@ -622,7 +611,7 @@ const XAI_IMAGE_TEST_OPTIONS = [
 ];
 
 const GROK_IMAGE_CAPABILITIES = imageCapabilityContract(GROK_IMAGE_TEST_OPTIONS, { referenceImagesMax: 4, outputFormats: ['image/jpeg'] });
-const ANTIGRAVITY_IMAGE_CAPABILITIES = imageCapabilityContract(ANTIGRAVITY_IMAGE_TEST_OPTIONS, { resolutionKey: 'image_size', referenceImagesMax: 4 });
+const ANTIGRAVITY_IMAGE_CAPABILITIES = imageCapabilityContract(ANTIGRAVITY_IMAGE_TEST_OPTIONS, { referenceImagesMax: 3, outputFormats: ['image/jpeg'] });
 const XAI_IMAGE_CAPABILITIES = imageCapabilityContract(XAI_IMAGE_TEST_OPTIONS, { resolutionKey: 'resolution', referenceImagesMax: XAI_IMAGE_REFERENCE_LIMIT, candidateCountMax: 10, cloudUpload: true, outputFormats: ['image/jpeg'], preserveAutoQuality: true });
 
 const XAI_VIDEO_TEST_OPTIONS = [
@@ -1076,9 +1065,11 @@ function createAntigravityCliDriver(mediaAnalysis, options = {}) {
 		return bytes.length ? { mime_type: match[1].toLowerCase(), bytes } : null;
 	}
 
-	function materializeImageReferences(payload, inputDir) {
+	function materializeImageReferences(payload, inputDir, limits = {}) {
 		const entries = [payload.input_reference_data_url, payload.input_reference, ...(Array.isArray(payload.reference_images) ? payload.reference_images : []), ...(Array.isArray(payload.frames) ? payload.frames : [])].filter(Boolean);
 		const sourcePaths = Array.isArray(payload.referenced_image_paths) ? payload.referenced_image_paths.filter(Boolean) : [];
+		const maxReferences = Number(limits.maxReferences || 0);
+		if (maxReferences > 0 && entries.length + sourcePaths.length > maxReferences) return { error: `Antigravity generate_image accepts at most ${maxReferences} reference images.` };
 		const paths = [];
 		const write = (image) => {
 			if (!image || !image.bytes || image.bytes.length > 20 * 1024 * 1024) return false;
@@ -1226,7 +1217,7 @@ function createAntigravityCliDriver(mediaAnalysis, options = {}) {
 			try {
 				const inputDir = path.join(workspace, 'input');
 				fs.mkdirSync(inputDir);
-				const references = materializeImageReferences(payload, inputDir);
+				const references = materializeImageReferences(payload, inputDir, { maxReferences: 3 });
 				if (references.error) return { success: false, category: 'validation', code: 'antigravity_reference_invalid', message: references.error };
 				const imageName = `relay-${Date.now()}-${randomUUID()}`;
 				const referenceInstruction = references.paths.length ? ` Use these exact ImagePaths: ${JSON.stringify(references.paths)}.` : ' Do not use ImagePaths.';

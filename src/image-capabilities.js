@@ -216,7 +216,7 @@ function normalizeImagePayloadForModel(payload, modelEntry) {
 		// provider-native resolution option. Once the native option is present,
 		// the generic size has no meaning and must not reach the driver.
 		if (hasValue(requested[resolutionKey]) && !isAuto(requested[resolutionKey])) delete requested.size;
-		else return { error: imageOptionsError(model, `Pixel size is not a supported option for the selected Relay image model; use ${resolutionKey}.`) };
+		else return { error: imageOptionsError(model, resolutionKey ? `Pixel size is not a supported option for the selected Relay image model; use ${resolutionKey}.` : 'Pixel size is not a supported option for the selected Relay image model.') };
 	}
 	if (resolutionKey === 'size' && sizeConstraints) {
 		if (hasValue(requested.size) && !isAuto(requested.size) && !canonicalConstrainedImageSize(requested.size, sizeConstraints)) return { error: imageOptionsError(model, 'The requested resolution is not supported by the selected Relay image model.') };

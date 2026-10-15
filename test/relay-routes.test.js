@@ -132,7 +132,7 @@ function createMockSecurity() {
 			{ id: 'model-relay:xai:grok-4.6', type: 'text', backend: 'xai-api' },
 			{ id: 'model-relay:xai:stt', type: 'audio', backend: 'xai-api' },
 			{ id: 'model-relay:xai:imagine-image', type: 'image', backend: 'xai-api', image_capabilities: { contract_version: 1, cloud_upload: true } },
-			{ id: 'model-relay:antigravity-cli:image', type: 'image', backend: 'antigravity-cli', image_capabilities: { contract_version: 1, provider_options: { image_size: { type: 'enum', values: ['1K', '2K', '4K'] } } } },
+			{ id: 'model-relay:antigravity-cli:image', type: 'image', backend: 'antigravity-cli', image_capabilities: { contract_version: 1, provider_options: { aspect_ratio: { type: 'enum', delivery: 'native', values: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3'] } }, supported_output_formats: ['image/jpeg'], reference_images_max: 3 } },
 			{ id: 'model-relay:grok-cli:image', type: 'image', backend: 'grok-cli', ready: true, job_types: ['images'], image_capabilities: GROK_IMAGE_CAPABILITIES },
 			{ id: 'model-relay:xai:imagine-video', type: 'video', backend: 'xai-api' },
 			{ id: 'model-relay:music-analysis:core', type: 'audio', backend: 'music-analysis' },
@@ -316,7 +316,9 @@ function createMockSecurity() {
 		assert.strictEqual(models.body.image_capability_contract_version, 1);
 		assert.strictEqual(models.body.image_capability_minimum_relay_version, '1.0.10');
 		const relayAntigravityImage = models.body.backends.find((model) => model.id === 'model-relay:antigravity-cli:image');
-		assert.deepStrictEqual(Object.keys(relayAntigravityImage.image_capabilities.provider_options), ['image_size']);
+		assert.deepStrictEqual(Object.keys(relayAntigravityImage.image_capabilities.provider_options), ['aspect_ratio']);
+		assert.deepStrictEqual(relayAntigravityImage.image_capabilities.supported_output_formats, ['image/jpeg']);
+		assert.strictEqual(relayAntigravityImage.image_capabilities.reference_images_max, 3);
 		const relayGrokImage = models.body.backends.find((model) => model.id === 'model-relay:grok-cli:image');
 		assert.ok(isCompleteImageCapabilityContract(relayGrokImage));
 		assert.ok(relayCatalogEntrySupportsImages(models.body, relayGrokImage));
@@ -497,10 +499,10 @@ function createMockSecurity() {
 		assert.strictEqual(localGrokOptionsTest.statusCode, 200);
 		assert.strictEqual(calls[calls.length - 1].payload.aspect_ratio, '16:9');
 		assert.strictEqual(calls[calls.length - 1].payload.resolution, '2k');
-		const localAntigravityImageTest = await requestJson(port, 'POST', '/v1/relay/test', { job_type: 'images', model: 'model-relay:antigravity-cli:image', prompt: 'test antigravity image', aspect_ratio: '16:9', image_size: '2K' }, pageOrigin);
+		const localAntigravityImageTest = await requestJson(port, 'POST', '/v1/relay/test', { job_type: 'images', model: 'model-relay:antigravity-cli:image', prompt: 'test antigravity image', aspect_ratio: '16:9' }, pageOrigin);
 		assert.strictEqual(localAntigravityImageTest.statusCode, 200);
 		assert.strictEqual(calls[calls.length - 1].payload.aspect_ratio, '16:9');
-		assert.strictEqual(calls[calls.length - 1].payload.image_size, '2K');
+		assert.strictEqual(calls[calls.length - 1].payload.image_size, undefined);
 		const localMediaTest = await requestJson(port, 'POST', '/v1/relay/test', { job_type: 'media.analyze', model: 'model-relay:codex:auto', prompt: 'test media', media_data_url: `data:video/mp4;base64,${Buffer.from('mp4').toString('base64')}` }, pageOrigin);
 		assert.strictEqual(localMediaTest.statusCode, 200);
 		assert.strictEqual(calls[calls.length - 1].route, 'relay-media.analyze');
