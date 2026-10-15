@@ -1,0 +1,50 @@
+src/backend-registry.js
+  s_15d3e25a8305a1::t_0410c94489f5e4 492,495
+  s_15d3e25a8305a1::t_d32e2d62e4d7b6 552
+  s_15d3e25a8305a1::t_d3673ec0f37966 614
+test/backend-registry.test.js
+  s_15d3e25a8305a1::t_a36615b228761d 208-213
+  s_15d3e25a8305a1::t_3da1f7502fa31d 288-290,292
+  s_15d3e25a8305a1::t_e86caca4ae4019 270,274
+  s_15d3e25a8305a1::t_127d43650a8ae8 960
+  s_15d3e25a8305a1::t_76ecdcc4ae7a57 291
+  s_15d3e25a8305a1::t_5db62b4af66435 222,224-229
+  s_15d3e25a8305a1::t_88c9de0f89560b 926-930
+  s_15d3e25a8305a1::t_c92a462afde569 230
+  s_15d3e25a8305a1::t_7eb930960713f9 313,315-316
+  s_15d3e25a8305a1::t_d4d5bda50f7961 912
+  s_15d3e25a8305a1::t_d0245ded19850e 954,959,961-966
+docs/operations.md
+  s_15d3e25a8305a1::t_e74b2b404744b8 223
+docs/local-bridge-api.md
+  s_15d3e25a8305a1::t_6b897a4f6849c4 544
+  s_15d3e25a8305a1::t_52930f567b751d 542
+  s_15d3e25a8305a1::t_52cfd7cc3f1425 577
+  s_15d3e25a8305a1::t_d1806b3d90b015 569
+test/relay-routes.test.js
+  s_15d3e25a8305a1::t_6c5e75055054bb 319-321
+  s_15d3e25a8305a1::t_daa2fcc953f9b9 502,505
+  s_15d3e25a8305a1::t_bbd1647f8a24df 135
+docs/gateway-integration.md
+  s_15d3e25a8305a1::t_6dc80555f0fc5e 196
+src/image-capabilities.js
+  s_15d3e25a8305a1::t_57a4bdb55f4f10 219
+docs/architecture.md
+  s_15d3e25a8305a1::t_e5cccfd831fe7b 65
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b299adc0c2f77fbcca12c93c13ae90cf9d863112",
+  "prompts": {},
+  "sessions": {
+    "s_15d3e25a8305a1": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "e8865d70-ca30-4878-9232-fb99818e6015",
+        "model": "grok-4.7"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
