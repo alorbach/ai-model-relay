@@ -1086,19 +1086,29 @@ function detectNewImage(before, after, options = {}) {
 	return [...preferred, ...fresh.filter((item) => !selected.has(imagePathKey(item.path)))];
 }
 
+function imageAspectHint(size) {
+	const match = String(size || '').trim().match(/^(\d+)x(\d+)$/i);
+	if (!match) return '';
+	const width = Number(match[1]);
+	const height = Number(match[2]);
+	if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width <= 0 || height <= 0) return '';
+	if (width === height) return 'square';
+	return width > height ? 'landscape' : 'portrait';
+}
+
 function imagePrompt(payload, attachments = []) {
 	const prompt = String(payload.prompt || '').trim();
-	const size = String(payload.size || '1024x1024').trim();
-	const quality = String(payload.quality || 'auto').trim();
-	const outputFormat = String(payload.output_format || 'image/png').trim();
-	const formatName = /png/i.test(outputFormat) ? 'PNG' : (/webp/i.test(outputFormat) ? 'WebP' : 'JPEG');
-	const sizePart = size === 'auto' ? '' : ` at ${size}`;
-	const qualityPart = quality === 'auto' ? '' : `, quality ${quality}`;
-	const generationPrompt = `Create one ${formatName} image${sizePart}${qualityPart}. Scene: ${prompt}`;
+	const aspect = imageAspectHint(payload.size);
+	const quality = String(payload.quality || 'auto').trim().toLowerCase();
+	const hints = [];
+	if (aspect) hints.push(`Use a ${aspect} composition.`);
+	if (quality && quality !== 'auto') hints.push(`Prefer ${quality} visual detail.`);
+	const generationPrompt = [...hints, `Scene: ${prompt}`].join(' ');
 	const lines = [
 		'Generate exactly one image using your built-in image_gen tool.',
-		'Pass the following text verbatim as the image_gen prompt (do not shorten or omit the size or quality):',
+		'Pass the following text verbatim as the image_gen prompt:',
 		generationPrompt,
+		'Do not pass a pixel size, quality, or file format to the tool. Those are not tool arguments. The tool returns one PNG; the prompt can guide aspect ratio and detail only.',
 		'Do not access unrelated local files or modify anything except generated image output.',
 	];
 	if (attachments.length) {
@@ -1113,10 +1123,7 @@ function imagePrompt(payload, attachments = []) {
 			lines.push('- Merge products from Image 1 into the layout structure of Image 2 photorealistically.');
 		}
 	}
-	lines.push(
-		`Requested output format: ${outputFormat}. Produce this exact file format.`,
-		'After the image has been generated, reply with a short plain-text confirmation only.',
-	);
+	lines.push('After the image has been generated, reply with a short plain-text confirmation only.');
 	return lines.join('\n');
 }
 
