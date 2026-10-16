@@ -305,8 +305,10 @@ function createMockSecurity() {
 		const queryTokenModels = await requestJson(port, 'GET', '/v1/relay/models?bridge_token=test-token', null, { 'X-Alorbach-Bridge-Token': null });
 		assert.strictEqual(queryTokenModels.statusCode, 200);
 		assert.strictEqual(queryTokenModels.headers['access-control-allow-credentials'], 'true');
-		const rejectedQueryTokenModels = await requestJson(port, 'GET', '/v1/relay/models?bridge_token=expired-token', null, { 'X-Alorbach-Bridge-Token': null });
+		const rejectedQueryTokenModels = await requestJson(port, 'GET', '/v1/relay/models?bridge_token=expired-token&probe=1', null, { 'X-Alorbach-Bridge-Token': null });
 		assert.strictEqual(rejectedQueryTokenModels.statusCode, 403);
+		assert.strictEqual(rejectedQueryTokenModels.body.debug_help.route, '/v1/relay/models?probe=1');
+		assert.ok(!JSON.stringify(rejectedQueryTokenModels.body).includes('expired-token'));
 
 		const unpairedOriginModels = await requestJson(port, 'GET', '/v1/relay/models', null, { Origin: 'https://unpaired.example', 'X-Alorbach-Bridge-Token': 'invalid-token' });
 		assert.strictEqual(unpairedOriginModels.statusCode, 403);
@@ -452,6 +454,7 @@ function createMockSecurity() {
 		const artifact = await requestBinary(port, 'GET', binaryResult.artifact_url, Buffer.alloc(0));
 		assert.strictEqual(artifact.statusCode, 200);
 		assert.strictEqual(artifact.headers['content-type'], 'image/png');
+		assert.strictEqual(artifact.headers['access-control-allow-credentials'], 'true');
 		assert.strictEqual(artifact.body.toString(), 'derived-png');
 		const foreignArtifact = await requestBinary(port, 'GET', binaryResult.artifact_url, Buffer.alloc(0), { Origin: 'http://127.0.0.1:9999' });
 		assert.strictEqual(foreignArtifact.statusCode, 404);

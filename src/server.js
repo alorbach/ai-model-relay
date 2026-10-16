@@ -5,7 +5,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const codex = require('./codex');
-const { attachDebugHelp } = require('./debug-help');
+const { attachDebugHelp, publicRoute } = require('./debug-help');
 const { JobManager, clampMaxConcurrent, publicJobsSnapshot } = require('./job-manager');
 const mediaAnalysis = require('./media-analysis');
 const musicAnalysis = require('./music-analysis');
@@ -352,6 +352,7 @@ function sendArtifact(res, artifact, origin) {
 	};
 	if (origin) {
 		headers['Access-Control-Allow-Origin'] = origin;
+		headers['Access-Control-Allow-Credentials'] = 'true';
 		headers['Access-Control-Allow-Private-Network'] = 'true';
 		headers.Vary = 'Origin';
 	}
@@ -1465,7 +1466,7 @@ function createServer(options = {}) {
 		route(req, res, context).catch((error) => {
 			appendLog('server', 'Unhandled route failure.', {
 				error: safeError(error),
-				url: req.url,
+				url: publicRoute(req.url),
 				method: req.method,
 			});
 			try {

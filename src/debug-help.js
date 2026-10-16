@@ -5,10 +5,23 @@ function requestBaseUrl(req) {
 	return `http://${host || '127.0.0.1:8765'}`;
 }
 
+function publicRoute(route) {
+	const value = String(route || '').trim();
+	if (!value) return '';
+	try {
+		const url = new URL(value, 'http://127.0.0.1');
+		url.searchParams.delete('bridge_token');
+		const query = url.searchParams.toString();
+		return `${url.pathname}${query ? `?${query}` : ''}`;
+	} catch (error) {
+		return value.replace(/(^|[?&])bridge_token=[^&]*/gi, '$1').replace(/\?&/, '?').replace(/[?&]$/, '');
+	}
+}
+
 function buildDebugHelp(req, options = {}) {
 	const baseUrl = requestBaseUrl(req);
 	const requestId = String(options.requestId || '').trim();
-	const route = String(options.route || (req && req.url) || '').trim();
+	const route = publicRoute(options.route || (req && req.url) || '');
 	const statusCode = Number(options.statusCode || 0) || undefined;
 	return {
 		request_id: requestId || undefined,
@@ -41,4 +54,5 @@ function attachDebugHelp(req, payload, options = {}) {
 module.exports = {
 	attachDebugHelp,
 	buildDebugHelp,
+	publicRoute,
 };
