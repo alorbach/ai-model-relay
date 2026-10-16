@@ -1,0 +1,21 @@
+package.json
+  s_536eeddf77a050::t_7dca3be798d2dd 3
+package-lock.json
+  s_536eeddf77a050::t_c3584c6b2b040d 3,9
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "2b45251e59f9325d62ec982edc33513595da0956",
+  "prompts": {},
+  "sessions": {
+    "s_536eeddf77a050": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "b662d2ee-29d3-4156-9d86-6505955ad58f",
+        "model": "grok-4.7"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
