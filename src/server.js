@@ -292,6 +292,38 @@ function isLocalStatusViewer(req, bridgeSecurity) {
 	return !!(referer && isLocalPageOrigin(req, referer));
 }
 
+function requestHostname(req) {
+	const host = String(req.headers.host || '').trim();
+	if (!host) return '';
+	try {
+		return new URL(`http://${host}`).hostname.toLowerCase();
+	} catch (error) {
+		return '';
+	}
+}
+
+function originHostname(origin) {
+	try {
+		return new URL(String(origin || '')).hostname.toLowerCase();
+	} catch (error) {
+		return '';
+	}
+}
+
+/* Preview and download links on the status page are same-origin GETs.
+ * Localhost is covered above. The public Relay host must get the same
+ * read, while a cross-site embed still has to present a paired origin. */
+function isRelayHostStatusRequest(req, bridgeSecurity) {
+	const host = requestHostname(req);
+	if (!host) return false;
+	const site = String(req.headers['sec-fetch-site'] || '').trim().toLowerCase();
+	if (site === 'cross-site' || site === 'same-site') return false;
+	const candidate = exposeOrigin(req, bridgeSecurity) || refererOrigin(req, bridgeSecurity);
+	if (!candidate) return site === 'same-origin';
+	if (originHostname(candidate) !== host) return false;
+	return site === '' || site === 'same-origin' || site === 'none';
+}
+
 function bridgeMetadata() {
 	return {
 		version: packageInfo.version,
@@ -778,23 +810,23 @@ async function route(req, res, context) {
 	}
 	const artifactMatch = url.pathname.match(/^\/v1\/status\/jobs\/(\d+)\/artifacts\/(\d+)$/);
 	if (req.method === 'GET' && artifactMatch) {
-		if (!isLocalStatusViewer(req, bridgeSecurity)) {
-			const pairedOrigin = requirePairing(req, res, bridgeSecurity);
-			if (!pairedOrigin) return;
-			const artifact = jobManager.artifact(artifactMatch[1], artifactMatch[2], pairedOrigin);
+		if (isLocalStatusViewer(req, bridgeSecurity) || isRelayHostStatusRequest(req, bridgeSecurity)) {
+			const artifact = jobManager.artifact(artifactMatch[1], artifactMatch[2]);
 			if (!artifact) {
-				sendJson(res, 404, { success: false, message: 'Generated job artifact was not found.' }, pairedOrigin);
+				sendJson(res, 404, { success: false, message: 'Generated job artifact was not found.' });
 				return;
 			}
-			sendArtifact(res, artifact, pairedOrigin);
+			sendArtifact(res, artifact);
 			return;
 		}
-		const artifact = jobManager.artifact(artifactMatch[1], artifactMatch[2]);
+		const pairedOrigin = requirePairing(req, res, bridgeSecurity);
+		if (!pairedOrigin) return;
+		const artifact = jobManager.artifact(artifactMatch[1], artifactMatch[2], pairedOrigin);
 		if (!artifact) {
-			sendJson(res, 404, { success: false, message: 'Generated job artifact was not found.' });
+			sendJson(res, 404, { success: false, message: 'Generated job artifact was not found.' }, pairedOrigin);
 			return;
 		}
-		sendArtifact(res, artifact);
+		sendArtifact(res, artifact, pairedOrigin);
 		return;
 	}
 	const relayArtifactMatch = url.pathname.match(/^\/v1\/relay\/jobs\/([^/]+)\/artifact$/);

@@ -464,6 +464,16 @@ function createMockSecurity() {
 		const corsPreview = await requestPlain(port, `/v1/status/jobs/${binaryResult.local_job_id}/artifacts/0`, { Origin: 'https://evil.example' });
 		assert.strictEqual(corsPreview.statusCode, 403);
 		assert.ok(!corsPreview.headers['access-control-allow-origin']);
+		const publicHost = 'ai-model-relay.shooter-szene.de';
+		const publicPreview = await requestPlain(port, `/v1/status/jobs/${binaryResult.local_job_id}/artifacts/0`, { Host: publicHost, Origin: `https://${publicHost}`, 'Sec-Fetch-Site': 'same-origin' });
+		assert.strictEqual(publicPreview.statusCode, 200);
+		assert.strictEqual(publicPreview.headers['content-type'], 'image/png');
+		assert.strictEqual(publicPreview.body.toString(), 'derived-png');
+		const publicDownload = await requestPlain(port, `/v1/status/jobs/${binaryResult.local_job_id}/artifacts/0`, { Host: publicHost, Referer: `https://${publicHost}/#live`, 'Sec-Fetch-Site': 'same-origin' });
+		assert.strictEqual(publicDownload.statusCode, 200);
+		assert.strictEqual(publicDownload.body.toString(), 'derived-png');
+		const crossSitePreview = await requestPlain(port, `/v1/status/jobs/${binaryResult.local_job_id}/artifacts/0`, { Host: publicHost, Origin: `https://${publicHost}`, 'Sec-Fetch-Site': 'cross-site' });
+		assert.strictEqual(crossSitePreview.statusCode, 403);
 		const invalidBinaryUpscale = await requestBinary(port, 'POST', '/v1/relay/jobs/upscale', Buffer.from('protected-source-png'), { 'X-Alorbach-Request-Id': 'upscale-request' });
 		assert.strictEqual(invalidBinaryUpscale.statusCode, 400);
 
