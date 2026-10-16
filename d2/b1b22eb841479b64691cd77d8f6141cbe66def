@@ -1,0 +1,36 @@
+src/debug-help.js
+  s_de0189c8515e55::t_ddf4594a48bcba 8-20,24
+package-lock.json
+  s_536eeddf77a050::t_c3584c6b2b040d 3,9
+test/relay-routes.test.js
+  s_de0189c8515e55::t_f7063f4a34a610 457
+  s_de0189c8515e55::t_38559b4fa7ea7d 308,310-311
+src/server.js
+  s_de0189c8515e55::t_621c66c18027b5 355
+package.json
+  s_536eeddf77a050::t_7dca3be798d2dd 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d2b1b22eb841479b64691cd77d8f6141cbe66def",
+  "prompts": {},
+  "sessions": {
+    "s_536eeddf77a050": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "b662d2ee-29d3-4156-9d86-6505955ad58f",
+        "model": "grok-4.7"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_de0189c8515e55": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "3b507727-d754-44b6-af30-607904e98884",
+        "model": "grok-4.7"
+      },
+      "human_author": null
+    }
+  }
+}
