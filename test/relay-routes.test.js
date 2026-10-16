@@ -300,6 +300,13 @@ function createMockSecurity() {
 		assert.strictEqual(pairedModelsPreflight.headers['access-control-allow-origin'], 'http://127.0.0.1:8787');
 		assert.strictEqual(pairedModelsPreflight.headers['access-control-allow-private-network'], 'true');
 		assert.ok(pairedModelsPreflight.headers['access-control-allow-headers'].toLowerCase().includes('x-alorbach-bridge-token'));
+		assert.strictEqual(pairedModelsPreflight.headers['access-control-allow-credentials'], 'true');
+
+		const queryTokenModels = await requestJson(port, 'GET', '/v1/relay/models?bridge_token=test-token', null, { 'X-Alorbach-Bridge-Token': null });
+		assert.strictEqual(queryTokenModels.statusCode, 200);
+		assert.strictEqual(queryTokenModels.headers['access-control-allow-credentials'], 'true');
+		const rejectedQueryTokenModels = await requestJson(port, 'GET', '/v1/relay/models?bridge_token=expired-token', null, { 'X-Alorbach-Bridge-Token': null });
+		assert.strictEqual(rejectedQueryTokenModels.statusCode, 403);
 
 		const unpairedOriginModels = await requestJson(port, 'GET', '/v1/relay/models', null, { Origin: 'https://unpaired.example', 'X-Alorbach-Bridge-Token': 'invalid-token' });
 		assert.strictEqual(unpairedOriginModels.statusCode, 403);

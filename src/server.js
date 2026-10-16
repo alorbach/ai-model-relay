@@ -124,6 +124,7 @@ function sseHeaders(origin = '') {
 	};
 	if (origin) {
 		headers['Access-Control-Allow-Origin'] = origin;
+		headers['Access-Control-Allow-Credentials'] = 'true';
 		headers['Access-Control-Allow-Headers'] = 'Content-Type, X-Alorbach-Bridge-Token, X-Alorbach-Request-Id, X-Alorbach-Job-Token, X-Alorbach-Request-Hash, X-Alorbach-Upscale-Payload';
 		headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS';
 		headers['Access-Control-Allow-Private-Network'] = 'true';
@@ -265,8 +266,7 @@ function corsOrigin(req, bridgeSecurity, options = {}) {
 	if (req.method === 'OPTIONS' || options.requireToken === false) {
 		return origin;
 	}
-	const token = req.headers['x-alorbach-bridge-token'];
-	return bridgeSecurity.validateBridgeToken(origin, token) ? origin : '';
+	return bridgeSecurity.validateBridgeToken(origin, bridgeToken(req)) ? origin : '';
 }
 
 function isTrustedStatusViewer(req, bridgeSecurity) {
@@ -280,8 +280,7 @@ function isTrustedStatusViewer(req, bridgeSecurity) {
 			return true;
 		}
 	}
-	const token = req.headers['x-alorbach-bridge-token'];
-	return !!(origin && bridgeSecurity.validateBridgeToken(origin, token));
+	return !!(origin && bridgeSecurity.validateBridgeToken(origin, bridgeToken(req)));
 }
 
 function isLocalStatusViewer(req, bridgeSecurity) {
@@ -309,6 +308,7 @@ function sendJson(res, statusCode, payload, origin) {
 	};
 	if (origin) {
 		headers['Access-Control-Allow-Origin'] = origin;
+		headers['Access-Control-Allow-Credentials'] = 'true';
 		headers['Access-Control-Allow-Headers'] = 'Content-Type, X-Alorbach-Bridge-Token, X-Alorbach-Request-Id, X-Alorbach-Job-Token, X-Alorbach-Request-Hash, X-Alorbach-Upscale-Payload';
 		headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS';
 		headers['Access-Control-Allow-Private-Network'] = 'true';
@@ -449,9 +449,19 @@ function exposeOrigin(req, bridgeSecurity) {
 	return bridgeSecurity.normalizeOrigin(req.headers.origin || '');
 }
 
+function bridgeToken(req) {
+	const header = String(req.headers['x-alorbach-bridge-token'] || '').trim();
+	if (header) return header;
+	try {
+		return String(new URL(req.url, 'http://127.0.0.1').searchParams.get('bridge_token') || '').trim();
+	} catch (error) {
+		return '';
+	}
+}
+
 function requirePairing(req, res, bridgeSecurity) {
 	const origin = exposeOrigin(req, bridgeSecurity);
-	const token = req.headers['x-alorbach-bridge-token'];
+	const token = bridgeToken(req);
 	const allowedOrigin = origin && bridgeSecurity.getPairing(origin) ? origin : corsOrigin(req, bridgeSecurity);
 	if (!origin || !bridgeSecurity.validateBridgeToken(origin, token)) {
 		sendErrorJson(req, res, 403, { success: false, message: 'This WordPress origin is not paired with the local Codex bridge.' }, allowedOrigin);
