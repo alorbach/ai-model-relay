@@ -1,0 +1,25 @@
+test/relay-routes.test.js
+  s_f777a16cd01885::t_cb3956f2d6c2f9 303-309
+src/server.js
+  s_f777a16cd01885::t_17c8628275ac77 283
+  s_f777a16cd01885::t_906ea513fd5753 127
+  s_f777a16cd01885::t_49d2f61654a9ae 269
+  s_f777a16cd01885::t_1e2e3ea8078f8f 311
+  s_f777a16cd01885::t_e10e0cf3aa2ddc 452-461,464
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "def681a770833382e1a7b0f9e7adbcae1c33d23b",
+  "prompts": {},
+  "sessions": {
+    "s_f777a16cd01885": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "48c73f8e-be98-419e-88b6-232bf81d1218",
+        "model": "grok-4.7"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
