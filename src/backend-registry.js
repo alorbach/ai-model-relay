@@ -1825,6 +1825,10 @@ function createCliProcessDriver(options = {}) {
 			if (!command) {
 				return Promise.resolve({ success: false, category: 'configuration', code: 'cli_process_not_configured', message: 'CLI process driver requires AI_MODEL_RELAY_CLI_COMMAND.' });
 			}
+			const hasImages = (Array.isArray(payload.messages) ? payload.messages : []).some((message) => Array.isArray(message && message.content) && message.content.some((part) => part && typeof part === 'object' && ['input_image', 'image_url', 'image'].includes(String(part.type || '').toLowerCase())));
+			if (hasImages) {
+				return Promise.resolve({ success: false, category: 'validation', code: 'cli_process_images_unsupported', message: 'CLI Process chat does not accept images.' });
+			}
 			return new Promise((resolve) => {
 				const stdout = createBoundedCollector({ maxChars: Number(process.env.AI_MODEL_RELAY_CLI_OUTPUT_MAX_CHARS || 1024 * 1024) });
 				const stderr = createBoundedCollector({ maxChars: Number(process.env.AI_MODEL_RELAY_CLI_OUTPUT_MAX_CHARS || 1024 * 1024) });
@@ -2150,7 +2154,7 @@ function createBackendRegistry(options = {}) {
 	function capabilitiesFor(driver) {
 		if (!driver || !driver.capabilities) return null;
 		const capabilities = driver.capabilities();
-		return { ...capabilities, kind: 'driver', job_types: capabilities.job_types || driver.job_types || [] };
+		return { ...capabilities, kind: 'driver', provider_kind: capabilities.kind || driver.kind || '', job_types: capabilities.job_types || driver.job_types || [] };
 	}
 
 	function publishedModelJobTypes(model, capabilities) {

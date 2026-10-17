@@ -623,6 +623,52 @@ function relayPayloadFor(context, jobType, payload = {}) {
 	return { payload: resolved.payload || resolvedPayload, resolved };
 }
 
+const CHAT_TEST_MAX_PROMPT_CHARS = 8000;
+const CHAT_TEST_MAX_SYSTEM_CHARS = 4000;
+const CHAT_TEST_MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const CHAT_TEST_DEFAULT_MAX_TOKENS = 256;
+const CHAT_TEST_EFFORTS = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
+
+function chatTestValidationError(message) {
+	return { success: false, category: 'validation', message };
+}
+
+// Builds the single-turn chat payload for the local status-page chat test, or returns { error }.
+function chatTestPayloadFrom(body) {
+	const prompt = typeof body.prompt === 'string' ? body.prompt.trim() : '';
+	if (!prompt) return { error: chatTestValidationError('Enter a test prompt to run a chat test.') };
+	if (prompt.length > CHAT_TEST_MAX_PROMPT_CHARS) return { error: chatTestValidationError(`The chat test prompt is limited to ${CHAT_TEST_MAX_PROMPT_CHARS} characters.`) };
+	const system = body.system === undefined || body.system === null ? '' : body.system;
+	if (typeof system !== 'string') return { error: chatTestValidationError('The chat test system prompt must be text.') };
+	if (system.trim().length > CHAT_TEST_MAX_SYSTEM_CHARS) return { error: chatTestValidationError(`The chat test system prompt is limited to ${CHAT_TEST_MAX_SYSTEM_CHARS} characters.`) };
+	let maxTokens = CHAT_TEST_DEFAULT_MAX_TOKENS;
+	if (body.max_tokens !== undefined && body.max_tokens !== null && body.max_tokens !== '') {
+		const parsed = typeof body.max_tokens === 'number' ? body.max_tokens : (typeof body.max_tokens === 'string' && /^\d+$/.test(body.max_tokens.trim()) ? Number(body.max_tokens.trim()) : NaN);
+		if (!Number.isInteger(parsed) || parsed < 16 || parsed > 4096) return { error: chatTestValidationError('The chat test max_tokens value must be an integer from 16 to 4096.') };
+		maxTokens = parsed;
+	}
+	let effort = '';
+	if (body.effort !== undefined && body.effort !== null && body.effort !== '') {
+		effort = String(body.effort).trim().toLowerCase();
+		if (!CHAT_TEST_EFFORTS.has(effort)) return { error: chatTestValidationError('The chat test effort must be low, medium, high, xhigh, or max.') };
+	}
+	let userContent = prompt;
+	let imageType = '';
+	if (body.image_data_url !== undefined && body.image_data_url !== null && body.image_data_url !== '') {
+		const match = typeof body.image_data_url === 'string' ? /^data:image\/(png|jpeg|webp|gif);base64,([A-Za-z0-9+/]+={0,2})$/.exec(body.image_data_url.trim()) : null;
+		if (!match) return { error: chatTestValidationError('The chat test image must be a base64 PNG, JPEG, WebP, or GIF data URL.') };
+		imageType = match[1];
+		const encoded = match[2];
+		const decodedBytes = Math.floor(encoded.length * 3 / 4) - (encoded.endsWith('==') ? 2 : encoded.endsWith('=') ? 1 : 0);
+		if (decodedBytes > CHAT_TEST_MAX_IMAGE_BYTES) return { error: chatTestValidationError('The chat test image is limited to 5 MB.') };
+		userContent = [{ type: 'text', text: prompt }, { type: 'image_url', image_url: { url: body.image_data_url.trim() } }];
+	}
+	const messages = [];
+	if (system.trim()) messages.push({ role: 'system', content: system.trim() });
+	messages.push({ role: 'user', content: userContent });
+	return { messages, max_tokens: maxTokens, effort, image_type: imageType };
+}
+
 function validLocalTestRequestId(value) {
 	const requestId = String(value || '').trim();
 	if (!requestId) return '';
@@ -1258,12 +1304,21 @@ async function route(req, res, context) {
 	if (url.pathname === '/v1/relay/test') {
 		const jobType = String(body.job_type || '').trim();
 		const model = String(body.model || '').trim();
-		if (!['images', 'videos', 'transcribe', 'media.analyze', 'music.analyze'].includes(jobType)) {
-			sendErrorJson(req, res, 400, { success: false, category: 'validation', message: 'Provider tests support images, videos, media analysis, transcription, or music analysis.' }, origin);
+		if (!['chat', 'images', 'videos', 'transcribe', 'media.analyze', 'music.analyze'].includes(jobType)) {
+			sendErrorJson(req, res, 400, { success: false, category: 'validation', message: 'Provider tests support chat, images, videos, media analysis, transcription, or music analysis.' }, origin);
 			return;
 		}
 		if (!model) {
-			sendErrorJson(req, res, 400, { success: false, category: 'validation', message: 'Choose a specific provider model to run a media test.' }, origin);
+			sendErrorJson(req, res, 400, { success: false, category: 'validation', message: 'Choose a specific provider model to run a provider test.' }, origin);
+			return;
+		}
+		const chatTest = jobType === 'chat' ? chatTestPayloadFrom(body) : null;
+		if (chatTest && chatTest.error) {
+			sendErrorJson(req, res, 400, chatTest.error, origin);
+			return;
+		}
+		if (chatTest && !(context.backends.models() || []).some((entry) => entry && (entry.id === model || entry.legacy_id === model))) {
+			sendErrorJson(req, res, 400, { success: false, category: 'configuration', code: 'backend_model_unknown', message: `Selected chat model is not available: ${model}.` }, origin);
 			return;
 		}
 		const suppliedRequestId = validLocalTestRequestId(body.test_request_id);
@@ -1271,25 +1326,42 @@ async function route(req, res, context) {
 			sendErrorJson(req, res, 400, { success: false, category: 'validation', message: 'Provider test request IDs must start with status-test- and contain only letters, numbers, and hyphens.' }, origin);
 			return;
 		}
-		await context.statusCache.refresh();
-		const requestedPayload = {
+		const requestedPayload = chatTest ? { model } : {
 			...(body.payload && typeof body.payload === 'object' ? body.payload : {}),
 			model,
 			prompt: String(body.prompt || '').trim(),
 		};
-		if (body.input_reference_data_url) {
+		if (chatTest) {
+			requestedPayload.messages = chatTest.messages;
+			requestedPayload.max_tokens = chatTest.max_tokens;
+			if (chatTest.effort) requestedPayload.effort = chatTest.effort;
+		}
+		if (body.input_reference_data_url && !chatTest) {
 			requestedPayload.input_reference_data_url = String(body.input_reference_data_url);
 		}
-		for (const key of ['audio_base64', 'audio_format', 'language', 'locale', 'xai_options', 'media_data_url', 'media_url', 'frames', 'size', 'quality', 'background', 'image_size', 'seconds', 'aspect_ratio', 'resolution', 'n', 'candidate_count', 'provider_options', 'output_format', 'cloud_upload_confirmed', 'cloud_consent', 'generate_audio']) {
+		for (const key of chatTest ? [] : ['audio_base64', 'audio_format', 'language', 'locale', 'xai_options', 'media_data_url', 'media_url', 'frames', 'size', 'quality', 'background', 'image_size', 'seconds', 'aspect_ratio', 'resolution', 'n', 'candidate_count', 'provider_options', 'output_format', 'cloud_upload_confirmed', 'cloud_consent', 'generate_audio']) {
 			if (body[key] !== undefined) requestedPayload[key] = body[key];
 		}
-		if (jobType === 'images') {
-			const imageModel = (context.backends.models() || []).find((entry) => entry && (entry.id === model || entry.legacy_id === model));
-			if (imageModel && imageModel.image_capabilities && imageModel.image_capabilities.cloud_upload) requestedPayload.cloud_upload_confirmed = true;
+		const resolveTest = () => {
+			if (jobType === 'images') {
+				const imageModel = (context.backends.models() || []).find((entry) => entry && (entry.id === model || entry.legacy_id === model));
+				if (imageModel && imageModel.image_capabilities && imageModel.image_capabilities.cloud_upload) requestedPayload.cloud_upload_confirmed = true;
+			}
+			return relayPayloadFor(context, jobType, requestedPayload);
+		};
+		// A full provider refresh can take many seconds (CLI probes), so it must not delay job creation when the chosen
+		// backend is already ready. Refresh and retry once only if the backend looks unavailable from the cached status.
+		let resolved = resolveTest();
+		if (resolved.error && (resolved.error.code === 'backend_unavailable' || resolved.error.code === 'backend_unknown')) {
+			await context.statusCache.refresh();
+			resolved = resolveTest();
 		}
-		const resolved = relayPayloadFor(context, jobType, requestedPayload);
 		if (resolved.error) {
 			sendErrorJson(req, res, errorStatusForResult(resolved.error), resolved.error, origin, { route: url.pathname });
+			return;
+		}
+		if (chatTest && chatTest.image_type === 'gif' && !(resolved.resolved && resolved.resolved.driver && resolved.resolved.driver.kind === 'api')) {
+			sendErrorJson(req, res, 400, chatTestValidationError('This provider accepts PNG, JPEG, or WebP test images.'), origin);
 			return;
 		}
 		const display = jobDisplayMeta(context, jobType, resolved.payload, '', '', resolved.resolved);

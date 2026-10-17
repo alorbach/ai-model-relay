@@ -184,6 +184,8 @@ function captureCliSpawn(calls) {
 	assert.strictEqual(grokImageModel.image_capabilities.resolution_mode, 'guidance');
 	assert.strictEqual(grokImageModel.image_capabilities.aspect_ratio_delivery, 'native');
 	assert.ok(capabilities.every((backend) => backend.kind === 'driver'));
+	assert.ok(['xai-api', 'anthropic-api'].every((id) => capabilities.find((backend) => backend.id === id).provider_kind === 'api'), 'API drivers keep their provider kind for the status page');
+	assert.strictEqual(capabilities.find((backend) => backend.id === 'codex-cli').provider_kind, 'local-cli');
 	assert.ok(models.filter((model) => model.type === 'image').every((model) => Array.isArray(model.job_types) && model.job_types.includes('images') && !model.job_types.includes('chat')));
 	assert.ok(isCompleteImageCapabilityContract(grokImageModel));
 	assert.ok(!relayCatalogEntrySupportsImages({ backends: [grokImageModel] }, grokImageModel), 'Persona-style clients fail when /v1/relay/models omits the grok-cli driver record');
@@ -673,6 +675,13 @@ function captureCliSpawn(calls) {
 	assert.strictEqual(failedCliResult.success, false);
 	assert.strictEqual(failedCliResult.code, 'cli_process_failed');
 	assert.strictEqual(failedCliResult.details.stderr, 'boom');
+
+	const chatTestCliResult = await cliDriver.chat({ model: 'model-relay:cli:default', max_tokens: 64, messages: [{ role: 'system', content: 'be terse' }, { role: 'user', content: 'ping cli' }] });
+	assert.strictEqual(chatTestCliResult.success, true);
+	assert.strictEqual(chatTestCliResult.response.choices[0].message.content.includes('SYSTEM: BE TERSE'), true);
+	assert.strictEqual(chatTestCliResult.response.choices[0].message.content.includes('USER: PING CLI'), true);
+	const cliImageResult = await cliDriver.chat({ messages: [{ role: 'user', content: [{ type: 'text', text: 'what is this' }, { type: 'image_url', image_url: { url: 'data:image/png;base64,iVBORw0KGgo=' } }] }] });
+	assert.deepStrictEqual(cliImageResult, { success: false, category: 'validation', code: 'cli_process_images_unsupported', message: 'CLI Process chat does not accept images.' });
 
 	const longCliTranscript = 'x'.repeat(30000);
 	const grokCalls = [];

@@ -1081,6 +1081,78 @@ function statusPageHtml() {
 			from { transform: translateX(-120%); }
 			to { transform: translateX(260%); }
 		}
+		.provider-chat-toolbar {
+			display: flex;
+			flex-wrap: wrap;
+			align-items: center;
+			gap: 10px;
+			margin: 10px 0;
+		}
+		.provider-chat-toolbar button {
+			appearance: none;
+			border: 1px solid var(--line);
+			border-radius: 6px;
+			background: var(--panel);
+			color: var(--text);
+			cursor: pointer;
+			font: inherit;
+			font-size: 12px;
+			padding: 8px 11px;
+		}
+		.provider-chat-toolbar button:hover:not(:disabled),
+		.provider-chat-toolbar button:focus-visible {
+			border-color: var(--info);
+			outline: none;
+		}
+		.provider-chat-toolbar button:disabled {
+			cursor: not-allowed;
+			opacity: 0.6;
+		}
+		.provider-chat-toolbar button[hidden] { display: none; }
+		.provider-chat-system summary {
+			cursor: pointer;
+			color: var(--muted);
+			font-size: 12px;
+			font-weight: 600;
+		}
+		.provider-chat-system textarea {
+			width: 100%;
+			margin-top: 5px;
+			background: #0e1520;
+			border: 1px solid var(--line);
+			color: #d7e7ff;
+			border-radius: 6px;
+			font: inherit;
+			padding: 8px 9px;
+			resize: vertical;
+		}
+		.provider-chat-result {
+			display: grid;
+			gap: 6px;
+			width: 100%;
+			min-width: 0;
+		}
+		.provider-chat-reply {
+			margin: 0;
+			max-height: 220px;
+			overflow: auto;
+			padding: 9px 10px;
+			white-space: pre-wrap;
+			overflow-wrap: anywhere;
+			background: #070b10;
+			border: 1px solid var(--line);
+			border-radius: 8px;
+			font: inherit;
+			font-size: 12px;
+		}
+		.provider-chat-warning {
+			padding: 8px 10px;
+			border: 1px solid var(--warn, #d9a441);
+			border-radius: 8px;
+			color: var(--warn, #d9a441);
+			font-size: 12px;
+			overflow-wrap: anywhere;
+		}
 		.provider-test-result:empty { display: none; }
 		.provider-test-result {
 			display: flex;
@@ -1321,14 +1393,23 @@ function statusPageHtml() {
 					</div>
 					<div class="settings-section" id="settings-section-tests" data-settings-panel="tests" hidden>
 						<div class="label">Provider media and audio tests</div>
-						<p class="muted">Runs a real request against the selected ready provider. Provider usage or API charges may apply. Selecting xAI Speech-to-Text uploads the chosen audio to xAI; Local ASR and Local Music Analysis stay on this computer.</p>
+						<p class="muted">Runs a real request against the selected ready provider, including chat tests for every ready CLI and API chat provider. Provider usage or API charges may apply. Selecting xAI Speech-to-Text uploads the chosen audio to xAI; Local ASR and Local Music Analysis stay on this computer.</p>
 						<div class="tabs provider-test-tabs" role="tablist" aria-label="Provider test types">
-							<button class="tab-button" type="button" role="tab" id="provider-test-tab-images" data-provider-test-tab aria-controls="provider-test-panel-images" aria-selected="true">Image</button>
+							<button class="tab-button" type="button" role="tab" id="provider-test-tab-chat" data-provider-test-tab aria-controls="provider-test-panel-chat" aria-selected="true">Chat</button>
+							<button class="tab-button" type="button" role="tab" id="provider-test-tab-images" data-provider-test-tab aria-controls="provider-test-panel-images" aria-selected="false" tabindex="-1">Image</button>
 							<button class="tab-button" type="button" role="tab" id="provider-test-tab-videos" data-provider-test-tab aria-controls="provider-test-panel-videos" aria-selected="false" tabindex="-1">Video</button>
 							<button class="tab-button" type="button" role="tab" id="provider-test-tab-analysis" data-provider-test-tab aria-controls="provider-test-panel-analysis" aria-selected="false" tabindex="-1">Video analysis</button>
 							<button class="tab-button" type="button" role="tab" id="provider-test-tab-audio" data-provider-test-tab aria-controls="provider-test-panel-audio" aria-selected="false" tabindex="-1">Audio</button>
 						</div>
-						<div class="provider-test-panel" id="provider-test-panel-images" role="tabpanel" aria-labelledby="provider-test-tab-images">
+						<div class="provider-test-panel" id="provider-test-panel-chat" role="tabpanel" aria-labelledby="provider-test-tab-chat">
+							<div class="provider-chat-toolbar">
+								<button type="button" id="runAllChatTests" disabled>Run all chat tests</button>
+								<button type="button" id="cancelAllChatTests" hidden>Cancel</button>
+								<small class="muted" id="chatRunAllSummary" aria-live="polite">Runs the visible chat tests one after another using each card's prompt. Each test is a real request and may incur charges.</small>
+							</div>
+							<div class="provider-media-tests" id="providerChatTests">Load routing settings to see ready chat providers.</div>
+						</div>
+						<div class="provider-test-panel" id="provider-test-panel-images" role="tabpanel" aria-labelledby="provider-test-tab-images" hidden>
 							<div class="provider-media-tests" id="providerImageTests">Load routing settings to see ready image providers.</div>
 						</div>
 						<div class="provider-test-panel" id="provider-test-panel-videos" role="tabpanel" aria-labelledby="provider-test-tab-videos" hidden>
@@ -1550,6 +1631,10 @@ function statusPageHtml() {
 			relaySettingsMessage: document.getElementById('relaySettingsMessage'),
 			refreshRelayProviders: document.getElementById('refreshRelayProviders'),
 			saveRelaySettings: document.getElementById('saveRelaySettings'),
+                        providerChatTests: document.getElementById('providerChatTests'),
+                        runAllChatTests: document.getElementById('runAllChatTests'),
+                        cancelAllChatTests: document.getElementById('cancelAllChatTests'),
+                        chatRunAllSummary: document.getElementById('chatRunAllSummary'),
                         providerImageTests: document.getElementById('providerImageTests'),
                         providerVideoTests: document.getElementById('providerVideoTests'),
                         providerAnalysisTests: document.getElementById('providerAnalysisTests'),
@@ -1601,6 +1686,25 @@ function statusPageHtml() {
 			mediaLightboxVideo: document.getElementById('mediaLightboxVideo'),
 			closeImageLightbox: document.getElementById('closeImageLightbox'),
 		};
+
+		const chatRunAll = { running: false, cancelled: false };
+		const providerTestWaiters = new WeakMap();
+		const providerTestPanels = new WeakMap();
+		let pendingProviderTestRender = null;
+		let providerTestStatusSerial = 0;
+		// Provider-test tracker only: the job list from the last fresh status snapshot. The rest of the page never reads it,
+		// so a failed status refresh cannot make old jobs look live.
+		let providerTestLastKnownJobs = null;
+		let providerTestLastFreshAt = 0;
+		let providerTestFeedStale = false;
+		let providerTestStaleSince = 0;
+		const providerTestStatusTimeoutMs = 120000;
+		const providerTestMissingMinMs = 45000;
+		const providerTestMissingMinSnapshots = 3;
+		const providerTestNotFoundMs = 60000;
+		const providerTestPollMs = 5000;
+		let providerTestPollInFlight = false;
+		let providerTestLastPollAt = 0;
 
 		function parseHash() {
 			const raw = (location.hash || '#overview').replace(/^#/, '');
@@ -2090,7 +2194,7 @@ function statusPageHtml() {
 					selectProviderTestTab(fields.providerTestTabButtons[nextIndex].id, { focus: true });
 				});
 			});
-			selectProviderTestTab('provider-test-tab-images');
+			selectProviderTestTab('provider-test-tab-chat');
 		}
 
 		function formatArtifactBytes(sizeBytes) {
@@ -2666,7 +2770,7 @@ function statusPageHtml() {
 		}
 
 		function escapeRegExp(value) {
-			return String(value).replace(/[.*+?^\${}()|[\]\\]/g, '\\$&');
+			return String(value).replace(/[.*+?^\${}()|[\\]\\\\]/g, '\\\\$&');
 		}
 
 		function applyRawStatusFilter() {
@@ -2676,7 +2780,26 @@ function statusPageHtml() {
 				fields.rawStatus.textContent = json;
 				return;
 			}
-			const pattern = new RegExp('(' + escapeRegExp(query) + ')', 'ig');
+			let pattern = null;
+			try {
+				pattern = new RegExp('(' + escapeRegExp(query) + ')', 'ig');
+			} catch (error) {
+				pattern = null;
+			}
+			if (!pattern) {
+				const lowerJson = json.toLowerCase();
+				const lowerQuery = query.toLowerCase();
+				let html = '';
+				let cursor = 0;
+				let index = lowerJson.indexOf(lowerQuery);
+				while (index !== -1) {
+					html += escapeHtml(json.slice(cursor, index)) + '<mark>' + escapeHtml(json.slice(index, index + lowerQuery.length)) + '</mark>';
+					cursor = index + lowerQuery.length;
+					index = lowerJson.indexOf(lowerQuery, cursor);
+				}
+				fields.rawStatus.innerHTML = html + escapeHtml(json.slice(cursor));
+				return;
+			}
 			fields.rawStatus.innerHTML = escapeHtml(json).replace(pattern, '<mark>$1</mark>');
 		}
 
@@ -2919,9 +3042,119 @@ function statusPageHtml() {
 			if (fields.relayRuntimeMessage && fields.refreshRelayProviders && !fields.refreshRelayProviders.disabled) {
 				fields.relayRuntimeMessage.textContent = 'Runtime settings loaded';
 			}
-			if (!document.querySelector('[data-provider-media-test][data-test-request-id]')) {
-				renderProviderMediaTests(models, backends);
+			renderProviderTestPanels(models, backends);
+		}
+
+		// Provider test cards are never rebuilt while a test is in flight or Run all is active; the latest
+		// models/backends are kept and rendered once the last card settles.
+		function providerTestsBusy() {
+			return chatRunAll.running || !!document.querySelector('[data-provider-media-test][data-test-request-id]');
+		}
+
+		function renderProviderTestPanels(models, backends) {
+			if (providerTestsBusy()) {
+				pendingProviderTestRender = { models, backends };
+				return;
 			}
+			pendingProviderTestRender = null;
+			renderProviderMediaTests(models, backends);
+			renderProviderChatTests(models, backends);
+		}
+
+		function flushPendingProviderTestRender() {
+			if (!pendingProviderTestRender || providerTestsBusy()) return;
+			const pending = pendingProviderTestRender;
+			pendingProviderTestRender = null;
+			renderProviderMediaTests(pending.models, pending.backends);
+			renderProviderChatTests(pending.models, pending.backends);
+		}
+
+		function waitForProviderTestSettled(card) {
+			return new Promise((resolve) => {
+				const waiting = providerTestWaiters.get(card) || [];
+				waiting.push(resolve);
+				providerTestWaiters.set(card, waiting);
+			});
+		}
+
+		// Called once a card's test has fully settled (request ids cleared): resolves Run all and runs any deferred render.
+		function providerTestSettled(card) {
+			const waiting = providerTestWaiters.get(card);
+			if (waiting) {
+				providerTestWaiters.delete(card);
+				const outcome = card.dataset.testOutcome === 'passed' || card.dataset.testOutcome === 'noreply' ? card.dataset.testOutcome : 'failed';
+				waiting.forEach((resolve) => resolve(outcome));
+			}
+			flushPendingProviderTestRender();
+		}
+
+		// Every job state after which the Relay will not change the job again.
+		function providerTestTerminal(state) {
+			return ['completed', 'failed', 'cancelled', 'canceled', 'timeout', 'timed_out', 'error', 'aborted', 'interrupted'].includes(String(state || '').toLowerCase());
+		}
+
+		// Carries what the user typed and the last result over from a card that is being replaced by changed markup.
+		function copyProviderTestCardState(from, to) {
+			['[data-test-prompt]', '[data-chat-system]', '[data-chat-max-tokens]'].forEach((selector) => {
+				const source = from.querySelector(selector);
+				const target = to.querySelector(selector);
+				if (source && target) target.value = source.value;
+			});
+			const targets = Array.from(to.querySelectorAll('[data-test-option]'));
+			Array.from(from.querySelectorAll('[data-test-option]')).forEach((source) => {
+				const target = targets.find((entry) => entry.dataset.testOption === source.dataset.testOption);
+				if (!target) return;
+				const fallback = target.value;
+				target.value = source.value;
+				if (target.value !== source.value) target.value = fallback;
+			});
+			[['[data-test-result]', 'innerHTML'], ['[data-test-message]', 'textContent'], ['[data-test-progress]', 'textContent']].forEach(([selector, property]) => {
+				const source = from.querySelector(selector);
+				const target = to.querySelector(selector);
+				if (source && target) target[property] = source[property];
+			});
+			if (from.dataset.testOutcome) to.dataset.testOutcome = from.dataset.testOutcome;
+			if (from.chatTestPayload) to.chatTestPayload = from.chatTestPayload;
+		}
+
+		// Renders one test panel from [{ key, html }] cards. Nothing happens when the card set is identical to the last
+		// render; otherwise cards whose markup is unchanged (or that are mid-test) are moved over as they are, and changed
+		// cards inherit the entered values and last result, so a finished test never loses its reply to a re-render.
+		function setProviderTestPanel(container, entries, emptyHtml) {
+			if (!container) return false;
+			// Card keys must be unique or two entries would collapse into one card; a duplicate gets '#index' appended.
+			const usedKeys = new Set();
+			entries = entries.map((entry, index) => {
+				if (!usedKeys.has(entry.key)) {
+					usedKeys.add(entry.key);
+					return entry;
+				}
+				const key = entry.key + '#' + index;
+				usedKeys.add(key);
+				return { key, html: entry.html.replace('data-card-key="' + escapeHtml(entry.key) + '"', 'data-card-key="' + escapeHtml(key) + '"') };
+			});
+			const fingerprint = entries.length ? entries.map((entry) => entry.key + '\\u0001' + entry.html).join('\\u0002') : 'empty:' + emptyHtml;
+			const previous = providerTestPanels.get(container);
+			if (previous && previous.fingerprint === fingerprint) return false;
+			const oldCards = new Map();
+			Array.from(container.querySelectorAll('[data-provider-media-test]')).forEach((card) => {
+				if (card.dataset.cardKey) oldCards.set(card.dataset.cardKey, card);
+			});
+			const markup = new Map(entries.map((entry) => [entry.key, entry.html]));
+			container.innerHTML = entries.length ? entries.map((entry) => entry.html).join('') : emptyHtml;
+			Array.from(container.querySelectorAll('[data-provider-media-test]')).forEach((card) => {
+				const old = oldCards.get(card.dataset.cardKey);
+				if (!old) return;
+				const unchanged = !!previous && previous.markup.get(card.dataset.cardKey) === markup.get(card.dataset.cardKey);
+				if (unchanged || old.dataset.testRequestId) {
+					if (!unchanged && previous) markup.set(card.dataset.cardKey, previous.markup.get(card.dataset.cardKey));
+					card.replaceWith(old);
+				} else {
+					copyProviderTestCardState(old, card);
+				}
+			});
+			providerTestPanels.set(container, { fingerprint, markup });
+			return true;
 		}
 
 		function readyMediaModels(models, backends, jobType, type) {
@@ -2976,7 +3209,7 @@ function statusPageHtml() {
                                 ...readyMediaModels(models, backends, 'transcribe', 'audio').map((model) => ({ model, jobType: 'transcribe', title: model.backend === 'xai-api' ? 'xAI Speech-to-Text (cloud)' : 'Audio transcription', prompt: '' })),
                                 ...readyMediaModels(models, backends, 'music.analyze', 'audio').map((model) => ({ model, jobType: 'music.analyze', title: 'Local music analysis', prompt: '' })),
                         ];
-                        const renderCards = (items, emptyMessage) => items.length ? items.map(({ model, jobType, title, prompt }) => {
+                        const renderCards = (container, items, emptyMessage) => setProviderTestPanel(container, items.map(({ model, jobType, title, prompt }) => {
                                 const isVideo = jobType === 'videos';
                                 const isMediaAnalysis = jobType === 'media.analyze';
                                 const isAudio = jobType === 'transcribe' || jobType === 'music.analyze';
@@ -2986,7 +3219,8 @@ function statusPageHtml() {
 				const audio = '<label class="field"><span>Audio file</span><input type="file" accept="audio/*,.mp3,.wav,.m4a,.flac,.ogg,.webm" data-test-audio></label>';
 				const promptField = isAudio ? '' : '<label class="field"><span>Test prompt</span><input type="text" data-test-prompt value="' + escapeHtml(prompt) + '"></label>';
 				const testLabel = isAudio ? (jobType === 'transcribe' ? 'transcription' : 'music analysis') : (isMediaAnalysis ? 'video analysis' : (isVideo ? 'video' : 'image'));
-				return '<article class="provider-media-test" data-provider-media-test>' +
+				const key = jobType + '|' + model.backend + '|' + model.id;
+				return { key, html: '<article class="provider-media-test" data-provider-media-test data-card-key="' + escapeHtml(key) + '">' +
                                         '<div class="provider-media-test-heading"><span>' + escapeHtml(title) + '</span><code>' + escapeHtml(model.id) + '</code></div>' +
                                         promptField +
                                         (isAudio ? audio : (isMediaAnalysis ? media : reference)) +
@@ -2997,13 +3231,197 @@ function statusPageHtml() {
                                         '<div class="provider-test-status"><small class="muted" data-test-message>Ready to test ' + escapeHtml(model.id) + '.</small><small class="provider-test-progress" data-test-progress aria-live="polite">Idle</small></div>' +
                                         '<div class="provider-test-activity" data-test-progress-bar role="progressbar" aria-label="Provider test activity" aria-valuetext="Idle" hidden><span></span></div>' +
                                         '<div class="provider-test-result" data-test-result></div>' +
-				'</article>';
-			}).join('') : '<div class="muted">' + escapeHtml(emptyMessage) + '</div>';
-                        fields.providerImageTests.innerHTML = renderCards(imageTests, 'No ready image providers are available for testing.');
-                        fields.providerVideoTests.innerHTML = renderCards(videoTests, 'No ready video providers are available for testing.');
-                        fields.providerAnalysisTests.innerHTML = renderCards(analysisTests, 'No ready video-analysis providers are available for testing.');
-                        fields.providerAudioTests.innerHTML = renderCards(audioTests, 'No ready transcription or music-analysis providers are available for testing.');
+				'</article>' };
+			}), '<div class="muted">' + escapeHtml(emptyMessage) + '</div>');
+                        renderCards(fields.providerImageTests, imageTests, 'No ready image providers are available for testing.');
+                        renderCards(fields.providerVideoTests, videoTests, 'No ready video providers are available for testing.');
+                        renderCards(fields.providerAnalysisTests, analysisTests, 'No ready video-analysis providers are available for testing.');
+                        renderCards(fields.providerAudioTests, audioTests, 'No ready transcription or music-analysis providers are available for testing.');
                 }
+
+		function renderProviderChatTests(models, backends) {
+			if (!fields.providerChatTests) return;
+			const backendById = new Map(backends.map((backend) => [backend.id, backend]));
+			const labelFor = (model) => { const backend = backendById.get(model.backend); return String(backend && backend.label || model.backend || 'Provider'); };
+			const chatModels = readyMediaModels(models, backends, 'chat', 'text').slice().sort((left, right) => labelFor(left).localeCompare(labelFor(right)) || String(left.id).localeCompare(String(right.id)));
+			const entries = chatModels.map((model) => {
+				const label = labelFor(model);
+				const backend = backendById.get(model.backend);
+				const isApi = !!backend && (backend.provider_kind === 'api' || backend.kind === 'api');
+				const cost = isApi ? '<small class="muted">This request is sent to ' + escapeHtml(label) + '; usage charges may apply.</small>' : '';
+				const imageAccept = isApi ? 'image/png,image/jpeg,image/webp,image/gif' : 'image/png,image/jpeg,image/webp';
+				const cliImageHint = ['grok-cli', 'cursor-cli', 'antigravity-cli', 'codex-cli'].includes(model.backend) ? '<small class="muted">CLI providers receive the image as a local file reference; check that the reply actually describes the image.</small>' : '';
+				// The generic CLI Process driver always rejects images, so it gets no image input.
+				const imageField = model.backend === 'cli-process' ? '' : '<label class="field"><span>Image (optional, vision check)</span><input type="file" accept="' + imageAccept + '" data-chat-image></label>' + cliImageHint;
+				const key = 'chat|' + model.backend + '|' + model.id;
+				return { key, html: '<article class="provider-media-test" data-provider-media-test data-test-job-type="chat" data-card-key="' + escapeHtml(key) + '">' +
+					'<div class="provider-media-test-heading"><span>' + escapeHtml(label) + '</span><code>' + escapeHtml(model.id) + '</code></div>' +
+					'<label class="field"><span>Test prompt</span><input type="text" data-test-prompt maxlength="8000" value="Reply with exactly: OK"></label>' +
+					'<details class="provider-chat-system"><summary>System prompt (optional)</summary><textarea data-chat-system maxlength="4000" rows="3" spellcheck="false"></textarea></details>' +
+					imageField +
+					'<label class="field"><span>Max tokens</span><input type="number" min="16" max="4096" step="1" inputmode="numeric" data-chat-max-tokens value="256"></label>' +
+					cost +
+					'<button type="button" data-provider-test="chat" data-model="' + escapeHtml(model.id) + '">Run chat test</button>' +
+					'<div class="provider-test-status"><small class="muted" data-test-message>Ready to test ' + escapeHtml(model.id) + '.</small><small class="provider-test-progress" data-test-progress aria-live="polite">Idle</small></div>' +
+					'<div class="provider-test-activity" data-test-progress-bar role="progressbar" aria-label="Provider test activity" aria-valuetext="Idle" hidden><span></span></div>' +
+					'<div class="provider-test-result" data-test-result></div>' +
+				'</article>' };
+			});
+			setProviderTestPanel(fields.providerChatTests, entries, '<div class="muted">No ready chat providers are available for testing.</div>');
+			updateChatRunAllState();
+		}
+
+		function updateChatRunAllState() {
+			if (!fields.runAllChatTests || !fields.providerChatTests) return;
+			// Disabled while a chat test is in flight (also one started on its own card), so Run all never has to skip it.
+			const busy = Array.from(fields.providerChatTests.querySelectorAll('[data-provider-media-test]')).some((card) => !!card.dataset.testRequestId);
+			fields.runAllChatTests.disabled = chatRunAll.running || busy || !fields.providerChatTests.querySelector('[data-provider-media-test]');
+			fields.cancelAllChatTests.hidden = !chatRunAll.running;
+			fields.cancelAllChatTests.disabled = chatRunAll.cancelled;
+			fields.providerChatTests.querySelectorAll('[data-provider-media-test]').forEach((card) => {
+				const button = card.querySelector('[data-provider-test]');
+				if (button && !card.dataset.testRequestId) button.disabled = chatRunAll.running;
+			});
+		}
+
+		function chatRunAllSummaryText(counts, cancelled) {
+			let summary = counts.passed + ' passed / ' + counts.failed + ' failed';
+			if (counts.noReply) summary += ' · ' + counts.noReply + ' without reply';
+			if (counts.cancelled) summary += ' · ' + counts.cancelled + ' cancelled (still running in Live)';
+			if (counts.busy) summary += ' · ' + counts.busy + ' skipped (already running)';
+			if (counts.notRun) summary += ' · ' + counts.notRun + ' not run' + (cancelled ? ' (cancelled)' : '');
+			return summary;
+		}
+
+		async function runAllChatTests() {
+			if (chatRunAll.running) return;
+			const cards = Array.from(fields.providerChatTests.querySelectorAll('[data-provider-media-test]'));
+			if (!cards.length) return;
+			chatRunAll.running = true;
+			chatRunAll.cancelled = false;
+			updateChatRunAllState();
+			const counts = { passed: 0, failed: 0, noReply: 0, cancelled: 0, notRun: 0, busy: 0 };
+			try {
+				for (let index = 0; index < cards.length; index += 1) {
+					if (chatRunAll.cancelled) { counts.notRun += cards.length - index; break; }
+					const card = cards[index];
+					const button = card.querySelector('[data-provider-test]');
+					if (card.dataset.testRequestId) { counts.busy += 1; continue; }
+					if (!button || !document.body.contains(card)) { counts.notRun += 1; continue; }
+					fields.chatRunAllSummary.textContent = 'Running ' + (index + 1) + ' of ' + cards.length + ' · ' + counts.passed + ' passed / ' + counts.failed + ' failed';
+					delete card.dataset.testOutcome;
+					const settled = waitForProviderTestSettled(card);
+					const cancelWait = new Promise((resolve) => { chatRunAll.abortWait = () => resolve('cancelled'); });
+					const work = (async () => {
+						try {
+							await runProviderMediaTest(button);
+							return await settled;
+						} catch (error) {
+							return 'failed';
+						}
+					})();
+					const outcome = await Promise.race([work, cancelWait]);
+					chatRunAll.abortWait = null;
+					if (outcome === 'cancelled') {
+						// Stop waiting, but leave the job running; the card keeps following it and says so.
+						providerTestWaiters.delete(card);
+						if (card.dataset.testRequestId) {
+							card.dataset.testDetached = '1';
+							updateProviderTestProgress();
+							counts.cancelled += 1;
+						} else if (card.dataset.testOutcome === 'passed' || card.dataset.testOutcome === 'noreply') {
+							counts.passed += 1;
+							if (card.dataset.testOutcome === 'noreply') counts.noReply += 1;
+						} else {
+							counts.failed += 1;
+						}
+					} else if (outcome === 'passed' || outcome === 'noreply') {
+						counts.passed += 1;
+						if (outcome === 'noreply') counts.noReply += 1;
+					} else {
+						counts.failed += 1;
+					}
+				}
+			} finally {
+				chatRunAll.running = false;
+				chatRunAll.abortWait = null;
+				updateChatRunAllState();
+				fields.chatRunAllSummary.textContent = chatRunAllSummaryText(counts, chatRunAll.cancelled);
+				chatRunAll.cancelled = false;
+				flushPendingProviderTestRender();
+			}
+		}
+
+		// Stops Run all promptly: no further tests start and the test being awaited is no longer waited for.
+		function cancelChatRunAll() {
+			if (!chatRunAll.running) return;
+			chatRunAll.cancelled = true;
+			updateChatRunAllState();
+			fields.chatRunAllSummary.textContent = 'Cancelling Run all. A test that is already running keeps going in Live.';
+			if (typeof chatRunAll.abortWait === 'function') chatRunAll.abortWait();
+		}
+
+		function initProviderChatTests() {
+			if (fields.runAllChatTests) fields.runAllChatTests.addEventListener('click', () => { runAllChatTests(); });
+			if (fields.cancelAllChatTests) fields.cancelAllChatTests.addEventListener('click', cancelChatRunAll);
+		}
+
+		function chatReplyText(response) {
+			const choice = response && Array.isArray(response.choices) && response.choices[0] || {};
+			const content = choice.message && choice.message.content;
+			if (Array.isArray(content)) return content.map((part) => part && typeof part === 'object' ? String(part.text || '') : String(part || '')).join('');
+			return typeof content === 'string' ? content : '';
+		}
+
+		function chatElapsed(ms) {
+			const value = Math.max(0, Number(ms || 0));
+			return value < 10000 ? (value / 1000).toFixed(1) + 's' : elapsed(value);
+		}
+
+		function renderChatTestResult(card, job) {
+			const result = card && card.querySelector('[data-test-result]');
+			if (!result) return;
+			const payload = card.chatTestPayload || null;
+			const requestId = job ? jobRequestId(job) : '';
+			if (!payload) {
+				card.dataset.testOutcome = 'noreply';
+				result.innerHTML = '<div class="provider-chat-result"><div class="provider-chat-warning" role="alert">Completed — reply not returned to this page; open in Live.</div>' +
+					(requestId ? '<button type="button" data-open-live-job="' + escapeHtml(requestId) + '">Open job in Live</button>' : '') + '</div>';
+				return;
+			}
+			const response = payload.response && typeof payload.response === 'object' ? payload.response : {};
+			const choice = Array.isArray(response.choices) && response.choices[0] || {};
+			const reply = chatReplyText(response);
+			const limit = 4000;
+			const elapsedMs = job && Number(job.elapsed_ms) ? Number(job.elapsed_ms) : Math.max(0, Date.now() - Number(card.dataset.testStartedAt || Date.now()));
+			const meta = ['Model: ' + text(response.model, '-'), 'Elapsed: ' + chatElapsed(elapsedMs)];
+			const usage = response.usage && typeof response.usage === 'object' ? response.usage : null;
+			if (usage) {
+				const count = (value) => value === undefined || value === null ? '-' : String(value);
+				meta.push('Tokens (prompt / completion / total): ' + count(usage.prompt_tokens) + ' / ' + count(usage.completion_tokens) + ' / ' + count(usage.total_tokens));
+			}
+			if (choice.finish_reason) meta.push('Finish reason: ' + text(choice.finish_reason, ''));
+			const details = response.provider_details && typeof response.provider_details === 'object' ? response.provider_details : {};
+			Object.keys(details).filter((key) => key !== 'provider' && !/api_?key|secret|authorization|password/i.test(key) && ['string', 'number', 'boolean'].includes(typeof details[key]) && String(details[key]) !== '').slice(0, 8).forEach((key) => {
+				meta.push(key + ': ' + String(details[key]).slice(0, 80));
+			});
+			const body = reply.trim()
+				? '<pre class="provider-chat-reply" tabindex="0">' + escapeHtml(reply.slice(0, limit)) + '</pre>' + (reply.length > limit ? '<small class="muted">Reply truncated: showing ' + limit + ' of ' + reply.length + ' characters.</small>' : '')
+				: '<div class="provider-chat-warning" role="alert">The provider returned an empty reply.</div>';
+			card.dataset.testOutcome = reply.trim() ? 'passed' : 'failed';
+			result.innerHTML = '<div class="provider-chat-result">' + body + '<small class="muted">' + meta.map(escapeHtml).join(' · ') + '</small></div>';
+		}
+
+		function renderChatTestFailure(card, error) {
+			const result = card && card.querySelector('[data-test-result]');
+			card.dataset.testOutcome = 'failed';
+			if (!result) return;
+			const parts = [];
+			if (error && error.code) parts.push('Code: ' + error.code);
+			if (error && error.httpStatus) parts.push('HTTP status: ' + error.httpStatus);
+			result.innerHTML = '<div class="provider-chat-result"><div class="provider-chat-warning" role="alert">' + escapeHtml(error && error.message || 'Chat test failed.') + '</div>' +
+				(parts.length ? '<small class="muted">' + escapeHtml(parts.join(' · ')) + '</small>' : '') + '</div>';
+		}
 
 		function fileAsDataUrl(file) {
 			return new Promise((resolve, reject) => {
@@ -3019,7 +3437,7 @@ function statusPageHtml() {
 		}
 
 		function providerTestJob(requestId) {
-			const jobs = currentStatus && currentStatus.jobs || {};
+			const jobs = providerTestLastKnownJobs || {};
 			return [...(Array.isArray(jobs.active) ? jobs.active : []), ...(Array.isArray(jobs.queued) ? jobs.queued : []), ...(Array.isArray(jobs.recent) ? jobs.recent : [])]
 				.find((job) => String(job && job.request_id || '') === String(requestId || '')) || null;
 		}
@@ -3034,59 +3452,151 @@ function statusPageHtml() {
 		function restoreProviderTestButton(card) {
 			const button = card && card.querySelector('[data-provider-test]');
 			if (!button) return;
-			button.disabled = false;
+			button.disabled = chatRunAll.running && card.dataset.testJobType === 'chat';
 			button.textContent = card.dataset.testButtonLabel || button.textContent;
 			delete card.dataset.testButtonLabel;
+			updateChatRunAllState();
+		}
+
+		function chatTestOutcomeMessage(outcome) {
+			if (outcome === 'passed') return 'Completed. The reply is shown below.';
+			if (outcome === 'noreply') return 'Completed — reply not returned to this page; open in Live';
+			return 'Completed, but the reply needs attention.';
 		}
 
 		function settleProviderTestCard(card, job) {
 			const message = card && card.querySelector('[data-test-message]');
 			const progress = card && card.querySelector('[data-test-progress]');
 			const state = String(job && job.status || '').toLowerCase();
+			if (!providerTestTerminal(state)) return false;
+			const isChat = card.dataset.testJobType === 'chat';
 			if (state === 'completed') {
+				if (isChat && card.dataset.testAwaitingReply === '1') return false;
+				card.dataset.testOutcome = 'passed';
 				renderProviderTestResult(card, job);
-				if (message) message.textContent = 'Completed. Click the result to preview it.';
+				if (message) message.textContent = isChat ? chatTestOutcomeMessage(card.dataset.testOutcome) : 'Completed. Click the result to preview it.';
 				if (progress) progress.textContent = 'Completed · ' + elapsed(Number(job.elapsed_ms || 0));
-			} else if (state === 'failed') {
-				if (message) message.textContent = String(job.error_message || 'Provider test failed.');
-				if (progress) progress.textContent = 'Failed · ' + elapsed(Number(job.elapsed_ms || 0));
 			} else {
-				return false;
+				const label = state === 'cancelled' || state === 'canceled' ? 'Cancelled' : 'Failed';
+				card.dataset.testOutcome = 'failed';
+				if (message) message.textContent = String(job.error_message || (label === 'Cancelled' ? 'The provider test was cancelled.' : 'Provider test failed.'));
+				if (progress) progress.textContent = label + ' · ' + elapsed(Number(job.elapsed_ms || 0));
 			}
 			setProviderTestActivity(card, false, state);
 			delete card.dataset.testRequestId;
 			delete card.dataset.testStartedAt;
+			delete card.dataset.testContinuing;
+			delete card.dataset.testDetached;
+			card.providerTestMissing = null;
+			card.providerTestFollowingSince = null;
+			card.providerTestRefreshSeenAt = null;
+			card.providerTestJobSeen = false;
 			restoreProviderTestButton(card);
+			providerTestSettled(card);
 			return true;
 		}
 
-		function updateProviderTestProgress() {
+		// fresh: true marks a newly received status snapshot (the tracker keeps its jobs); fresh: false marks a failed
+		// status refresh; no option is just the one-second ticker.
+		function updateProviderTestProgress(options) {
+			if (options && options.fresh === true) {
+				providerTestStatusSerial += 1;
+				providerTestLastKnownJobs = currentStatus && currentStatus.jobs || providerTestLastKnownJobs;
+				providerTestLastFreshAt = Date.now();
+				providerTestFeedStale = false;
+				providerTestStaleSince = 0;
+			} else if (options && options.fresh === false) {
+				if (!providerTestFeedStale) providerTestStaleSince = Date.now();
+				providerTestFeedStale = true;
+			}
+			let needsPoll = false;
 			document.querySelectorAll('[data-provider-media-test][data-test-request-id]').forEach((card) => {
 				const progress = card.querySelector('[data-test-progress]');
 				const message = card.querySelector('[data-test-message]');
 				if (!progress) return;
 				const job = providerTestJob(card.dataset.testRequestId);
 				const startedAt = Number(card.dataset.testStartedAt || Date.now());
+				if (card.dataset.testContinuing === '1' && !(job && providerTestTerminal(String(job.status || '').toLowerCase()))) {
+					// Following a job while the status feed is stale (refreshes keep failing) for two minutes: stop waiting. A healthy
+					// feed with a silent running job (an API chat produces no session output) never times out.
+					if (!card.providerTestFollowingSince) {
+						card.providerTestFollowingSince = Date.now();
+						providerTestLastPollAt = Math.max(providerTestLastPollAt, card.providerTestFollowingSince);
+					}
+					if (providerTestFeedStale && Date.now() - Math.max(providerTestStaleSince, card.providerTestFollowingSince) >= providerTestStatusTimeoutMs) {
+						settleProviderTestCard(card, { status: 'failed', error_message: 'Status unknown — the Relay did not report status for 2 minutes; check Live.', elapsed_ms: Math.max(0, Date.now() - startedAt) });
+						return;
+					}
+				}
+				if (!job && card.dataset.testContinuing === '1') {
+					// The job was tracked after the request connection dropped. If the Relay stops reporting it
+					// (restart, eviction), stop waiting instead of leaving the card and Run all hanging. Only fresh,
+					// successfully received snapshots with a jobs list count (an SSE jobs event is one too, not just a status
+					// poll); the job must be absent from at least three of them. The 45 s floor since the first miss keeps a
+					// burst of snapshots from evicting it early, because the Relay can create the job well after the request was
+					// sent (provider probes run before the job is created). A job that was never seen at all is given up on
+					// after 60 s of following instead (it may never have started).
+					if (options && options.fresh === true && currentStatus && currentStatus.jobs) {
+						card.providerTestMissing = card.providerTestMissing || { at: Date.now(), count: 0 };
+						card.providerTestMissing.count += 1;
+					}
+					const missing = card.providerTestMissing;
+					if (card.providerTestJobSeen && missing && missing.count >= providerTestMissingMinSnapshots && Date.now() - missing.at >= providerTestMissingMinMs) {
+						settleProviderTestCard(card, { status: 'failed', error_message: 'Test job is no longer tracked by the Relay.', elapsed_ms: Math.max(0, Date.now() - startedAt) });
+						return;
+					}
+					// While a provider detection refresh is active the Relay may still be probing before it creates the job, so the
+					// 60 s clock does not run: it restarts from the moment the refresh is no longer active.
+					if (currentStatus && currentStatus.refresh && currentStatus.refresh.active) card.providerTestRefreshSeenAt = Date.now();
+					if (!card.providerTestJobSeen && !providerTestFeedStale && Date.now() - Math.max(card.providerTestFollowingSince || 0, card.providerTestRefreshSeenAt || 0) >= providerTestNotFoundMs) {
+						settleProviderTestCard(card, { status: 'failed', error_message: 'Test job was not found on the Relay; it may not have started. Check Live.', elapsed_ms: Math.max(0, Date.now() - startedAt) });
+						return;
+					}
+					// An idle Relay sends no snapshots; the one-second ticker asks for one (see below).
+					needsPoll = true;
+				}
+				if (job) {
+					card.providerTestMissing = null;
+					card.providerTestJobSeen = true;
+				}
 				if (!job) {
 					progress.textContent = 'Submitting · ' + elapsed(Math.max(0, Date.now() - startedAt));
-					if (message) message.textContent = 'Submitting provider test. This card will follow the matching Live job.';
+					if (message) message.textContent = providerTestFeedStale ? 'Relay unreachable — waiting for status…' : (card.dataset.testContinuing === '1' ? 'Connection lost — following the job in Live…' : 'Submitting provider test. This card will follow the matching Live job.');
 					setProviderTestActivity(card, true, 'Submitting');
 					return;
 				}
 				const duration = Number(job.elapsed_ms || Math.max(0, Date.now() - startedAt));
 				const state = String(job.status || 'running').toLowerCase();
 				if (settleProviderTestCard(card, job)) return;
-				const detail = String(job.session_output || '').trim().replace(/\s+/g, ' ').slice(-180);
+				if (providerTestFeedStale) {
+					// The job state comes from an older snapshot: do not present it as running.
+					progress.textContent = 'Waiting for status · ' + elapsed(Math.max(0, Date.now() - startedAt));
+					if (message) message.textContent = card.dataset.testDetached === '1' ? 'Run all was cancelled. Relay unreachable — waiting for status…' : 'Relay unreachable — waiting for status…';
+					setProviderTestActivity(card, true, 'Waiting for status');
+					return;
+				}
+				const detail = String(job.session_output || '').trim().replace(/\\s+/g, ' ').slice(-180);
 				progress.textContent = (state === 'queued' ? 'Queued' : (state === 'running' ? 'Running' : state)) + ' · ' + elapsed(duration) + (detail ? ' · ' + detail : '');
-				if (message) message.textContent = (state === 'queued' ? 'Queued' : 'Running') + '. This card is following the matching Live job.';
+				if (message) message.textContent = card.dataset.testDetached === '1' ? 'Run all was cancelled. Still running in Live.' : (state === 'queued' ? 'Queued' : 'Running') + '. This card is following the matching Live job.';
 				if (detail) progress.title = String(job.session_output).slice(-500);
-				setProviderTestActivity(card, state === 'queued' || state === 'running', state);
+				setProviderTestActivity(card, state === 'queued' || state === 'running' || state === 'cancelling', state);
 			});
+			// While a followed job is absent from the snapshots, ask for a status at most every 5 s (one request in flight);
+			// SSE only emits on changes, so an idle Relay would otherwise never tell the card anything. Only the ticker polls.
+			if (needsPoll && !options && !providerTestPollInFlight && Date.now() - providerTestLastPollAt >= providerTestPollMs) {
+				providerTestPollInFlight = true;
+				providerTestLastPollAt = Date.now();
+				Promise.resolve().then(() => refresh({ silent: true })).catch(() => {}).then(() => { providerTestPollInFlight = false; });
+			}
 		}
 
 		function renderProviderTestResult(card, job) {
 			const result = card && card.querySelector('[data-test-result]');
 			if (!result) return;
+			if (card.dataset.testJobType === 'chat') {
+				renderChatTestResult(card, job);
+				return;
+			}
 			const artifacts = Array.isArray(job && job.artifacts) ? job.artifacts : [];
 			const artifact = artifacts.find((entry) => entry && /^\\/(?:v1)\\/status\\/jobs\\/\\d+\\/artifacts\\/\\d+$/.test(String(entry.url || '')) && /^(image|video)\\//.test(String(entry.mime_type || '')));
 			if (!artifact) {
@@ -3120,16 +3630,28 @@ function statusPageHtml() {
 			const requestId = createProviderTestRequestId();
 			let completed = false;
 			let continuingTrackedJob = false;
+			let droppedConnection = false;
+			let requestSent = false;
 			try {
 				button.disabled = true;
 				button.textContent = 'Running...';
 				card.dataset.testButtonLabel = original;
 				card.dataset.testRequestId = requestId;
 				card.dataset.testStartedAt = String(Date.now());
+				updateChatRunAllState();
+				delete card.dataset.testOutcome;
+				delete card.dataset.testDetached;
+				delete card.dataset.testContinuing;
+				card.providerTestMissing = null;
+				card.providerTestFollowingSince = null;
+				card.providerTestRefreshSeenAt = null;
+				card.providerTestJobSeen = false;
+				card.chatTestPayload = null;
+				if (jobType === 'chat') card.dataset.testAwaitingReply = '1';
 				if (result) result.innerHTML = '';
 				if (message) message.textContent = 'Starting provider test.';
 				updateProviderTestProgress();
-				if (selectTab('tab-live')) {
+				if (jobType !== 'chat' && selectTab('tab-live')) {
 					selectLiveJob(requestId, { skipHash: false });
 				}
 				const body = { job_type: jobType, model: button.dataset.model || '', prompt: prompt ? prompt.value.trim() : '', test_request_id: requestId };
@@ -3139,6 +3661,17 @@ function statusPageHtml() {
 					if (key === 'model') body.model = field.value;
 					else body[key] = field.value;
 				});
+				if (jobType === 'chat') {
+					const system = card.querySelector('[data-chat-system]');
+					const maxTokens = card.querySelector('[data-chat-max-tokens]');
+					const image = card.querySelector('[data-chat-image]');
+					if (!body.prompt) throw new Error('Enter a test prompt before running a chat test.');
+					if (system && system.value.trim()) body.system = system.value.trim();
+					if (maxTokens && maxTokens.value.trim()) body.max_tokens = Number(maxTokens.value);
+					const imageFile = image && image.files && image.files[0];
+					if (imageFile && imageFile.size > 5 * 1024 * 1024) throw new Error('Image is larger than 5 MB.');
+					if (imageFile) body.image_data_url = await fileAsDataUrl(imageFile);
+				}
 				const file = reference && reference.files && reference.files[0];
 				if (file) body.input_reference_data_url = await fileAsDataUrl(file);
 				const mediaFile = media && media.files && media.files[0];
@@ -3148,36 +3681,81 @@ function statusPageHtml() {
 				if ((jobType === 'transcribe' || jobType === 'music.analyze') && !audioFile) throw new Error('Choose an audio file before running this test.');
 				if (audioFile) {
 					const dataUrl = await fileAsDataUrl(audioFile);
-					const match = /^data:([^;]+);base64,([A-Za-z0-9+/=\s]+)$/i.exec(dataUrl);
+					const match = /^data:([^;]+);base64,([A-Za-z0-9+/=\\s]+)$/i.exec(dataUrl);
 					if (!match) throw new Error('The selected audio file is not a supported base64 upload.');
-					body.audio_base64 = match[2].replace(/\s+/g, '');
+					body.audio_base64 = match[2].replace(/\\s+/g, '');
 					body.audio_format = audioFile.type || (audioFile.name.split('.').pop() || '');
 				}
+				requestSent = true;
 				const response = await fetch(relayTestUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 				const payload = await response.json().catch(() => ({}));
-				if (!response.ok || !payload.success) throw new Error(payload.message || 'Provider test failed.');
+				if (!response.ok || !payload.success) {
+					const failure = new Error(payload.error_message || payload.message || 'Provider test failed.');
+					failure.code = payload.code || '';
+					failure.httpStatus = response.status;
+					throw failure;
+				}
+				if (jobType === 'chat') card.chatTestPayload = payload;
 				completed = true;
 			} catch (error) {
 				await refresh().catch(() => {});
 				const job = providerTestJob(requestId);
 				const state = String(job && job.status || '').toLowerCase();
-				if (job && (state === 'queued' || state === 'running')) {
+				if (job && !error.httpStatus && providerTestTerminal(state)) {
+					// The connection dropped but the job finished anyway: the finally block settles the card from the job record.
+					droppedConnection = true;
+				} else if (job && !providerTestTerminal(state)) {
 					continuingTrackedJob = true;
+					card.dataset.testContinuing = '1';
 					if (message) message.textContent = 'The test request connection ended, but the provider job is still ' + state + '. Continuing to follow it here.';
 					updateProviderTestProgress();
+				} else if (requestSent && !error.httpStatus && !providerTestFeedStale) {
+					// Network-level failure (no HTTP response), job state unknown: the job may still be running on the Relay.
+					// Keep following it; the progress tracker settles the card from the job status.
+					// (If the status refresh above failed too and no job with this request id is known, the Relay is unreachable: fail below.)
+					continuingTrackedJob = true;
+					card.dataset.testContinuing = '1';
+					if (message) message.textContent = 'Connection lost — following the job in Live…';
+					updateProviderTestProgress();
 				} else {
+					const unreachable = requestSent && !error.httpStatus;
+					if (unreachable) error = new Error('Relay unreachable — the test could not be confirmed. Check that AI Model Relay is running.');
 					if (message) message.textContent = error.message || 'Provider test failed.';
 					if (progress) progress.textContent = 'Failed · ' + elapsed(Math.max(0, Date.now() - Number(card.dataset.testStartedAt || Date.now())));
 					setProviderTestActivity(card, false, 'Failed');
+					if (jobType === 'chat') renderChatTestFailure(card, error);
+					// Stop the progress tracker from replacing this report while the finally block refreshes the status again.
+					if (unreachable) delete card.dataset.testRequestId;
 				}
 			} finally {
+				delete card.dataset.testAwaitingReply;
 				await refresh().catch(() => {});
 				const job = providerTestJob(requestId);
 				const state = String(job && job.status || '').toLowerCase();
-				if (continuingTrackedJob && job && (state === 'queued' || state === 'running')) {
+				const jobTerminal = !!job && providerTestTerminal(state);
+				if (!completed && !jobTerminal && (continuingTrackedJob || job)) {
+					// Keep following the job (known non-terminal, or lost after a network failure); updateProviderTestProgress
+					// settles the card when it ends or is no longer tracked.
+					if (card.dataset.testContinuing !== '1') {
+						// The catch had already reported a failure, but the job turned out to be live: undo that report.
+						card.dataset.testContinuing = '1';
+						card.dataset.testRequestId = requestId;
+						delete card.dataset.testOutcome;
+						if (result) result.innerHTML = '';
+						if (message) message.textContent = 'Connection lost — following the job in Live…';
+						updateProviderTestProgress();
+					}
 					return;
 				}
-				if (completed && job) {
+				if (completed && jobType === 'chat') {
+					card.dataset.testOutcome = 'passed';
+					renderChatTestResult(card, job);
+					const startedAt = Number(card.dataset.testStartedAt || Date.now());
+					if (message) message.textContent = chatTestOutcomeMessage(card.dataset.testOutcome);
+					if (progress) progress.textContent = 'Completed · ' + elapsed(job && Number(job.elapsed_ms) ? Number(job.elapsed_ms) : Math.max(0, Date.now() - startedAt));
+				} else if (completed && job) {
+					settleProviderTestCard(card, job);
+				} else if (!completed && jobTerminal && (droppedConnection || continuingTrackedJob) && card.dataset.testRequestId) {
 					settleProviderTestCard(card, job);
 				} else if (completed && message) {
 					message.textContent = 'Completed. Open Live to inspect the result.';
@@ -3185,8 +3763,11 @@ function statusPageHtml() {
 				}
 				delete card.dataset.testRequestId;
 				delete card.dataset.testStartedAt;
-				setProviderTestActivity(card, false, completed ? 'Completed' : 'Failed');
+				delete card.dataset.testContinuing;
+				delete card.dataset.testDetached;
+				setProviderTestActivity(card, false, completed || (jobTerminal && state === 'completed') ? 'Completed' : 'Failed');
 				restoreProviderTestButton(card);
+				providerTestSettled(card);
 			}
 		}
 
@@ -4163,7 +4744,8 @@ function statusPageHtml() {
 			if (event.key === 'Escape' && !fields.imageLightbox.hidden) closeImageLightbox();
 		});
 
-		function renderJobs(jobs) {
+		// options.stale: a status refresh failed; the (empty) jobs are not a Relay report, so the provider-test tracker keeps its last known jobs.
+		function renderJobs(jobs, options) {
 			const scrollStates = captureSessionOutputScrolls();
 			currentStatus.jobs = jobs;
 			fields.jobCounts.textContent = 'Running ' + Number(jobs.running_count || 0) + ' / Queued ' + Number(jobs.queued_count || 0);
@@ -4174,7 +4756,7 @@ function statusPageHtml() {
 			} else {
 				autoSelectLiveJob(jobs);
 			}
-			updateProviderTestProgress();
+			updateProviderTestProgress({ fresh: !(options && options.stale) });
 			updateTabBadges(jobs);
 			renderDebugFailures(jobs);
 			applyRawStatusFilter();
@@ -4202,7 +4784,8 @@ function statusPageHtml() {
 			}
 		}
 
-		function renderStatus(payload, ok) {
+		function renderStatus(payload, ok, options) {
+			const stale = !!(options && options.stale) || !payload.jobs;
 			currentStatus = payload;
 			if (Object.keys(currentCapabilities).length) {
 				currentStatus.capabilities = currentCapabilities;
@@ -4225,7 +4808,7 @@ function statusPageHtml() {
 				fields.detectedFeatures.innerHTML = '<div class="muted">Loading detected features</div>';
 				fields.backendDrivers.innerHTML = '<div class="muted">Loading backend drivers</div>';
 			}
-			renderJobs(jobs);
+			renderJobs(jobs, { stale });
 			updateProviderRefreshState(payload.refresh);
 		}
 
@@ -4283,20 +4866,23 @@ function statusPageHtml() {
 			}
 		}
 
-		async function refresh() {
+		async function refresh(options) {
+			const silent = Boolean(options && options.silent);
 			try {
 				const [response, capabilitiesResponse] = await Promise.all([
 					fetch(statusUrl, { cache: 'no-store' }),
 					fetch(capabilitiesUrl, { cache: 'no-store' }).catch(() => null),
 				]);
 				const payload = await response.json();
-				renderStatus(payload, response.ok);
+				renderStatus(payload, response.ok, { stale: !response.ok && !payload.jobs });
 				if (capabilitiesResponse && capabilitiesResponse.ok) {
 					renderCapabilities(await capabilitiesResponse.json());
 				}
-				fields.updated.textContent = 'Polled - updated ' + new Date().toLocaleTimeString();
+				// The provider-test ticker polls silently so it does not replace the live-connection text while SSE is connected.
+				if (!silent) fields.updated.textContent = 'Polled - updated ' + new Date().toLocaleTimeString();
 			} catch (error) {
-				renderStatus({ success: false, message: error.message, jobs: {} }, false);
+				// The page shows the error state; only the provider-test tracker remembers the last known jobs.
+				renderStatus({ success: false, message: error.message, jobs: {} }, false, { stale: true });
 			}
 		}
 
@@ -4357,6 +4943,7 @@ function statusPageHtml() {
 		initSettingsNav();
 		initLiveFilters();
 		initProviderTestTabs();
+		initProviderChatTests();
 		setInterval(tickElapsedCells, 1000);
 		fields.rawStatusFilter.addEventListener('input', applyRawStatusFilter);
 		fields.relaySettingsForm.addEventListener('input', (event) => {

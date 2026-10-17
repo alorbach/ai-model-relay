@@ -80,6 +80,8 @@ The in-memory job manager publishes safe provider metadata (`provider`, display 
 
 For completed image jobs, the manager can retain up to four validated PNG, JPEG, or WebP artifacts in memory for the recent-job window. The local status page obtains a same-origin artifact URL and displays a thumbnail that opens in an overlay. Artifacts are removed when their job leaves the recent-job cache and are not embedded in the SSE payload.
 
+The local status page can run provider tests through `POST /v1/relay/test` (a local status-page mutator that follows the same origin rules as the other Settings routes). Besides image, video, analysis, and audio tests, `job_type: "chat"` accepts a required `prompt` (up to 8000 characters), an optional `system` prompt (up to 4000 characters), an optional `image_data_url` (PNG, JPEG, or WebP data URL, up to 5 MB decoded; GIF is accepted only for API providers, CLI providers take PNG/JPEG/WebP, and the CLI Process driver takes no images), an integer `max_tokens` from 16 to 4096 (default 256), and an optional `effort`. These become a single-turn `messages` payload that runs through the normal `relayPayloadFor`, job manager, and `backends.run('chat', ...)` path, so the test shows in Live with provider metadata and never silently falls back to another provider. Settings → Tests → Chat lists every ready chat model (CLI and API), shows the reply and usage, and **Run all chat tests** executes the cards sequentially. These are real provider requests, so charges may apply.
+
 ### Security state
 
 Entry point: `src/security.js`

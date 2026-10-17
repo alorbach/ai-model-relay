@@ -96,6 +96,7 @@ function createMockSecurity() {
 	const calls = [];
 	let savedPersistentPairingCode = '';
 	let backendRefreshes = 0;
+	let lateReadyBaseline = Infinity;
 	let localUpscaleRefreshes = 0;
 	const codex = {
 		checkStatus: () => ({ success: true, message: 'ready', details: {} }),
@@ -130,6 +131,7 @@ function createMockSecurity() {
 			{ id: 'model-relay:codex:auto', legacy_id: 'codex-local:auto', type: 'text', backend: 'codex-cli' },
 			{ id: 'model-relay:xai:grok-4.3', type: 'text', backend: 'xai-api' },
 			{ id: 'model-relay:xai:grok-4.6', type: 'text', backend: 'xai-api' },
+			{ id: 'model-relay:unready:auto', type: 'text', backend: 'unready-api' },
 			{ id: 'model-relay:xai:stt', type: 'audio', backend: 'xai-api' },
 			{ id: 'model-relay:xai:imagine-image', type: 'image', backend: 'xai-api', image_capabilities: { contract_version: 1, cloud_upload: true } },
 			{ id: 'model-relay:antigravity-cli:image', type: 'image', backend: 'antigravity-cli', image_capabilities: { contract_version: 1, provider_options: { aspect_ratio: { type: 'enum', delivery: 'native', values: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3'] } }, supported_output_formats: ['image/jpeg'], reference_images_max: 3 } },
@@ -138,10 +140,16 @@ function createMockSecurity() {
 			{ id: 'model-relay:music-analysis:core', type: 'audio', backend: 'music-analysis' },
 			{ id: 'model-relay:local-upscale:swinir-classical-x2', type: 'image', backend: 'local-upscale', job_types: ['upscale'], upscale_capabilities: { contract_version: 1, native_scale: 2, output_policy: 'retain_native_x2', input_formats: ['image/png'], output_formats: ['image/png'], cuda_only: true, explicit_install: true } },
 		],
-		getDriver: (type, payload = {}) => String(payload.model || '').startsWith('model-relay:local-upscale:') ? ({ id: 'local-upscale', job_types: ['upscale'], capabilities: () => ({ ready: true, models: [{ id: 'model-relay:local-upscale:swinir-classical-x2', manifest_valid: true }] }) }) : ({ id: 'codex-cli', job_types: ['chat', 'images', 'videos', 'transcribe', 'media.analyze', 'music.analyze'], checkStatus: () => ({ success: true, message: 'ready', details: {} }), capabilities: () => ({ ready: true }) }),
+		getDriver: (type, payload = {}) => String(payload.model || '').startsWith('model-relay:local-upscale:') ? ({ id: 'local-upscale', job_types: ['upscale'], capabilities: () => ({ ready: true, models: [{ id: 'model-relay:local-upscale:swinir-classical-x2', manifest_valid: true }] }) }) : ({ id: 'codex-cli', kind: String(payload.model || '').includes(':xai:') ? 'api' : 'local-cli', job_types: ['chat', 'images', 'videos', 'transcribe', 'media.analyze', 'music.analyze'], checkStatus: () => ({ success: true, message: 'ready', details: {} }), capabilities: () => ({ ready: true }) }),
 		resolve(jobType, payload = {}) {
 			if (jobType === 'images' && String(payload.aspect_ratio || '') === 'not-a-ratio') {
 				return { error: { success: false, category: 'validation', code: 'relay_image_options_unsupported', message: 'The requested aspect ratio is not supported by the selected Relay image model.' } };
+			}
+			if (String(payload.model || '').includes('late-ready') && backendRefreshes <= lateReadyBaseline) {
+				return { error: { success: false, category: 'configuration', code: 'backend_unavailable', message: 'Selected provider is unavailable.' } };
+			}
+			if (String(payload.model || '').includes('unready')) {
+				return { error: { success: false, category: 'configuration', code: 'backend_unavailable', message: 'Selected provider is unavailable.' } };
 			}
 			const driver = this.getDriver(jobType, payload);
 			const capabilities = driver && driver.capabilities ? driver.capabilities() : { ready: true };
@@ -507,7 +515,7 @@ function createMockSecurity() {
 		assert.strictEqual(localImageTest.statusCode, 200);
 		assert.strictEqual(localImageTest.body.success, true);
 		assert.strictEqual(localImageTest.body.request_id, localTestRequestId);
-		assert.ok(backendRefreshes > refreshesBeforeImageTest, 'provider test should refresh detection before model preflight');
+		assert.strictEqual(backendRefreshes, refreshesBeforeImageTest, 'a ready backend never waits for a full provider refresh before its job is created');
                 assert.strictEqual(calls[calls.length - 1].route, 'relay-images');
                 assert.strictEqual(calls[calls.length - 1].payload.prompt, 'test image');
 		assert.strictEqual(calls[calls.length - 1].payload.size, '1536x1024');
@@ -551,6 +559,107 @@ function createMockSecurity() {
 		assert.strictEqual(localMediaTest.statusCode, 200);
 		assert.strictEqual(calls[calls.length - 1].route, 'relay-media.analyze');
 		assert.ok(String(calls[calls.length - 1].payload.media_data_url).startsWith('data:video/mp4;base64,'));
+
+		const chatTestRequestId = 'status-test-ui-route-chat';
+		const callsBeforeChatTest = calls.length;
+		const chatTest = await requestJson(port, 'POST', '/v1/relay/test', { job_type: 'chat', model: 'model-relay:xai:grok-4.3', prompt: '  Reply with exactly: OK  ', system: '  Be terse.  ', max_tokens: 512, effort: 'high', test_request_id: chatTestRequestId }, pageOrigin);
+		assert.strictEqual(chatTest.statusCode, 200);
+		assert.strictEqual(chatTest.body.success, true);
+		assert.strictEqual(chatTest.body.request_id, chatTestRequestId);
+		assert.strictEqual(chatTest.body.response.choices[0].message.content, 'relay ok');
+		assert.strictEqual(calls.length, callsBeforeChatTest + 1);
+		assert.strictEqual(calls[calls.length - 1].route, 'relay-chat');
+		assert.strictEqual(calls[calls.length - 1].payload.model, 'model-relay:xai:grok-4.3');
+		assert.deepStrictEqual(calls[calls.length - 1].payload.messages, [{ role: 'system', content: 'Be terse.' }, { role: 'user', content: 'Reply with exactly: OK' }]);
+		assert.strictEqual(calls[calls.length - 1].payload.max_tokens, 512);
+		assert.strictEqual(calls[calls.length - 1].payload.effort, 'high');
+		assert.ok(!('prompt' in calls[calls.length - 1].payload), 'chat tests send only messages so drivers never prefer a top-level prompt');
+		const chatTestSmuggled = await requestJson(port, 'POST', '/v1/relay/test', { job_type: 'chat', model: 'model-relay:xai:grok-4.3', prompt: 'hello', payload: { provider: 'codex-cli', backend: 'codex-cli', input: 'smuggled input', temperature: 2, messages: [{ role: 'user', content: 'smuggled' }] } }, pageOrigin);
+		assert.strictEqual(chatTestSmuggled.statusCode, 200);
+		const smuggledPayload = calls[calls.length - 1].payload;
+		assert.deepStrictEqual(Object.keys(smuggledPayload).sort(), ['max_tokens', 'messages', 'model']);
+		assert.deepStrictEqual(smuggledPayload.messages, [{ role: 'user', content: 'hello' }]);
+		const chatTestDefaults = await requestJson(port, 'POST', '/v1/relay/test', { job_type: 'chat', model: 'model-relay:xai:grok-4.3', prompt: 'hello', system: '   ', aspect_ratio: '16:9', size: '1024x1024' }, pageOrigin);
+		assert.strictEqual(chatTestDefaults.statusCode, 200);
+		assert.deepStrictEqual(calls[calls.length - 1].payload.messages, [{ role: 'user', content: 'hello' }]);
+		assert.strictEqual(calls[calls.length - 1].payload.max_tokens, 256);
+		assert.strictEqual(calls[calls.length - 1].payload.effort, undefined);
+		assert.strictEqual(calls[calls.length - 1].payload.aspect_ratio, undefined, 'media-only fields never reach chat drivers');
+		assert.strictEqual(calls[calls.length - 1].payload.size, undefined);
+		const chatImageUrl = 'data:image/png;base64,' + Buffer.from('tiny-png').toString('base64');
+		const chatTestImage = await requestJson(port, 'POST', '/v1/relay/test', { job_type: 'chat', model: 'model-relay:codex:auto', prompt: 'describe', image_data_url: chatImageUrl, max_tokens: '64' }, pageOrigin);
+		assert.strictEqual(chatTestImage.statusCode, 200);
+		assert.deepStrictEqual(calls[calls.length - 1].payload.messages, [{ role: 'user', content: [{ type: 'text', text: 'describe' }, { type: 'image_url', image_url: { url: chatImageUrl } }] }]);
+		assert.strictEqual(calls[calls.length - 1].payload.max_tokens, 64);
+		const chatGifUrl = 'data:image/gif;base64,' + Buffer.from('tiny-gif').toString('base64');
+		const callsBeforeGif = calls.length;
+		const chatGifCli = await requestJson(port, 'POST', '/v1/relay/test', { job_type: 'chat', model: 'model-relay:codex:auto', prompt: 'describe', image_data_url: chatGifUrl }, pageOrigin);
+		assert.strictEqual(chatGifCli.statusCode, 400, 'CLI drivers do not accept GIF test images');
+		assert.strictEqual(chatGifCli.body.category, 'validation');
+		assert.strictEqual(chatGifCli.body.message, 'This provider accepts PNG, JPEG, or WebP test images.');
+		assert.strictEqual(calls.length, callsBeforeGif, 'a rejected GIF never reaches a backend');
+		const chatGifApi = await requestJson(port, 'POST', '/v1/relay/test', { job_type: 'chat', model: 'model-relay:xai:grok-4.3', prompt: 'describe', image_data_url: chatGifUrl }, pageOrigin);
+		assert.strictEqual(chatGifApi.statusCode, 200, 'API providers accept GIF test images');
+		assert.strictEqual(calls[calls.length - 1].payload.messages[0].content[1].image_url.url, chatGifUrl);
+		const callsBeforeChatRejections = calls.length;
+		const chatBase = { job_type: 'chat', model: 'model-relay:xai:grok-4.3', prompt: 'hello' };
+		const chatRejections = [
+			['missing prompt', { ...chatBase, prompt: undefined }],
+			['blank prompt', { ...chatBase, prompt: '   ' }],
+			['oversized prompt', { ...chatBase, prompt: 'x'.repeat(8001) }],
+			['oversized system', { ...chatBase, system: 'x'.repeat(4001) }],
+			['non-text system', { ...chatBase, system: { text: 'x' } }],
+			['small max_tokens', { ...chatBase, max_tokens: 8 }],
+			['large max_tokens', { ...chatBase, max_tokens: 5000 }],
+			['fractional max_tokens', { ...chatBase, max_tokens: 20.5 }],
+			['text max_tokens', { ...chatBase, max_tokens: 'many' }],
+			['unknown effort', { ...chatBase, effort: 'extreme' }],
+			['non-image data URL', { ...chatBase, image_data_url: 'data:text/plain;base64,AAAA' }],
+			['svg image', { ...chatBase, image_data_url: 'data:image/svg+xml;base64,AAAA' }],
+			['non-base64 image', { ...chatBase, image_data_url: 'data:image/png;base64,@@@' }],
+			['remote image URL', { ...chatBase, image_data_url: 'https://example.com/a.png' }],
+			['oversized image', { ...chatBase, image_data_url: 'data:image/png;base64,' + Buffer.alloc(5 * 1024 * 1024 + 1).toString('base64') }],
+		];
+		for (const [label, rejectedBody] of chatRejections) {
+			const rejected = await requestJson(port, 'POST', '/v1/relay/test', rejectedBody, pageOrigin);
+			assert.strictEqual(rejected.statusCode, 400, label);
+			assert.strictEqual(rejected.body.category, 'validation', label);
+		}
+		const chatBoundary = await requestJson(port, 'POST', '/v1/relay/test', { ...chatBase, prompt: 'x'.repeat(8000), system: 'y'.repeat(4000), max_tokens: 4096, image_data_url: 'data:image/webp;base64,' + Buffer.alloc(5 * 1024 * 1024).toString('base64') }, pageOrigin);
+		assert.strictEqual(chatBoundary.statusCode, 200, 'limits are inclusive');
+		assert.strictEqual(calls.length, callsBeforeChatRejections + 1, 'rejected chat tests never reach a backend');
+		const chatForeignOrigin = await requestJson(port, 'POST', '/v1/relay/test', chatBase, { Origin: 'https://evil.example' });
+		assert.strictEqual(chatForeignOrigin.statusCode, 403);
+		assert.ok(!chatForeignOrigin.headers['access-control-allow-origin']);
+		const chatUnknownModel = await requestJson(port, 'POST', '/v1/relay/test', { ...chatBase, model: 'model-relay:nope:missing' }, pageOrigin);
+		assert.strictEqual(chatUnknownModel.statusCode, 400);
+		assert.strictEqual(chatUnknownModel.body.category, 'configuration');
+		assert.strictEqual(chatUnknownModel.body.code, 'backend_model_unknown');
+		assert.strictEqual(chatUnknownModel.body.message, 'Selected chat model is not available: model-relay:nope:missing.');
+		assert.strictEqual(calls.length, callsBeforeChatRejections + 1, 'an unknown chat model never reaches a backend');
+		const refreshesBeforeUnready = backendRefreshes;
+		const chatUnreadyModel = await requestJson(port, 'POST', '/v1/relay/test', { ...chatBase, model: 'model-relay:unready:auto' }, pageOrigin);
+		assert.strictEqual(chatUnreadyModel.statusCode, 503);
+		assert.strictEqual(chatUnreadyModel.body.category, 'configuration');
+		assert.strictEqual(chatUnreadyModel.body.code, 'backend_unavailable');
+		assert.strictEqual(calls.length, callsBeforeChatRejections + 1, 'an unavailable model never falls back to another provider');
+		assert.strictEqual(backendRefreshes, refreshesBeforeUnready + 1, 'an unavailable backend triggers exactly one provider refresh and a single retry');
+		// A backend that only becomes ready through the refresh is resolved on the retry and the test runs.
+		lateReadyBaseline = backendRefreshes;
+		const callsBeforeLateReady = calls.length;
+		const lateReadyTest = await requestJson(port, 'POST', '/v1/relay/test', { job_type: 'images', model: 'model-relay:late-ready:image', prompt: 'late image' }, pageOrigin);
+		assert.strictEqual(lateReadyTest.statusCode, 200);
+		assert.strictEqual(backendRefreshes, lateReadyBaseline + 1, 'one refresh was needed to find the backend ready');
+		assert.strictEqual(calls.length, callsBeforeLateReady + 1);
+		lateReadyBaseline = Infinity;
+		const chatLegacyModel = await requestJson(port, 'POST', '/v1/relay/test', { ...chatBase, model: 'codex-local:auto' }, pageOrigin);
+		assert.strictEqual(chatLegacyModel.statusCode, 200, 'legacy ids are accepted');
+		const chatMissingModel = await requestJson(port, 'POST', '/v1/relay/test', { job_type: 'chat', prompt: 'hello' }, pageOrigin);
+		assert.strictEqual(chatMissingModel.statusCode, 400);
+		assert.match(chatMissingModel.body.message, /specific provider model/i);
+		const unsupportedTestType = await requestJson(port, 'POST', '/v1/relay/test', { job_type: 'upscale', model: 'x', prompt: 'x' }, pageOrigin);
+		assert.strictEqual(unsupportedTestType.statusCode, 400);
+		assert.match(unsupportedTestType.body.message, /chat, images/i);
 
 		const missingTestModel = await requestJson(port, 'POST', '/v1/relay/test', { job_type: 'images', prompt: 'x' }, pageOrigin);
 		assert.strictEqual(missingTestModel.statusCode, 400);
