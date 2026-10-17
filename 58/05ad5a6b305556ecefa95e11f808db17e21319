@@ -1,0 +1,69 @@
+docs/architecture.md
+  s_302299dca5a0bf::t_64d59b58c5c557 39
+  s_302299dca5a0bf::t_386c600f4e9e87 41
+docs/operations.md
+  s_302299dca5a0bf::t_386c600f4e9e87 221
+src/relay-settings.js
+  s_302299dca5a0bf::t_3c872c5dbc9604 569
+  s_302299dca5a0bf::t_facdbda1950ff7 523-529,531
+  s_302299dca5a0bf::t_de416275c5fcce 153-154
+  s_302299dca5a0bf::t_1e26349e3e5888 151-152,155-175,183-184,509
+test/anthropic-api.test.js
+  s_302299dca5a0bf::t_5d567894ddb454 161
+  s_302299dca5a0bf::t_d4ae7c473beb5d 160,162-174,176-181,356-359
+  s_302299dca5a0bf::t_abaae74dda0099 186-195,413-425
+  s_302299dca5a0bf::t_30221352f9f9c8 325-327,332,338,341-344,363,365-386,395-396
+  s_302299dca5a0bf::t_fc3f55b700daff 248
+  s_302299dca5a0bf::t_41fd0720e55970 221-247,249-253
+  s_302299dca5a0bf::t_6ecaafe6b0bf8a 175
+  s_302299dca5a0bf::t_7ad253b380089d 360
+test/status-page.test.js
+  s_302299dca5a0bf::t_64d59b58c5c557 234-236
+  s_302299dca5a0bf::t_2aabe6fcd6a0a9 238-239
+  s_302299dca5a0bf::t_abaae74dda0099 192-198
+  s_302299dca5a0bf::t_d4ae7c473beb5d 205-212,214,237
+  s_302299dca5a0bf::t_cea31715081dad 215
+  s_302299dca5a0bf::t_6f0bf959f55c1e 186-191,199-204,213,216-233
+test/relay-settings.test.js
+  s_302299dca5a0bf::t_4b0d18fc7520b9 235-242,255,259-284
+  s_302299dca5a0bf::t_abaae74dda0099 244-251,258
+  s_302299dca5a0bf::t_c1df0dbd5d8221 285-300
+src/server.js
+  s_302299dca5a0bf::t_7eb5d2f4489313 1229-1238
+src/backend-registry.js
+  s_302299dca5a0bf::t_39bd32b7d8e2c1 1925,1930,2021-2030,2041-2043
+  s_302299dca5a0bf::t_99e72215e42696 1902-1907,1914,2006
+  s_302299dca5a0bf::t_de416275c5fcce 1920-1921
+src/status-page.js
+  s_302299dca5a0bf::t_de416275c5fcce 1782,2878,3396-3397
+  s_302299dca5a0bf::t_bdf5dae1891c62 1875,2877,2907,3361,3367,3395,3398-3399,3401-3404,4362
+  s_302299dca5a0bf::t_c439bd40d856c5 3400
+  s_302299dca5a0bf::t_64d59b58c5c557 2906,3327
+  s_302299dca5a0bf::t_99e72215e42696 3375,3379,3383,3387,4458
+test/relay-routes.test.js
+  s_302299dca5a0bf::t_9bfb5997e4582d 237,408-412,414-416,418
+  s_302299dca5a0bf::t_abaae74dda0099 413,417
+README.md
+  s_302299dca5a0bf::t_386c600f4e9e87 292
+src/anthropic-usage.js
+  s_302299dca5a0bf::t_e72da8aae4bcba 208
+  s_302299dca5a0bf::t_d728cad3f3fc71 120-122,183-184,186-205
+  s_302299dca5a0bf::t_99e72215e42696 86
+  s_302299dca5a0bf::t_de416275c5fcce 116-117,130-131,134-135
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "5805ad5a6b305556ecefa95e11f808db17e21319",
+  "prompts": {},
+  "sessions": {
+    "s_302299dca5a0bf": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "70612418-085e-405d-9206-0244d9396144",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
