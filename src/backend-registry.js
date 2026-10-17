@@ -13,6 +13,7 @@ const { createLocalImageDriver } = require('./local-image');
 const { resolveMaxTokens } = require('./token-policy');
 const { IMAGE_CAPABILITY_CONTRACT_VERSION, imageCapabilityContract, isCompleteImageCapabilityContract, findRelayImageModel, normalizeImageOutputFormat, normalizeImagePayloadForModel, relayCatalogEntrySupportsImages } = require('./image-capabilities');
 const { readImageDimensions } = require('./image-dimensions');
+const { ANTHROPIC_VERSION, recordRateLimitHeaders } = require('./anthropic-usage');
 const { antigravityAuthenticationFailure, antigravityResultText, createAntigravityImageArtifactResolver, findAntigravityImagePath, isAntigravityAuthenticationError } = require('./antigravity-cli');
 
 const RELAY_MODEL_PREFIX = 'model-relay';
@@ -145,6 +146,9 @@ function providerFromPayload(payload = {}) {
 	const model = String(payload.model || '').trim().toLowerCase();
 	if (model.startsWith('model-relay:xai:')) {
 		return 'xai-api';
+	}
+	if (model.startsWith('model-relay:anthropic:') || model.startsWith('model-relay:claude:')) {
+		return 'anthropic-api';
 	}
 	if (model.startsWith('model-relay:grok:')) {
 		return 'xai-api';
@@ -1879,6 +1883,190 @@ function createCliProcessDriver(options = {}) {
 	};
 }
 
+const DEFAULT_ANTHROPIC_MODELS = 'claude-opus-5-5,claude-sonnet-5-5,claude-haiku-5-5';
+const ANTHROPIC_FALLBACK_MODELS = new Set(['claude-opus-5-5', 'claude-opus-5', 'claude-sonnet-5-5', 'claude-fable-5-1']);
+const ANTHROPIC_FALLBACK_BETA = 'server-side-fallback-2026-07-01';
+const ANTHROPIC_EFFORTS = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
+
+function anthropicImageBlock(value, report) {
+	const url = String(value && typeof value === 'object' ? value.url : value || '').trim();
+	if (!url) return null;
+	const data = /^data:(image\/[a-z0-9.+-]+);base64,(.+)$/is.exec(url);
+	if (data) {
+		let mediaType = data[1].toLowerCase();
+		if (mediaType === 'image/jpg') mediaType = 'image/jpeg';
+		if (!/^image\/(?:png|jpeg|gif|webp)$/.test(mediaType)) {
+			if (report) report.unsupportedImage = true;
+			return null;
+		}
+		return { type: 'image', source: { type: 'base64', media_type: mediaType, data: data[2] } };
+	}
+	if (/^data:/i.test(url)) {
+		if (report) report.unsupportedImage = true;
+		return null;
+	}
+	if (/^https?:\/\//i.test(url)) return { type: 'image', source: { type: 'url', url } };
+	return null;
+}
+
+function anthropicContent(content, report) {
+	if (typeof content === 'string') return content;
+	if (!Array.isArray(content)) return content === undefined || content === null ? '' : String(content);
+	const blocks = [];
+	for (const part of content) {
+		if (typeof part === 'string') {
+			if (part) blocks.push({ type: 'text', text: part });
+			continue;
+		}
+		if (!part || typeof part !== 'object') continue;
+		if ((part.type === 'text' || part.type === 'input_text') && typeof part.text === 'string') {
+			if (part.text) blocks.push({ type: 'text', text: part.text });
+		} else if (part.type === 'image_url' || part.type === 'input_image') {
+			const block = anthropicImageBlock(part.image_url, report);
+			if (block) blocks.push(block);
+		}
+	}
+	return blocks;
+}
+
+function anthropicContentText(content) {
+	if (typeof content === 'string') return content;
+	return (Array.isArray(content) ? content : []).filter((block) => block.type === 'text').map((block) => block.text).join('\n');
+}
+
+function anthropicMessagesFromPayload(payload = {}) {
+	const report = { unsupportedImage: false };
+	const source = Array.isArray(payload.messages) ? payload.messages : [{ role: 'user', content: String(payload.prompt || '') }];
+	const system = [];
+	const messages = [];
+	for (const message of source) {
+		if (!message || typeof message !== 'object') continue;
+		const role = String(message.role || 'user').toLowerCase();
+		const content = anthropicContent(message.content, report);
+		if (role === 'system' || role === 'developer') {
+			const text = anthropicContentText(content).trim();
+			if (text) system.push(text);
+			continue;
+		}
+		if (typeof content === 'string' ? !content.trim() : !content.length) continue;
+		messages.push({ role: role === 'assistant' ? 'assistant' : 'user', content });
+	}
+	return { system: system.join('\n\n'), messages, unsupportedImage: report.unsupportedImage };
+}
+
+function createAnthropicApiDriver(options = {}) {
+	const fetchImpl = withFetchTimeout(options.fetch || globalThis.fetch, Number(options.chatTimeoutMs || 600000));
+	const apiKey = options.apiKey || process.env.ANTHROPIC_API_KEY || process.env.AI_MODEL_RELAY_ANTHROPIC_API_KEY || '';
+	const baseUrl = String(options.baseUrl || process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com').replace(/\/+$/, '').replace(/\/v1$/i, '');
+	const defaultModels = String(options.models || process.env.AI_MODEL_RELAY_ANTHROPIC_MODELS || DEFAULT_ANTHROPIC_MODELS).split(',').map((id) => id.trim()).filter(Boolean);
+	const directAnthropic = (() => { try { return new URL(baseUrl).hostname.toLowerCase() === 'api.anthropic.com'; } catch (error) { return false; } })();
+	const fallbacksEnabled = directAnthropic && options.fallbacks !== false && !/^(0|false|no|off)$/i.test(String(process.env.AI_MODEL_RELAY_ANTHROPIC_FALLBACKS || ''));
+	function modelFromRelay(model) {
+		const id = String(model || '').trim().replace(/^model-relay:(?:anthropic|claude):/i, '');
+		if (!id || /^(auto|default)$/i.test(id)) return defaultModels[0] || 'claude-sonnet-5-5';
+		return id;
+	}
+	return {
+		id: 'anthropic-api',
+		label: 'Claude API (Anthropic)',
+		kind: 'api',
+		job_types: ['chat'],
+		checkStatus: () => ({ success: !!apiKey, message: apiKey ? 'Claude API key is configured.' : 'Claude API key is not configured.', details: { provider: 'anthropic-api', configured: !!apiKey, base_url: baseUrl } }),
+		capabilities: () => ({
+			id: 'anthropic-api',
+			label: 'Claude API (Anthropic)',
+			kind: 'api',
+			enabled: !!apiKey,
+			configured: !!apiKey,
+			ready: !!apiKey,
+			job_types: ['chat'],
+			models: defaultModels.map((id) => relayModel('anthropic', id)),
+			features: { chat: true, image_input: true },
+			requires: ['ANTHROPIC_API_KEY or AI_MODEL_RELAY_ANTHROPIC_API_KEY'],
+			dashboard_url: 'https://platform.claude.com/dashboard',
+		}),
+		models: () => defaultModels.map((id) => ({ id: relayModel('anthropic', id), type: 'text', backend: 'anthropic-api', job_types: ['chat'] })),
+		async chat(payload = {}, session = {}) {
+			if (!apiKey) {
+				return { success: false, category: 'configuration', code: 'anthropic_api_key_missing', message: 'Claude API requires an Anthropic API key (Settings → Providers or ANTHROPIC_API_KEY).' };
+			}
+			if (!fetchImpl) {
+				return { success: false, category: 'configuration', code: 'fetch_unavailable', message: 'This Node runtime does not provide fetch for API-backed drivers.' };
+			}
+			const model = modelFromRelay(payload.model);
+			const converted = anthropicMessagesFromPayload(payload);
+			if (converted.unsupportedImage) {
+				return { success: false, category: 'validation', code: 'anthropic_image_unsupported', message: 'Claude API accepts PNG, JPEG, GIF, or WebP images.' };
+			}
+			while (converted.messages.length && converted.messages[0].role === 'assistant') converted.messages.shift();
+			if (!converted.messages.length) {
+				return { success: false, category: 'validation', code: 'anthropic_messages_empty', message: 'Claude API needs at least one user message.' };
+			}
+			const body = { model, max_tokens: resolveMaxTokens('chat', payload.max_tokens), messages: converted.messages };
+			if (converted.system) body.system = converted.system;
+			const effort = String(payload.effort || payload.reasoning_effort || '').trim().toLowerCase();
+			if (ANTHROPIC_EFFORTS.has(effort)) body.output_config = { effort };
+			const headers = { 'x-api-key': apiKey, 'anthropic-version': ANTHROPIC_VERSION, 'content-type': 'application/json' };
+			if (fallbacksEnabled && ANTHROPIC_FALLBACK_MODELS.has(model)) {
+				headers['anthropic-beta'] = ANTHROPIC_FALLBACK_BETA;
+				body.fallbacks = 'default';
+			}
+			const fetched = await fetchWithSession(fetchImpl, `${baseUrl}/v1/messages`, { method: 'POST', headers, body: JSON.stringify(body) }, session);
+			if (fetched.error) return fetched.error;
+			const response = fetched.response;
+			recordRateLimitHeaders(response.headers);
+			let parsed = null;
+			try {
+				const text = await readBoundedText(response);
+				parsed = text ? JSON.parse(text) : {};
+			} catch (error) {
+				if (error instanceof SyntaxError) parsed = null;
+				else if (session && session.signal && session.signal.aborted) return cancelledProviderResult();
+				else if (error && (error.name === 'TimeoutError' || error.name === 'AbortError')) return { success: false, category: 'timeout', code: 'anthropic_api_timeout', message: 'Claude API request timed out.', retryable: true, details: { provider: 'anthropic-api' } };
+				else return { success: false, category: 'api', code: 'anthropic_api_failed', message: 'Claude API response exceeded the maximum size.', details: { provider: 'anthropic-api' } };
+			}
+			if (!response.ok) {
+				const status = response.status;
+				const message = redactProviderSecret(parsed && parsed.error && parsed.error.message || `Claude API request failed with HTTP ${status}.`, apiKey);
+				return {
+					success: false,
+					category: status === 401 || status === 403 ? 'configuration' : (status === 429 ? 'rate_limit' : (status === 413 ? 'validation' : 'api')),
+					code: 'anthropic_api_failed',
+					message,
+					retryable: status === 429 || status === 529 || status >= 500,
+					details: { status, provider: 'anthropic-api', error_type: parsed && parsed.error && parsed.error.type || undefined },
+				};
+			}
+			if (!parsed || !Array.isArray(parsed.content)) {
+				return { success: false, category: 'api', code: 'anthropic_api_failed', message: 'Claude API returned an unexpected response.', details: { provider: 'anthropic-api', status: response.status } };
+			}
+			if (parsed.stop_reason === 'refusal') {
+				return {
+					success: false,
+					category: 'api',
+					code: 'anthropic_refusal',
+					message: (parsed.stop_details && parsed.stop_details.explanation) || 'Claude declined this request.',
+					details: { provider: 'anthropic-api', category: parsed.stop_details && parsed.stop_details.category || null },
+				};
+			}
+			const text = parsed.content.filter((block) => block && block.type === 'text').map((block) => String(block.text || '')).join('');
+			const usage = parsed.usage || {};
+			const cacheCreate = Number(usage.cache_creation_input_tokens || 0);
+			const cacheRead = Number(usage.cache_read_input_tokens || 0);
+			const promptTokens = Number(usage.input_tokens || 0) + cacheCreate + cacheRead;
+			const completionTokens = Number(usage.output_tokens || 0);
+			return normalizeChatResponse('anthropic', model, {
+				id: parsed.id,
+				object: 'chat.completion',
+				model: parsed.model || model,
+				choices: [{ index: 0, message: { role: 'assistant', content: text }, finish_reason: parsed.stop_reason === 'max_tokens' ? 'length' : 'stop' }],
+				usage: { prompt_tokens: promptTokens, completion_tokens: completionTokens, total_tokens: promptTokens + completionTokens },
+				provider_details: { stop_reason: parsed.stop_reason || null, cache_read_input_tokens: cacheRead, cache_creation_input_tokens: cacheCreate, cloud: true },
+			});
+		},
+	};
+}
+
 function createBackendRegistry(options = {}) {
 	const cliPaths = options.cliPaths && typeof options.cliPaths === 'object' ? options.cliPaths : {};
 	const configuredCliOptions = (driverOptions, key) => {
@@ -1900,6 +2088,7 @@ function createBackendRegistry(options = {}) {
 		createMusicAnalysisDriver(options.musicAnalysis),
 		createOpenAiVideosDriver(options.video),
 		createXaiApiDriver({ fetchTimeoutMs, ...(options.xai || {}) }),
+		createAnthropicApiDriver({ fetchTimeoutMs, ...(options.anthropic || {}) }),
 		createCliProcessDriver(configuredCliOptions(options.cli, 'cli-process')),
 		createApiKeyChatDriver({ fetchTimeoutMs, ...(options.apiKeyChat || {}) }),
 	].filter(Boolean);
@@ -1920,6 +2109,9 @@ function createBackendRegistry(options = {}) {
 		image: 'local-image',
 		'music-analysis': 'music-analysis',
 		xai: 'xai-api',
+		anthropic: 'anthropic-api',
+		claude: 'anthropic-api',
+		'anthropic-api': 'anthropic-api',
 		'xai-api': 'xai-api',
 		cli: 'cli-process',
 		'cli-process': 'cli-process',
@@ -2017,6 +2209,7 @@ module.exports = {
 	isCompleteImageCapabilityContract,
 	findRelayImageModel,
 	relayCatalogEntrySupportsImages,
+	createAnthropicApiDriver,
 	createApiKeyChatDriver,
 	createAntigravityCliDriver,
 	createBackendRegistry,

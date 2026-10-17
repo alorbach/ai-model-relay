@@ -584,6 +584,41 @@ function statusPageHtml() {
 			color: var(--muted);
 			font-size: 11px;
 		}
+		.claude-usage-head {
+			display: flex;
+			align-items: center;
+			flex-wrap: wrap;
+			gap: 12px;
+			margin-bottom: 10px;
+		}
+		.claude-usage-head .label { margin: 0; }
+		.claude-usage-grid {
+			display: grid;
+			grid-template-columns: repeat(3, minmax(0, 1fr));
+			gap: 10px;
+		}
+		.claude-usage-card {
+			display: grid;
+			gap: 8px;
+			align-content: start;
+			min-width: 0;
+			padding: 14px;
+			background: var(--panel-2);
+			border: 1px solid var(--line);
+			border-radius: 10px;
+		}
+		.claude-usage-card .health-title { color: var(--muted); font-size: 12px; font-weight: 600; }
+		.claude-usage-card .health-value { font-size: 17px; font-weight: 650; overflow-wrap: anywhere; }
+		.claude-usage-card .health-hint { color: var(--muted); font-size: 11px; }
+		.claude-usage-negative { color: var(--warn); }
+		.claude-usage-lines { display: grid; gap: 4px; font-size: 13px; }
+		.claude-usage-bar { height: 6px; border-radius: 3px; background: var(--panel); overflow: hidden; }
+		.claude-usage-bar span { display: block; height: 100%; background: var(--accent); }
+		.claude-usage-bar span.claude-usage-bar-high { background: var(--warn); }
+		.claude-usage-note { margin-top: 10px; }
+		@media (max-width: 900px) {
+			.claude-usage-grid { grid-template-columns: 1fr; }
+		}
 		.panel.live-inspector {
 			padding: 0;
 			background: transparent;
@@ -1159,6 +1194,10 @@ function statusPageHtml() {
 					<button type="button" class="health-card" data-nav="settings/asr"><span class="health-title">Local ASR</span><span class="health-value" id="healthAsr">Checking</span><span class="health-hint">Runtime and models</span></button>
 				</div>
 			</div>
+			<div class="panel span-12" id="claudeUsagePanel">
+				<div class="label">Claude API usage</div>
+				<div class="muted">Loading…</div>
+			</div>
 			<div class="panel span-4">
 				<div class="label">Bridge</div>
 				<div class="value"><span class="pill" id="bridgePill"><span class="dot"></span><span>Checking</span></span></div>
@@ -1430,6 +1469,7 @@ function statusPageHtml() {
 		const imageSettingsUrl = '/v1/image/settings';
 		const imageSetupUrl = '/v1/image/setup';
 		const relaySettingsUrl = '/v1/relay/settings';
+		const claudeUsageUrl = '/v1/relay/providers/anthropic/usage';
 		const pairingCodeSettingsUrl = '/v1/relay/pairing-code';
 		const relayTestUrl = '/v1/relay/test';
 		const liveImageCancelUrl = '/v1/relay/jobs/images/cancel';
@@ -1730,6 +1770,16 @@ function statusPageHtml() {
 				runtime,
 				codex_image_tool: codexImageToolValue,
 				providers: {
+					anthropic: {
+						api_key: (document.getElementById('relayAnthropicApiKey') || {}).value || '',
+						clear_api_key: !!(document.getElementById('relayAnthropicApiKeyClear') && document.getElementById('relayAnthropicApiKeyClear').checked),
+						admin_api_key: (document.getElementById('relayAnthropicAdminKey') || {}).value || '',
+						clear_admin_api_key: !!(document.getElementById('relayAnthropicAdminKeyClear') && document.getElementById('relayAnthropicAdminKeyClear').checked),
+						base_url: (document.getElementById('relayAnthropicBaseUrl') || {}).value || '',
+						models: (document.getElementById('relayAnthropicModels') || {}).value || '',
+						monthly_limit_usd: ((document.getElementById('relayAnthropicMonthlyLimit') || {}).value || '').trim(),
+						credit_balance_usd: ((document.getElementById('relayAnthropicCreditBalance') || {}).value || '').trim(),
+					},
 					xai: {
 						api_key: (document.getElementById('relayXaiApiKey') || {}).value || '',
 						clear_api_key: !!(document.getElementById('relayXaiApiKeyClear') && document.getElementById('relayXaiApiKeyClear').checked),
@@ -1812,6 +1862,15 @@ function statusPageHtml() {
 				const el = document.getElementById(id);
 				if (el) el.checked = !!value;
 			};
+			const anthropicPreserved = providers.anthropic || {};
+			setValue('relayAnthropicApiKey', anthropicPreserved.api_key);
+			setChecked('relayAnthropicApiKeyClear', anthropicPreserved.clear_api_key);
+			setValue('relayAnthropicAdminKey', anthropicPreserved.admin_api_key);
+			setChecked('relayAnthropicAdminKeyClear', anthropicPreserved.clear_admin_api_key);
+			setValue('relayAnthropicBaseUrl', anthropicPreserved.base_url);
+			setValue('relayAnthropicModels', anthropicPreserved.models);
+			setValue('relayAnthropicMonthlyLimit', anthropicPreserved.monthly_limit_usd);
+			setValue('relayAnthropicCreditBalance', anthropicPreserved.credit_balance_usd);
 			setValue('relayXaiApiKey', xai.api_key);
 			setChecked('relayXaiApiKeyClear', xai.clear_api_key);
 			setValue('relayXaiBaseUrl', xai.base_url);
@@ -2799,6 +2858,7 @@ function statusPageHtml() {
 			const xai = providers.xai || {};
 			const openai = providers.openai_videos || {};
 			const apiKeyChat = providers.api_key_chat || {};
+			const anthropic = providers.anthropic || {};
 			const secretHint = (secret, envName) => {
 				if (secret && secret.configured) return 'Saved key ends with ' + escapeHtml(secret.suffix || '') + '. Leave blank to keep it.';
 				return 'Leave blank to use ' + envName + '.';
@@ -2807,6 +2867,13 @@ function statusPageHtml() {
 			if (fields.relayProviderOptions) {
 				fields.relayProviderOptions.innerHTML = [
 					'<div class="label">Cloud APIs and extra CLI options</div>',
+					secretInput('relayAnthropicApiKey', 'Claude API key', anthropic.api_key, 'ANTHROPIC_API_KEY'),
+					secretInput('relayAnthropicAdminKey', 'Claude Admin API key (optional, usage only)', anthropic.admin_api_key, 'ANTHROPIC_ADMIN_KEY'),
+					'<small class="muted">Admin keys (sk-ant-admin…) are created under platform.claude.com → Settings → Admin keys and are only used to read month-to-date cost. Not available for individual accounts.</small>',
+					'<label class="field"><span>Claude API base URL</span><input id="relayAnthropicBaseUrl" value="' + escapeHtml(anthropic.base_url || '') + '" placeholder="https://api.anthropic.com" autocomplete="off" spellcheck="false"></label>',
+					'<label class="field"><span>Claude chat models</span><input id="relayAnthropicModels" value="' + escapeHtml(Array.isArray(anthropic.models) ? anthropic.models.join(',') : (anthropic.models || '')) + '" placeholder="claude-opus-5-5,claude-sonnet-5-5,claude-haiku-5-5" autocomplete="off" spellcheck="false"><small class="muted">Comma-separated model IDs.</small></label>',
+					'<label class="field"><span>Monthly spend limit (USD)</span><input type="number" min="0" step="0.01" inputmode="decimal" id="relayAnthropicMonthlyLimit" value="' + escapeHtml(anthropic.monthly_limit_usd == null ? '' : String(anthropic.monthly_limit_usd)) + '" autocomplete="off"><small class="muted">Your tier or custom limit from the Claude dashboard, e.g. 500.</small></label>',
+					'<label class="field"><span>Organization credit balance (USD)</span><input type="number" min="0" step="0.01" inputmode="decimal" id="relayAnthropicCreditBalance" value="' + escapeHtml(anthropic.credit_balance_usd == null ? '' : String(anthropic.credit_balance_usd)) + '" autocomplete="off"><small class="muted">Copy "Organization credits" from platform.claude.com/dashboard. Relay subtracts the cost reported since you saved it to estimate what is left.' + (anthropic.credit_balance_as_of && formatLocalDateTime(anthropic.credit_balance_as_of) ? ' Saved ' + escapeHtml(formatLocalDateTime(anthropic.credit_balance_as_of)) : '') + '</small></label>',
 					secretInput('relayXaiApiKey', 'xAI API key', xai.api_key, 'XAI_API_KEY'),
 					'<label class="field"><span>xAI base URL</span><input id="relayXaiBaseUrl" value="' + escapeHtml(xai.base_url || '') + '" placeholder="https://api.x.ai/v1" autocomplete="off" spellcheck="false"></label>',
 					'<label class="field"><span>xAI chat models</span><input id="relayXaiModels" value="' + escapeHtml(xai.models || '') + '" placeholder="grok-4.6,grok-4.5,grok-4.3,latest" autocomplete="off" spellcheck="false"><small class="muted">Comma-separated native model IDs.</small></label>',
@@ -3201,6 +3268,120 @@ function statusPageHtml() {
 			return true;
 		}
 
+		function formatUsd(value) {
+			const n = Number(value);
+			if (value === null || value === undefined || value === '' || !Number.isFinite(n)) return '—';
+			return (n < 0 ? '-$' : '$') + Math.abs(n).toFixed(2);
+		}
+
+		function formatLocalDateTime(value) {
+			const d = new Date(value);
+			return Number.isNaN(d.getTime()) ? '' : d.toLocaleString();
+		}
+
+		function formatLocalDate(value) {
+			const d = new Date(value);
+			return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString();
+		}
+
+		function formatRelativeTime(value) {
+			const t = new Date(value).getTime();
+			if (Number.isNaN(t)) return '';
+			const seconds = Math.max(0, Math.round((Date.now() - t) / 1000));
+			if (seconds < 60) return seconds + 's ago';
+			if (seconds < 3600) return Math.round(seconds / 60) + 'm ago';
+			if (seconds < 86400) return Math.round(seconds / 3600) + 'h ago';
+			return formatLocalDateTime(value);
+		}
+
+		function claudeNum(value) {
+			return value === null || value === undefined || value === '' || !Number.isFinite(Number(value)) ? null : Number(value);
+		}
+
+		function renderClaudeUsage(data) {
+			const panel = document.getElementById('claudeUsagePanel');
+			if (!panel) return;
+			const configured = data.configured || {};
+			if (!configured.api_key && !configured.admin_api_key) {
+				panel.innerHTML = '<div class="claude-usage-head"><div class="label">Claude API usage</div><span class="muted">Claude API not configured — add a key in Settings → Providers.</span><button type="button" data-nav-hash="settings/providers">Open Providers settings</button></div>';
+				return;
+			}
+			const month = data.month || {};
+			const credits = data.credits || {};
+			const costReport = data.cost_report || {};
+			const rate = data.rate_limits || null;
+			const dashboardUrl = data.dashboard_url || 'https://platform.claude.com/dashboard';
+			const spend = claudeNum(month.spend_usd);
+			const limit = claudeNum(month.limit_usd);
+			const monthRemaining = claudeNum(month.remaining_usd);
+			const creditBalance = claudeNum(credits.balance_usd);
+			const creditRemaining = claudeNum(credits.remaining_usd);
+			const creditSpent = claudeNum(credits.spent_since_usd);
+			const creditClass = creditRemaining !== null && creditRemaining < 0 ? ' claude-usage-negative' : '';
+			const creditSub = creditBalance === null
+				? 'Enter your dashboard credit balance in Settings → Providers'
+				: (creditRemaining === null
+					? 'Saved ' + (credits.as_of ? formatLocalDate(credits.as_of) : '') + '; spend since then unavailable' + (costReport.reason ? ' (' + costReport.reason + ')' : '')
+					: 'From ' + formatUsd(creditBalance) + ' saved' + (credits.as_of ? ' ' + formatLocalDate(credits.as_of) : '') + ' minus ' + formatUsd(creditSpent === null ? 0 : creditSpent) + ' spent since');
+			const monthParts = [];
+			if (limit !== null) monthParts.push('of ' + formatUsd(limit) + ' limit');
+			if (monthRemaining !== null) monthParts.push(formatUsd(monthRemaining) + ' left');
+			if (month.resets_at && formatLocalDate(month.resets_at)) monthParts.push('resets ' + formatLocalDate(month.resets_at));
+			let monthSub = monthParts.join(' · ');
+			if (spend === null && costReport.reason) monthSub = costReport.reason;
+			let bar = '';
+			if (spend !== null && limit !== null && limit > 0) {
+				const pct = Math.max(0, Math.min(100, (spend / limit) * 100));
+				bar = '<div class="claude-usage-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + escapeHtml(String(Math.round(pct))) + '"><span class="' + (pct >= 90 ? 'claude-usage-bar-high' : '') + '" style="width:' + pct.toFixed(1) + '%"></span></div>';
+			}
+			const rateLines = [];
+			if (rate) {
+				const pair = (label, remaining, max) => {
+					const r = claudeNum(remaining);
+					const m = claudeNum(max);
+					if (r === null && m === null) return;
+					rateLines.push(escapeHtml(label) + ': ' + escapeHtml(r === null ? '—' : r.toLocaleString()) + (m === null ? '' : ' / ' + escapeHtml(m.toLocaleString())));
+				};
+				pair('Requests', rate.requests_remaining, rate.requests_limit);
+				pair('Tokens', rate.tokens_remaining, rate.tokens_limit);
+				pair('Input tokens', rate.input_tokens_remaining, rate.input_tokens_limit);
+				pair('Output tokens', rate.output_tokens_remaining, rate.output_tokens_limit);
+			}
+			let rateHtml;
+			if (rateLines.length) {
+				rateHtml = '<div class="claude-usage-lines">' + rateLines.map((line) => '<div>' + line + '</div>').join('') + '</div>' + (rate.observed_at ? '<div class="health-hint">observed ' + escapeHtml(formatRelativeTime(rate.observed_at) || formatLocalDateTime(rate.observed_at)) + '</div>' : '');
+			} else {
+				rateHtml = '<div class="health-value">No Claude request yet</div>';
+			}
+			const notes = [];
+			if (costReport.note) notes.push(escapeHtml(costReport.note));
+			notes.push('Anthropic does not publish the credit balance through its API; the credit figure is an estimate.');
+			panel.innerHTML = [
+				'<div class="claude-usage-head"><div class="label">Claude API usage</div>',
+				'<a class="muted" href="' + escapeHtml(dashboardUrl) + '" target="_blank" rel="noopener">Open dashboard</a>',
+				'<button type="button" data-claude-usage-refresh>Refresh</button></div>',
+				'<div class="claude-usage-grid">',
+				'<div class="claude-usage-card"><span class="health-title">Organization credits (estimated)</span><span class="health-value' + creditClass + '">' + escapeHtml(creditRemaining !== null ? formatUsd(creditRemaining) : (creditBalance !== null ? formatUsd(creditBalance) : '—')) + '</span><span class="health-hint">' + escapeHtml(creditSub) + '</span></div>',
+				'<div class="claude-usage-card"><span class="health-title">Spend this month</span><span class="health-value">' + escapeHtml(spend === null ? '—' : formatUsd(spend)) + '</span>' + bar + (monthSub ? '<span class="health-hint">' + escapeHtml(monthSub) + '</span>' : '') + '</div>',
+				'<div class="claude-usage-card"><span class="health-title">Rate limits (last request)</span>' + rateHtml + '</div>',
+				'</div>',
+				'<div class="health-hint claude-usage-note">' + notes.join('<br>') + '</div>',
+			].join('');
+		}
+
+		async function loadClaudeUsage({ force } = {}) {
+			const panel = document.getElementById('claudeUsagePanel');
+			if (!panel) return;
+			try {
+				const response = await fetch(claudeUsageUrl + (force ? '?refresh=1' : ''), { cache: 'no-store' });
+				const payload = await response.json();
+				if (!response.ok || payload.success === false) throw new Error(payload.message || 'Claude usage unavailable');
+				renderClaudeUsage(payload);
+			} catch (error) {
+				panel.innerHTML = '<div class="claude-usage-head"><div class="label">Claude API usage</div><button type="button" data-claude-usage-refresh>Refresh</button></div><div class="muted">' + escapeHtml((error && error.message) || 'Claude usage unavailable') + '</div>';
+			}
+		}
+
 		async function saveRelaySettings(options = {}) {
 			const section = options.section || 'relay';
 			const settings = collectRelaySettingsPayload(section);
@@ -3222,6 +3403,7 @@ function statusPageHtml() {
 					}
 				}
 				captureFormSnapshots([section]);
+				loadClaudeUsage({ force: true });
 				return { success: true, payload, refreshStarted };
 			} catch (error) {
 				const message = error.message || 'Routing settings save failed';
@@ -4252,6 +4434,11 @@ function statusPageHtml() {
 		}
 		if (fields.saveRelayRuntimeSettings) fields.saveRelayRuntimeSettings.addEventListener('click', () => saveRelaySettings({ section: 'runtime' }));
 		fields.refreshRelayProviders.addEventListener('click', refreshProviderDetection);
+		document.getElementById('claudeUsagePanel').addEventListener('click', (event) => {
+			if (event.target.closest('[data-claude-usage-refresh]')) loadClaudeUsage({ force: true });
+		});
+		loadClaudeUsage({ force: false });
+		setInterval(() => { loadClaudeUsage({ force: false }); }, 5 * 60 * 1000);
 		refresh().then(connectJobEvents).catch(() => {
 			startFallbackPolling();
 		});

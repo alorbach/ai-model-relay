@@ -33,6 +33,7 @@ const TIMEOUT_SPECS = {
 	cli_process_ms: { env: 'AI_MODEL_RELAY_CLI_TIMEOUT_MS', fallback: 600000 },
 	cli_probe_ms: { env: 'AI_MODEL_RELAY_CLI_PROBE_TIMEOUT_MS', fallback: 10000 },
 	provider_fetch_ms: { env: 'AI_MODEL_RELAY_PROVIDER_FETCH_TIMEOUT_MS', fallback: 60000 },
+	anthropic_chat_ms: { env: 'AI_MODEL_RELAY_ANTHROPIC_CHAT_TIMEOUT_MS', fallback: 600000 },
 	xai_poll_timeout_ms: { env: 'ALORBACH_VIDEO_POLL_TIMEOUT_MS', fallback: 600000 },
 	xai_poll_interval_ms: { env: 'ALORBACH_VIDEO_POLL_INTERVAL_MS', fallback: 3000 },
 	openai_poll_timeout_ms: { env: 'ALORBACH_VIDEO_POLL_TIMEOUT_MS', fallback: 600000 },
@@ -129,6 +130,46 @@ function nextSecret(group, previousGroup) {
 	return incoming.slice(0, 8192);
 }
 
+function nextNamedSecret(group, previousGroup, field) {
+	const next = group && typeof group === 'object' ? group : {};
+	const previous = previousGroup && typeof previousGroup === 'object' ? previousGroup : {};
+	if (next[`clear_${field}`] === true) return '';
+	const incoming = typeof next[field] === 'string' ? next[field].trim() : '';
+	if (!incoming) return String(previous[field] || '');
+	return incoming.slice(0, 8192);
+}
+
+function optionalUsdAmount(value, previous = '') {
+	if (value === undefined) return previous === undefined || previous === null ? '' : String(previous);
+	if (value === '' || value === null) return '';
+	const text = String(value).trim();
+	const parsed = /^\d+([.,]\d{1,2})?$/.test(text) ? Number.parseFloat(text.replace(',', '.')) : NaN;
+	if (!Number.isFinite(parsed) || parsed < 0 || parsed > 100000000) return previous === undefined || previous === null ? '' : String(previous);
+	return String(Math.round(parsed * 100) / 100);
+}
+
+function normalizeAnthropic(source = {}, prior = {}, now = () => new Date()) {
+	const balance = optionalUsdAmount(source.credit_balance_usd, prior.credit_balance_usd);
+	const priorBalance = prior.credit_balance_usd === undefined || prior.credit_balance_usd === null ? '' : String(prior.credit_balance_usd);
+	const validDate = (value) => typeof value === 'string' && value && Number.isFinite(Date.parse(value)) ? new Date(Date.parse(value)).toISOString() : '';
+	const priorAsOf = validDate(prior.credit_balance_as_of);
+	const sourceAsOf = validDate(source.credit_balance_as_of);
+	let asOf = '';
+	if (balance && balance === priorBalance && priorAsOf) asOf = priorAsOf;
+	// Stored records carry their own timestamp; UI saves never send one, so a new balance is stamped now.
+	else if (balance && sourceAsOf && optionalUsdAmount(source.credit_balance_usd, '') === balance) asOf = sourceAsOf;
+	else if (balance) asOf = now().toISOString();
+	return {
+		api_key: nextSecret(source, prior),
+		admin_api_key: nextNamedSecret(source, prior, 'admin_api_key'),
+		base_url: optionalString(source.base_url, prior.base_url),
+		models: optionalString(source.models, prior.models),
+		monthly_limit_usd: optionalUsdAmount(source.monthly_limit_usd, prior.monthly_limit_usd),
+		credit_balance_usd: balance,
+		credit_balance_as_of: asOf,
+	};
+}
+
 function normalizeRuntime(value = {}, previous = {}) {
 	const source = value && typeof value === 'object' ? value : {};
 	const prior = previous && typeof previous === 'object' ? previous : {};
@@ -166,7 +207,10 @@ function normalizeProviders(value = {}, previous = {}) {
 	const priorGrok = prior.grok && typeof prior.grok === 'object' ? prior.grok : {};
 	const antigravity = source.antigravity && typeof source.antigravity === 'object' ? source.antigravity : {};
 	const priorAntigravity = prior.antigravity && typeof prior.antigravity === 'object' ? prior.antigravity : {};
+	const anthropic = source.anthropic && typeof source.anthropic === 'object' ? source.anthropic : {};
+	const priorAnthropic = prior.anthropic && typeof prior.anthropic === 'object' ? prior.anthropic : {};
 	return {
+		anthropic: normalizeAnthropic(anthropic, priorAnthropic),
 		xai: {
 			api_key: nextSecret(xai, priorXai),
 			base_url: optionalString(xai.base_url, priorXai.base_url),
@@ -228,7 +272,17 @@ function maskSecret(value) {
 
 function publicProviders(providers) {
 	const source = providers && typeof providers === 'object' ? providers : emptyProviders();
+	const anthropic = source.anthropic || {};
 	return {
+		anthropic: {
+			api_key: maskSecret(anthropic.api_key),
+			admin_api_key: maskSecret(anthropic.admin_api_key),
+			base_url: anthropic.base_url || '',
+			models: anthropic.models || '',
+			monthly_limit_usd: anthropic.monthly_limit_usd || '',
+			credit_balance_usd: anthropic.credit_balance_usd || '',
+			credit_balance_as_of: anthropic.credit_balance_as_of || '',
+		},
 		xai: {
 			api_key: maskSecret(source.xai && source.xai.api_key),
 			base_url: source.xai && source.xai.base_url || '',
@@ -331,6 +385,15 @@ function resolved() {
 			timeouts,
 		},
 		providers: {
+			anthropic: {
+				api_key: resolvedString(stored.providers.anthropic.api_key, ['ANTHROPIC_API_KEY', 'AI_MODEL_RELAY_ANTHROPIC_API_KEY']),
+				admin_api_key: resolvedString(stored.providers.anthropic.admin_api_key, ['ANTHROPIC_ADMIN_KEY', 'AI_MODEL_RELAY_ANTHROPIC_ADMIN_KEY']),
+				base_url: resolvedString(stored.providers.anthropic.base_url, ['ANTHROPIC_BASE_URL', 'AI_MODEL_RELAY_ANTHROPIC_BASE_URL'], 'https://api.anthropic.com'),
+				models: resolvedString(stored.providers.anthropic.models, ['AI_MODEL_RELAY_ANTHROPIC_MODELS']),
+				monthly_limit_usd: stored.providers.anthropic.monthly_limit_usd,
+				credit_balance_usd: stored.providers.anthropic.credit_balance_usd,
+				credit_balance_as_of: stored.providers.anthropic.credit_balance_as_of,
+			},
 			xai: {
 				api_key: resolvedXaiApiKey(stored.providers),
 				base_url: resolvedString(stored.providers.xai.base_url, ['XAI_BASE_URL', 'AI_MODEL_RELAY_XAI_BASE_URL'], 'https://api.x.ai/v1'),
@@ -389,6 +452,12 @@ function driverOptions() {
 			pollTimeoutMs: timeouts.xai_poll_timeout_ms,
 			pollIntervalMs: timeouts.xai_poll_interval_ms,
 			fetchTimeoutMs: timeouts.provider_fetch_ms,
+		},
+		anthropic: {
+			apiKey: values.providers.anthropic.api_key,
+			baseUrl: values.providers.anthropic.base_url,
+			models: values.providers.anthropic.models,
+			chatTimeoutMs: timeouts.anthropic_chat_ms,
 		},
 		apiKeyChat: {
 			apiKey: values.providers.api_key_chat.api_key,
@@ -452,6 +521,7 @@ module.exports = {
 	driverOptions,
 	maskSecret,
 	normalizeCliPaths,
+	normalizeAnthropic,
 	normalizeCodexImageTool,
 	normalizeDefaults,
 	normalizeProviders,

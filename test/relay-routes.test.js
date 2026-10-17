@@ -191,6 +191,7 @@ function createMockSecurity() {
 		backgroundRefresh: false,
 		codex,
 		backends,
+		anthropicUsage: { report: async ({ force }) => ({ success: true, force: !!force, provider: 'anthropic-api' }) },
 		security: createMockSecurity(),
 		persistPairingFailures: true,
 		pairingCodePersistenceAvailable: true,
@@ -350,6 +351,17 @@ function createMockSecurity() {
 		const musicSettings = await requestJson(port, 'GET', '/v1/music-analysis/settings');
 		assert.strictEqual(musicSettings.statusCode, 200);
 		const pageOrigin = { Origin: `http://127.0.0.1:${port}` };
+		const usageEvil = await requestJson(port, 'GET', '/v1/relay/providers/anthropic/usage', null, { Origin: 'http://evil.example' });
+		assert.strictEqual(usageEvil.statusCode, 403);
+		const usageNoOrigin = await requestJson(port, 'GET', '/v1/relay/providers/anthropic/usage', null, { Origin: null });
+		assert.strictEqual(usageNoOrigin.statusCode, 403);
+		const usageLocal = await requestJson(port, 'GET', '/v1/relay/providers/anthropic/usage', null, pageOrigin);
+		assert.strictEqual(usageLocal.statusCode, 200);
+		assert.strictEqual(usageLocal.body.success, true);
+		assert.strictEqual(usageLocal.body.force, false);
+		const usageForced = await requestJson(port, 'GET', '/v1/relay/providers/anthropic/usage?refresh=1', null, pageOrigin);
+		assert.strictEqual(usageForced.statusCode, 200);
+		assert.strictEqual(usageForced.body.force, true);
 		const bootstrapCors = await requestJson(port, 'OPTIONS', '/v1/status', null, { Origin: 'https://evil.example', 'X-Alorbach-Bridge-Token': '' });
 		assert.strictEqual(bootstrapCors.statusCode, 204);
 		assert.strictEqual(bootstrapCors.headers['access-control-allow-origin'], 'https://evil.example');

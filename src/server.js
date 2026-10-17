@@ -19,6 +19,7 @@ const { PRODUCT_NAME, SHORT_NAME, LEGACY_PRODUCT_NAME } = require('./brand');
 const { createBackendRegistry, IMAGE_CAPABILITY_CONTRACT_VERSION } = require('./backend-registry');
 const { expandWindowsEnvironmentVariables } = require('./local-cli');
 const relaySettings = require('./relay-settings');
+const { createAnthropicUsage } = require('./anthropic-usage');
 const { createStatusCache } = require('./status-cache');
 const packageInfo = require('../package.json');
 const { appendLog, safeError, safeProcessSend } = require('./diagnostics');
@@ -842,6 +843,20 @@ async function route(req, res, context) {
 		return;
 	}
 
+	if (req.method === 'GET' && url.pathname === '/v1/relay/providers/anthropic/usage') {
+		if (!isLocalStatusViewer(req, bridgeSecurity)) {
+			sendErrorJson(req, res, 403, { success: false, message: 'Claude API usage is only available to the local Relay user.' });
+			return;
+		}
+		try {
+			const force = /^(1|true|yes)$/i.test(url.searchParams.get('refresh') || '');
+			sendJson(res, 200, await context.anthropicUsage.report({ force }));
+		} catch (error) {
+			sendJson(res, 500, { success: false, message: error && error.message || 'Claude API usage could not be read.' });
+		}
+		return;
+	}
+
 	if (req.method === 'GET' && url.pathname === '/v1/relay/pairing-code') {
 		if (!isLocalStatusViewer(req, bridgeSecurity)) {
 			sendErrorJson(req, res, 403, { success: false, message: 'Pairing settings are only available to the local Relay user.' });
@@ -1453,6 +1468,13 @@ function createServer(options = {}) {
 		savePersistentPairingCode: options.savePersistentPairingCode || requestPersistentPairingCodeSave,
 		listenPort: Number(options.port || process.env.ALORBACH_CODEX_BRIDGE_PORT || 8765),
 	};
+	context.anthropicUsage = options.anthropicUsage || createAnthropicUsage({
+		fetch: options.fetch,
+		getConfig: () => {
+			const resolved = context.relaySettings && typeof context.relaySettings.resolved === 'function' ? context.relaySettings.resolved() : null;
+			return resolved && resolved.providers && resolved.providers.anthropic || {};
+		},
+	});
 	context.usesProvidedBackends = !!options.backends;
 	context.rebuildBackends = (reason) => {
 		const cliPaths = applyRelayCliPaths(context);
@@ -1477,6 +1499,7 @@ function createServer(options = {}) {
 			cursor: { ...(driverOpts.cursor || {}), ...(options.cursor || {}) },
 			antigravity: { ...(driverOpts.antigravity || {}), ...(options.antigravity || {}) },
 			xai: { ...(driverOpts.xai || {}), ...(options.xai || {}) },
+			anthropic: { ...(driverOpts.anthropic || {}), ...(options.anthropic || {}) },
 			cli: { ...(driverOpts.cli || {}), ...(options.cli || {}) },
 			apiKeyChat: { ...(driverOpts.apiKeyChat || {}), ...(options.apiKeyChat || {}) },
 			fetchTimeoutMs: driverOpts.fetchTimeoutMs,

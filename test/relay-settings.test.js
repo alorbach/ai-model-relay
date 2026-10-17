@@ -186,6 +186,78 @@ try {
 	const keptGenerations = relaySettings.saveSettings({ defaults: { chat: 'model-relay:codex:auto' } });
 	assert.strictEqual(keptGenerations.codex_image_tool, 'generations');
 
+	const anthropicEnvNames = ['ANTHROPIC_API_KEY', 'AI_MODEL_RELAY_ANTHROPIC_API_KEY', 'ANTHROPIC_ADMIN_KEY', 'AI_MODEL_RELAY_ANTHROPIC_ADMIN_KEY', 'ANTHROPIC_BASE_URL', 'AI_MODEL_RELAY_ANTHROPIC_BASE_URL', 'AI_MODEL_RELAY_ANTHROPIC_MODELS', 'AI_MODEL_RELAY_ANTHROPIC_CHAT_TIMEOUT_MS'];
+	const previousAnthropicEnv = {};
+	for (const name of anthropicEnvNames) {
+		previousAnthropicEnv[name] = process.env[name];
+		delete process.env[name];
+	}
+	try {
+		state = {};
+		const apiKey = 'sk-ant-api03-FULLKEYVALUEabcd';
+		const adminKey = 'sk-ant-admin01-FULLADMINKEYwxyz';
+		relaySettings.saveSettings({ providers: { anthropic: { api_key: apiKey, admin_api_key: adminKey } } });
+		let pub = relaySettings.publicSettings();
+		assert.deepStrictEqual(pub.providers.anthropic.api_key, { configured: true, suffix: 'abcd' });
+		assert.deepStrictEqual(pub.providers.anthropic.admin_api_key, { configured: true, suffix: 'wxyz' });
+		assert.ok(!JSON.stringify(pub).includes(apiKey));
+		assert.ok(!JSON.stringify(pub).includes(adminKey));
+
+		relaySettings.saveSettings({ providers: { anthropic: { api_key: '', admin_api_key: '' } } });
+		assert.strictEqual(relaySettings.settings().providers.anthropic.api_key, apiKey);
+		assert.strictEqual(relaySettings.settings().providers.anthropic.admin_api_key, adminKey);
+
+		relaySettings.saveSettings({ providers: { anthropic: { clear_admin_api_key: true } } });
+		assert.strictEqual(relaySettings.settings().providers.anthropic.admin_api_key, '');
+		assert.strictEqual(relaySettings.settings().providers.anthropic.api_key, apiKey);
+
+		// Credit balance: normalized and stamped.
+		const stamped = relaySettings.saveSettings({ providers: { anthropic: { credit_balance_usd: '123,45' } } });
+		assert.strictEqual(stamped.providers.anthropic.credit_balance_usd, '123.45');
+		const asOf = stamped.providers.anthropic.credit_balance_as_of;
+		assert.ok(asOf && Number.isFinite(Date.parse(asOf)));
+		assert.strictEqual(new Date(asOf).toISOString(), asOf);
+		// Same balance again keeps the stamp; a plain read keeps it too.
+		const again = relaySettings.saveSettings({ providers: { anthropic: { credit_balance_usd: '123.45' } } });
+		assert.strictEqual(again.providers.anthropic.credit_balance_as_of, asOf);
+		assert.strictEqual(relaySettings.settings().providers.anthropic.credit_balance_as_of, asOf);
+		// A different balance re-stamps.
+		for (const until = Date.now() + 15; Date.now() < until;);
+		const restamped = relaySettings.saveSettings({ providers: { anthropic: { credit_balance_usd: '50' } } });
+		assert.strictEqual(restamped.providers.anthropic.credit_balance_usd, '50');
+		assert.notStrictEqual(restamped.providers.anthropic.credit_balance_as_of, asOf);
+		assert.ok(restamped.providers.anthropic.credit_balance_as_of);
+		// Clearing the balance clears the stamp.
+		const cleared = relaySettings.saveSettings({ providers: { anthropic: { credit_balance_usd: '' } } });
+		assert.strictEqual(cleared.providers.anthropic.credit_balance_usd, '');
+		assert.strictEqual(cleared.providers.anthropic.credit_balance_as_of, '');
+
+		// Only plain decimals are accepted; thousands separators, negatives, and text keep the previous value.
+		for (const bad of ['1,000.50', '1.000,50', '-5', 'abc', '12.345']) {
+			const kept = relaySettings.saveSettings({ providers: { anthropic: { credit_balance_usd: bad } } });
+			assert.strictEqual(kept.providers.anthropic.credit_balance_usd, '', bad);
+		}
+		assert.strictEqual(relaySettings.saveSettings({ providers: { anthropic: { credit_balance_usd: ' 7,5 ' } } }).providers.anthropic.credit_balance_usd, '7.5');
+		relaySettings.saveSettings({ providers: { anthropic: { credit_balance_usd: '' } } });
+
+		// Monthly limit: invalid input keeps the previous value.
+		relaySettings.saveSettings({ providers: { anthropic: { monthly_limit_usd: '100' } } });
+		assert.strictEqual(relaySettings.settings().providers.anthropic.monthly_limit_usd, '100');
+		assert.strictEqual(relaySettings.saveSettings({ providers: { anthropic: { monthly_limit_usd: 'abc' } } }).providers.anthropic.monthly_limit_usd, '100');
+		assert.strictEqual(relaySettings.saveSettings({ providers: { anthropic: { monthly_limit_usd: '-5' } } }).providers.anthropic.monthly_limit_usd, '100');
+
+		const anthropicDriver = relaySettings.driverOptions().anthropic;
+		assert.strictEqual(anthropicDriver.apiKey, apiKey);
+		assert.strictEqual(anthropicDriver.baseUrl, 'https://api.anthropic.com');
+		assert.strictEqual(anthropicDriver.chatTimeoutMs, 600000);
+		assert.ok('models' in anthropicDriver);
+	} finally {
+		for (const name of anthropicEnvNames) {
+			if (previousAnthropicEnv[name] === undefined) delete process.env[name];
+			else process.env[name] = previousAnthropicEnv[name];
+		}
+	}
+
 	console.log('relay settings tests passed');
 } finally {
 	security.readState = originalReadState;

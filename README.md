@@ -22,7 +22,7 @@ Windows tray companion for Alorbach AI Subscription Gateway. It exposes a secure
 - Executes signed Gateway image jobs and returns normalized base64 image data.
 - Executes signed Gateway audio transcription jobs through private local ASR runtimes with per-word timestamps, or through explicitly selected xAI Speech-to-Text.
 - Optionally runs a separate local music-analysis pipeline for acoustic album metrics; it does not infer lyrics or send audio to a cloud provider.
-- Routes provider-neutral relay jobs through backend drivers for Codex CLI, Antigravity CLI, local ASR, Grok/xAI, configurable CLI processes, API-key chat providers, and OpenAI video.
+- Routes provider-neutral relay jobs through backend drivers for Codex CLI, Antigravity CLI, local ASR, Grok/xAI, configurable CLI processes, API-key chat providers, Claude API (Anthropic), and OpenAI video.
 - Resolves chat and media-analysis `max_tokens` (defaults 8192 / 4096; values below 512 floor up; optional Settings overrides). Codex uses a prompt hint; xAI and API-key chat send `max_tokens` and `max_completion_tokens`.
 - Runs Grok/Cursor/Antigravity Gateway chat from a temp prompt file so large transcripts are not placed on the Windows command line. Cursor chat uses `--mode=ask`.
 - Reports local bridge multimodal capabilities, including structured Codex event support and optional video/media features.
@@ -288,6 +288,12 @@ for await (const chunk of response.body.pipeThrough(new TextDecoderStream())) {
 - `XAI_API_KEY` or `AI_MODEL_RELAY_XAI_API_KEY`: enables the Grok/xAI API chat backend, Imagine image/video (`model-relay:xai:imagine-image`, `model-relay:xai:imagine-video`), and the explicit cloud transcription model `model-relay:xai:stt`. When this key is set and no video default has been saved, video routing defaults to `model-relay:xai:imagine-video`.
 - `XAI_BASE_URL` or `AI_MODEL_RELAY_XAI_BASE_URL`: optional xAI-compatible base URL. Default: `https://api.x.ai/v1`.
 - `AI_MODEL_RELAY_XAI_MODELS`: comma-separated Grok chat model IDs exposed as `model-relay:xai:*`. Default: `grok-4.6,grok-4.5,grok-4.3,latest`.
+- `ANTHROPIC_API_KEY` or `AI_MODEL_RELAY_ANTHROPIC_API_KEY`: enables the Claude API (Anthropic) chat backend (`model-relay:anthropic:*`).
+- `ANTHROPIC_ADMIN_KEY` or `AI_MODEL_RELAY_ANTHROPIC_ADMIN_KEY`: optional Admin API key used only for month-to-date spend on the local Claude API usage card.
+- `ANTHROPIC_BASE_URL`: optional Anthropic base URL. Default: `https://api.anthropic.com`.
+- `AI_MODEL_RELAY_ANTHROPIC_MODELS`: comma-separated Claude model IDs exposed as `model-relay:anthropic:*`. Default: `claude-opus-5-5,claude-sonnet-5-5,claude-haiku-5-5`.
+- `AI_MODEL_RELAY_ANTHROPIC_CHAT_TIMEOUT_MS`: Claude API chat timeout. Default: `600000`.
+- `AI_MODEL_RELAY_ANTHROPIC_FALLBACKS`: set to `0` to stop sending refusal fallbacks (`fallbacks: "default"`, only sent when calling api.anthropic.com directly) for Opus 5.5, Opus 5, Sonnet 5.5, and Fable 5.1.
 - `AI_MODEL_RELAY_CLI_COMMAND`: enables the generic CLI process chat backend.
 - `AI_MODEL_RELAY_CLI_ARGS`: optional arguments for the CLI process backend. The prompt is sent on stdin.
 - `AI_MODEL_RELAY_CLI_TIMEOUT_MS`: CLI process timeout. Default: `600000`.
