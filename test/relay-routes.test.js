@@ -234,6 +234,7 @@ function createMockSecurity() {
 				providers: JSON.parse(JSON.stringify(storedRelay.providers)),
 			}),
 			driverOptions: () => ({}),
+			validateSettings: require('../src/relay-settings').validateSettings,
 			saveSettings: (settings) => {
 				savedRelaySettingsInput = settings;
 				if (settings.cli_paths) storedRelay.cli_paths = { ...storedRelay.cli_paths, ...settings.cli_paths };
@@ -404,6 +405,17 @@ function createMockSecurity() {
 		assert.strictEqual(savedRelaySettings.statusCode, 200);
 		assert.strictEqual(savedRelaySettingsInput.cli_paths['antigravity-cli'], 'C:\\Tools\\agy.exe');
 		assert.strictEqual(savedRelaySettings.body.refresh_started, true);
+		savedRelaySettingsInput = null;
+		const invalidLimit = await requestJson(port, 'POST', '/v1/relay/settings', { settings: { providers: { anthropic: { monthly_limit_usd: '1e3' } } } }, pageOrigin);
+		assert.strictEqual(invalidLimit.statusCode, 400);
+		assert.strictEqual(invalidLimit.body.success, false);
+		assert.strictEqual(invalidLimit.body.code, 'invalid_settings');
+		assert.strictEqual(invalidLimit.body.message, 'Monthly spend limit must be a dollar amount like 500 or 500.25 (max 100,000,000).');
+		const invalidBalance = await requestJson(port, 'POST', '/v1/relay/settings', { settings: { providers: { anthropic: { credit_balance_usd: '12.345' } } } }, pageOrigin);
+		assert.strictEqual(invalidBalance.statusCode, 400);
+		assert.strictEqual(invalidBalance.body.code, 'invalid_settings');
+		assert.strictEqual(invalidBalance.body.message, 'Credit balance must be a dollar amount like 500 or 500.25 (max 100,000,000).');
+		assert.strictEqual(savedRelaySettingsInput, null, 'invalid settings must not reach saveSettings');
 		const secret = 'xai-super-secret-key-9999';
 		const savedSecrets = await requestJson(port, 'POST', '/v1/relay/settings', { settings: { runtime: { max_concurrent_jobs: 4 }, providers: { xai: { api_key: secret } } } }, pageOrigin);
 		assert.strictEqual(savedSecrets.statusCode, 200);

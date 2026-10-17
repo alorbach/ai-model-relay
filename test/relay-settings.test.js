@@ -232,19 +232,72 @@ try {
 		assert.strictEqual(cleared.providers.anthropic.credit_balance_usd, '');
 		assert.strictEqual(cleared.providers.anthropic.credit_balance_as_of, '');
 
-		// Only plain decimals are accepted; thousands separators, negatives, and text keep the previous value.
-		for (const bad of ['1,000.50', '1.000,50', '-5', 'abc', '12.345']) {
-			const kept = relaySettings.saveSettings({ providers: { anthropic: { credit_balance_usd: bad } } });
-			assert.strictEqual(kept.providers.anthropic.credit_balance_usd, '', bad);
+		// Only plain decimals are accepted; thousands separators, negatives, exponents, and text are explicit errors and save nothing.
+		for (const bad of ['1,000.50', '1.000,50', '-5', 'abc', '12.345', '1e3']) {
+			assert.throws(
+				() => relaySettings.saveSettings({ providers: { anthropic: { credit_balance_usd: bad } } }),
+				(error) => error.code === 'invalid_settings' && /Credit balance must be a dollar amount/.test(error.message),
+				bad,
+			);
+			assert.strictEqual(relaySettings.settings().providers.anthropic.credit_balance_usd, '', bad);
 		}
+		// Above the maximum is an explicit error too, not a silent keep of the previous value.
+		assert.throws(
+			() => relaySettings.saveSettings({ providers: { anthropic: { credit_balance_usd: '100000000.01' } } }),
+			(error) => error.code === 'invalid_settings' && /max 100,000,000/.test(error.message),
+		);
+		assert.strictEqual(relaySettings.settings().providers.anthropic.credit_balance_usd, '');
+		assert.strictEqual(relaySettings.saveSettings({ providers: { anthropic: { credit_balance_usd: '100000000' } } }).providers.anthropic.credit_balance_usd, '100000000');
+		relaySettings.saveSettings({ providers: { anthropic: { credit_balance_usd: '' } } });
 		assert.strictEqual(relaySettings.saveSettings({ providers: { anthropic: { credit_balance_usd: ' 7,5 ' } } }).providers.anthropic.credit_balance_usd, '7.5');
 		relaySettings.saveSettings({ providers: { anthropic: { credit_balance_usd: '' } } });
 
-		// Monthly limit: invalid input keeps the previous value.
+		// Monthly limit: invalid input is an explicit error and the previous value is kept.
 		relaySettings.saveSettings({ providers: { anthropic: { monthly_limit_usd: '100' } } });
 		assert.strictEqual(relaySettings.settings().providers.anthropic.monthly_limit_usd, '100');
-		assert.strictEqual(relaySettings.saveSettings({ providers: { anthropic: { monthly_limit_usd: 'abc' } } }).providers.anthropic.monthly_limit_usd, '100');
-		assert.strictEqual(relaySettings.saveSettings({ providers: { anthropic: { monthly_limit_usd: '-5' } } }).providers.anthropic.monthly_limit_usd, '100');
+		for (const bad of ['abc', '-5', '1e3', '100000001']) {
+			assert.throws(
+				() => relaySettings.saveSettings({ providers: { anthropic: { monthly_limit_usd: bad, api_key: 'sk-ant-should-not-save' } } }),
+				(error) => error.code === 'invalid_settings' && /Monthly spend limit must be a dollar amount/.test(error.message),
+				bad,
+			);
+			assert.strictEqual(relaySettings.settings().providers.anthropic.monthly_limit_usd, '100', bad);
+			assert.strictEqual(relaySettings.settings().providers.anthropic.api_key, apiKey, bad);
+		}
+		assert.doesNotThrow(() => relaySettings.validateSettings({ providers: { anthropic: { monthly_limit_usd: '', credit_balance_usd: null } } }));
+		assert.doesNotThrow(() => relaySettings.validateSettings({ defaults: { chat: 'x' } }));
+
+		// Re-baselining: same balance keeps the stamp unless credit_balance_rebaseline forces a new one.
+		const base = relaySettings.saveSettings({ providers: { anthropic: { credit_balance_usd: '80' } } });
+		const baseAsOf = base.providers.anthropic.credit_balance_as_of;
+		for (const until = Date.now() + 15; Date.now() < until;);
+		const keptStamp = relaySettings.saveSettings({ providers: { anthropic: { credit_balance_usd: '80' } } });
+		assert.strictEqual(keptStamp.providers.anthropic.credit_balance_as_of, baseAsOf);
+		const rebased = relaySettings.saveSettings({ providers: { anthropic: { credit_balance_usd: '80', credit_balance_rebaseline: true } } });
+		assert.strictEqual(rebased.providers.anthropic.credit_balance_usd, '80');
+		assert.notStrictEqual(rebased.providers.anthropic.credit_balance_as_of, baseAsOf);
+		assert.ok(Date.parse(rebased.providers.anthropic.credit_balance_as_of) > Date.parse(baseAsOf));
+		assert.ok(!('credit_balance_rebaseline' in relaySettings.settings().providers.anthropic));
+		// Rebaseline without a balance does not stamp anything.
+		const noBalance = relaySettings.saveSettings({ providers: { anthropic: { credit_balance_usd: '', credit_balance_rebaseline: true } } });
+		assert.strictEqual(noBalance.providers.anthropic.credit_balance_as_of, '');
+
+		// A client-supplied credit_balance_as_of is never trusted on save; stored stamps survive reads and non-provider saves.
+		const trusted = relaySettings.saveSettings({ providers: { anthropic: { credit_balance_usd: '60' } } });
+		const trustedAsOf = trusted.providers.anthropic.credit_balance_as_of;
+		assert.ok(trustedAsOf);
+		for (const until = Date.now() + 15; Date.now() < until;);
+		const bogus = '2000-01-01T00:00:00.000Z';
+		const changedWithEcho = relaySettings.saveSettings({ providers: { anthropic: { credit_balance_usd: '61', credit_balance_as_of: bogus } } });
+		assert.notStrictEqual(changedWithEcho.providers.anthropic.credit_balance_as_of, bogus);
+		assert.ok(Date.parse(changedWithEcho.providers.anthropic.credit_balance_as_of) > Date.parse(trustedAsOf));
+		const changedAsOf = changedWithEcho.providers.anthropic.credit_balance_as_of;
+		const sameWithEcho = relaySettings.saveSettings({ providers: { anthropic: { credit_balance_usd: '61', credit_balance_as_of: bogus } } });
+		assert.strictEqual(sameWithEcho.providers.anthropic.credit_balance_as_of, changedAsOf);
+		assert.strictEqual(relaySettings.settings().providers.anthropic.credit_balance_as_of, changedAsOf);
+		relaySettings.saveSettings({ runtime: { max_concurrent_jobs: '3' } });
+		assert.strictEqual(relaySettings.settings().providers.anthropic.credit_balance_as_of, changedAsOf);
+		relaySettings.saveSettings({ providers: { anthropic: { credit_balance_usd: '' } } });
 
 		const anthropicDriver = relaySettings.driverOptions().anthropic;
 		assert.strictEqual(anthropicDriver.apiKey, apiKey);

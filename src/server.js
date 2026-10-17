@@ -1226,7 +1226,16 @@ async function route(req, res, context) {
 	}
 	if (url.pathname === '/v1/relay/settings') {
 		const previous = context.relaySettings.settings();
-		context.relaySettings.saveSettings(body.settings || body || {});
+		try {
+			if (context.relaySettings.validateSettings) context.relaySettings.validateSettings(body.settings || body || {});
+			context.relaySettings.saveSettings(body.settings || body || {});
+		} catch (error) {
+			if (error && error.code === 'invalid_settings') {
+				sendErrorJson(req, res, 400, { success: false, category: 'validation', code: 'invalid_settings', message: error.message }, origin, { route: url.pathname });
+				return;
+			}
+			throw error;
+		}
 		const settings = context.relaySettings.publicSettings
 			? context.relaySettings.publicSettings()
 			: context.relaySettings.settings();

@@ -289,7 +289,7 @@ for await (const chunk of response.body.pipeThrough(new TextDecoderStream())) {
 - `XAI_BASE_URL` or `AI_MODEL_RELAY_XAI_BASE_URL`: optional xAI-compatible base URL. Default: `https://api.x.ai/v1`.
 - `AI_MODEL_RELAY_XAI_MODELS`: comma-separated Grok chat model IDs exposed as `model-relay:xai:*`. Default: `grok-4.6,grok-4.5,grok-4.3,latest`.
 - `ANTHROPIC_API_KEY` or `AI_MODEL_RELAY_ANTHROPIC_API_KEY`: enables the Claude API (Anthropic) chat backend (`model-relay:anthropic:*`).
-- `ANTHROPIC_ADMIN_KEY` or `AI_MODEL_RELAY_ANTHROPIC_ADMIN_KEY`: optional Admin API key used only for month-to-date spend on the local Claude API usage card.
+- `ANTHROPIC_ADMIN_KEY` or `AI_MODEL_RELAY_ANTHROPIC_ADMIN_KEY`: optional Admin API key used only for month-to-date spend on the local Claude API usage card. The credit estimate is the saved dashboard balance minus Cost API spend from the start of the UTC day it was saved (daily granularity, about 5 minutes of lag, excludes Priority Tier).
 - `ANTHROPIC_BASE_URL`: optional Anthropic base URL. Default: `https://api.anthropic.com`.
 - `AI_MODEL_RELAY_ANTHROPIC_MODELS`: comma-separated Claude model IDs exposed as `model-relay:anthropic:*`. Default: `claude-opus-5-5,claude-sonnet-5-5,claude-haiku-5-5`.
 - `AI_MODEL_RELAY_ANTHROPIC_CHAT_TIMEOUT_MS`: Claude API chat timeout. Default: `600000`.

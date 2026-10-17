@@ -83,7 +83,7 @@ function createAnthropicUsage(options = {}) {
 	let inflight = null;
 
 	async function fetchCostBuckets(config, startingAt, endingAt) {
-		const base = String(config.base_url || 'https://api.anthropic.com').replace(/\/+$/, '').replace(/\/v1$/, '');
+		const base = String(config.base_url || 'https://api.anthropic.com').replace(/\/+$/, '').replace(/\/v1$/i, '');
 		const buckets = [];
 		let page = '';
 		for (let index = 0; index < MAX_COST_PAGES; index += 1) {
@@ -113,10 +113,13 @@ function createAnthropicUsage(options = {}) {
 			}
 			if (!parsed || !Array.isArray(parsed.data)) throw new Error('Cost report returned an unexpected response.');
 			for (const bucket of parsed.data) buckets.push(bucket);
-			if (!(parsed.has_more && parsed.next_page)) return buckets;
+			if (!parsed.has_more) return buckets;
+			if (!parsed.next_page) throw new Error('Cost report returned an unexpected response.');
 			page = String(parsed.next_page);
 		}
-		throw new Error('Cost report has more pages than Relay reads; save a newer credit balance.');
+		const overflow = new Error('Cost report has more pages than Relay reads; save a newer credit balance.');
+		overflow.code = 'cost_pages_overflow';
+		throw overflow;
 	}
 
 	function sumCents(buckets, from) {
@@ -124,10 +127,12 @@ function createAnthropicUsage(options = {}) {
 		let total = 0;
 		for (const bucket of buckets) {
 			const start = Date.parse(bucket && bucket.starting_at);
-			if (!Number.isFinite(start) || start < fromMs) continue;
+			if (!Number.isFinite(start)) throw new Error('Cost report returned an unexpected response.');
+			if (start < fromMs) continue;
 			for (const result of Array.isArray(bucket.results) ? bucket.results : []) {
 				const amount = Number.parseFloat(result && result.amount);
-				if (Number.isFinite(amount)) total += amount;
+				if (!Number.isFinite(amount)) throw new Error('Cost report returned an unexpected response.');
+				total += amount;
 			}
 		}
 		return total;
@@ -174,18 +179,33 @@ function createAnthropicUsage(options = {}) {
 		// The cost report snaps to whole UTC days, so a balance saved mid-day also subtracts that
 		// day's earlier spend. That errs toward showing less remaining credit, never more.
 		const balanceDay = balanceAsOf ? startOfUtcDay(balanceAsOf) : null;
-		const from = balanceDay && balanceDay < monthStart ? balanceDay : monthStart;
 		const until = new Date(startOfUtcDay(current).getTime() + 24 * 60 * 60 * 1000);
-		try {
-			const buckets = await fetchCostBuckets(config, from, until);
-			const monthCents = sumCents(buckets, monthStart);
-			report.month.spend_usd = centsToUsd(monthCents);
+		const applyMonth = (buckets) => {
+			report.month.spend_usd = centsToUsd(sumCents(buckets, monthStart));
 			if (limitUsd !== null) report.month.remaining_usd = Math.max(0, Math.round((limitUsd - report.month.spend_usd) * 100) / 100);
-			if (balanceDay) {
-				report.credits.spent_since_usd = centsToUsd(sumCents(buckets, balanceDay));
-				report.credits.remaining_usd = Math.round((balanceUsd - report.credits.spent_since_usd) * 100) / 100;
+		};
+		const applyCredits = (buckets) => {
+			report.credits.spent_since_usd = centsToUsd(sumCents(buckets, balanceDay));
+			report.credits.remaining_usd = Math.round((balanceUsd - report.credits.spent_since_usd) * 100) / 100;
+		};
+		try {
+			if (balanceDay && balanceDay < monthStart) {
+				// Month first, so a balance range that is too long to read cannot take the month spend with it.
+				applyMonth(await fetchCostBuckets(config, monthStart, until));
+				try {
+					applyCredits(await fetchCostBuckets(config, balanceDay, until));
+				} catch (error) {
+					report.credits.reason = error && error.code === 'cost_pages_overflow'
+						? 'Credit balance is too old to recount; save a newer balance or tick "Recount spend from today".'
+						: (error && error.message) || 'Credit spend could not be recounted.';
+				}
+			} else {
+				const buckets = await fetchCostBuckets(config, monthStart, until);
+				applyMonth(buckets);
+				if (balanceDay) applyCredits(buckets);
 			}
 			report.cost_report = { available: true, note: 'Cost API data lags about 5 minutes and excludes Priority Tier.' };
+			if (report.credits.reason) report.cost_report.credits_reason = report.credits.reason;
 		} catch (error) {
 			report.cost_report = {
 				available: false,

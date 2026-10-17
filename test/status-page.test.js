@@ -178,10 +178,62 @@ assert.ok(html.includes('min-height: 240px'));
 assert.ok(html.includes('data-open-live-job'));
 assert.ok(html.includes('--accent:'));
 
-console.log('status page tests passed');
-
 assert.ok(html.includes('data-settings-section="pairing"'));
 assert.ok(html.includes('id="persistentPairingCodeInput"'));
 assert.ok(html.includes('type="password"'));
 assert.ok(html.includes("const pairingCodeSettingsUrl = '/v1/relay/pairing-code'"));
 assert.ok(html.includes('The code is never returned to this page after saving.'));
+
+// Claude API settings: text money inputs, re-baseline control, chat timeout field, client-side USD validation.
+assert.ok(/id="relayAnthropicMonthlyLimit"/.test(html) && !/type="number"[^>]*id="relayAnthropicMonthlyLimit"/.test(html));
+assert.ok(/<input type="text" inputmode="decimal" id="relayAnthropicCreditBalance"/.test(html));
+assert.ok(html.includes('id="relayAnthropicCreditRebaseline"'));
+assert.ok(html.includes('Recount spend from today'));
+assert.ok(!html.includes('anthropicCreditEdited'), 'typing in the balance field must not force a re-baseline');
+assert.ok(html.includes("credit_balance_rebaseline: !!(document.getElementById('relayAnthropicCreditRebaseline') && document.getElementById('relayAnthropicCreditRebaseline').checked)"));
+assert.ok(html.includes("{ key: 'anthropic_chat_ms', label: 'Claude API chat timeout (ms)', placeholder: '600000' }"));
+assert.ok(html.includes('Relay subtracts the Cost API spend from the start of the UTC day you saved it.'));
+assert.ok(html.includes('Credit balance must be a dollar amount like 500 or 500.25 (max 100,000,000).'));
+assert.ok(html.includes('Monthly spend limit must be a dollar amount like 500 or 500.25 (max 100,000,000).'));
+assert.ok(html.includes("Number.parseFloat(check.value.replace(',', '.')) > 100000000"));
+const usdRegexSource = /!\/(\^[^/\n]*\$)\/\.test\(check\.value\)/.exec(inlineScript[1]);
+assert.ok(usdRegexSource, 'client-side USD validation should be present');
+const usdRegex = new RegExp(usdRegexSource[1]);
+for (const ok of ['500', '500.25', '0,5', '7']) assert.ok(usdRegex.test(ok), ok);
+for (const bad of ['1e3', '-5', 'abc', '12.345', '1,000.50']) assert.ok(!usdRegex.test(bad), bad);
+
+// loadClaudeUsage ignores stale responses and the timed poll skips hidden tabs.
+{
+	const loader = inlineScript[1].slice(inlineScript[1].indexOf('let claudeUsageSequence'), inlineScript[1].indexOf('async function saveRelaySettings'));
+	assert.ok(loader.includes('const sequence = ++claudeUsageSequence;'));
+	assert.strictEqual(loader.split('if (sequence !== claudeUsageSequence) return;').length - 1, 2, 'both the success and error paths must drop stale requests');
+	assert.ok(inlineScript[1].includes('setInterval(() => { if (!document.hidden) loadClaudeUsage({ force: false }); }, 5 * 60 * 1000);'));
+}
+
+// renderClaudeUsage: unknown remaining credits must not show the saved balance as the headline.
+{
+	const start = inlineScript[1].indexOf('function claudeNum(value)');
+	const end = inlineScript[1].indexOf('async function loadClaudeUsage');
+	assert.ok(start > 0 && end > start);
+	const panel = { innerHTML: '' };
+	const factory = new Function('document', 'escapeHtml', 'formatUsd', 'formatLocalDate', 'formatLocalDateTime', 'formatRelativeTime', inlineScript[1].slice(start, end) + '\nreturn { renderClaudeUsage, claudeNum };');
+	const escapeHtml = (value) => String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+	const formatUsd = (value) => '$' + Number(value).toFixed(2);
+	const { renderClaudeUsage } = factory({ getElementById: () => panel }, escapeHtml, formatUsd, () => '17 Oct 2026', () => '17 Oct 2026, 10:00', () => '1m ago');
+	const base = { configured: { api_key: true }, month: {}, rate_limits: null };
+	renderClaudeUsage({ ...base, credits: { balance_usd: 250, as_of: '2026-10-17T10:00:00Z', remaining_usd: null, spent_since_usd: null }, cost_report: { reason: 'Admin API key not configured' } });
+	assert.ok(panel.innerHTML.includes('Organization credits (estimated)</span><span class="health-value">—</span>'), 'headline must be a dash when remaining credits are unknown');
+	assert.ok(!panel.innerHTML.includes('health-value">$250.00'));
+	assert.ok(panel.innerHTML.includes('Saved balance $250.00 on 17 Oct 2026; spend since then unavailable — Admin API key not configured'));
+	renderClaudeUsage({ ...base, credits: { balance_usd: null, remaining_usd: null }, cost_report: {} });
+	assert.ok(panel.innerHTML.includes('Enter your dashboard credit balance in Settings'));
+	renderClaudeUsage({ ...base, credits: { balance_usd: 250, as_of: '2026-10-17T10:00:00Z', remaining_usd: 200, spent_since_usd: 50 }, cost_report: {} });
+	assert.ok(panel.innerHTML.includes('health-value">$200.00'));
+	renderClaudeUsage({ ...base, credits: { balance_usd: 250, as_of: '2026-10-17T10:00:00Z', remaining_usd: null }, cost_report: { reason: '<b>x</b>' } });
+	assert.ok(!panel.innerHTML.includes('<b>x</b>'));
+	renderClaudeUsage({ ...base, credits: { balance_usd: 250, as_of: '2026-10-17T10:00:00Z', remaining_usd: null, reason: 'Too old <i>x</i>' }, cost_report: { available: true } });
+	assert.ok(panel.innerHTML.includes('spend since then unavailable — Too old &lt;i&gt;x&lt;/i&gt;'));
+	assert.ok(!panel.innerHTML.includes('<i>x</i>'));
+}
+
+console.log('status page tests passed');

@@ -1899,28 +1899,35 @@ function anthropicImageBlock(value, report) {
 			if (report) report.unsupportedImage = true;
 			return null;
 		}
-		return { type: 'image', source: { type: 'base64', media_type: mediaType, data: data[2] } };
+		const base64 = data[2].replace(/\s+/g, '');
+		if (!/^[A-Za-z0-9+/]+={0,2}$/.test(base64)) {
+			if (report) report.unsupportedImage = true;
+			return null;
+		}
+		return { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } };
 	}
 	if (/^data:/i.test(url)) {
 		if (report) report.unsupportedImage = true;
 		return null;
 	}
 	if (/^https?:\/\//i.test(url)) return { type: 'image', source: { type: 'url', url } };
+	if (report) report.unsupportedImage = true;
 	return null;
 }
 
 function anthropicContent(content, report) {
 	if (typeof content === 'string') return content;
-	if (!Array.isArray(content)) return content === undefined || content === null ? '' : String(content);
+	if (content && typeof content === 'object' && !Array.isArray(content)) content = [content];
+	if (!Array.isArray(content)) return '';
 	const blocks = [];
 	for (const part of content) {
 		if (typeof part === 'string') {
-			if (part) blocks.push({ type: 'text', text: part });
+			if (part.trim()) blocks.push({ type: 'text', text: part });
 			continue;
 		}
 		if (!part || typeof part !== 'object') continue;
 		if ((part.type === 'text' || part.type === 'input_text') && typeof part.text === 'string') {
-			if (part.text) blocks.push({ type: 'text', text: part.text });
+			if (part.text.trim()) blocks.push({ type: 'text', text: part.text });
 		} else if (part.type === 'image_url' || part.type === 'input_image') {
 			const block = anthropicImageBlock(part.image_url, report);
 			if (block) blocks.push(block);
@@ -1996,7 +2003,7 @@ function createAnthropicApiDriver(options = {}) {
 			const model = modelFromRelay(payload.model);
 			const converted = anthropicMessagesFromPayload(payload);
 			if (converted.unsupportedImage) {
-				return { success: false, category: 'validation', code: 'anthropic_image_unsupported', message: 'Claude API accepts PNG, JPEG, GIF, or WebP images.' };
+				return { success: false, category: 'validation', code: 'anthropic_image_unsupported', message: 'Claude API accepts PNG, JPEG, GIF, or WebP images as data URLs or http(s) URLs.' };
 			}
 			while (converted.messages.length && converted.messages[0].role === 'assistant') converted.messages.shift();
 			if (!converted.messages.length) {
@@ -2011,7 +2018,16 @@ function createAnthropicApiDriver(options = {}) {
 				headers['anthropic-beta'] = ANTHROPIC_FALLBACK_BETA;
 				body.fallbacks = 'default';
 			}
-			const fetched = await fetchWithSession(fetchImpl, `${baseUrl}/v1/messages`, { method: 'POST', headers, body: JSON.stringify(body) }, session);
+			const timeoutResult = () => ({ success: false, category: 'timeout', code: 'anthropic_api_timeout', message: 'Claude API request timed out.', retryable: true, details: { provider: 'anthropic-api' } });
+			const networkResult = (message) => ({ success: false, category: 'api', code: 'anthropic_api_network', message, retryable: true, details: { provider: 'anthropic-api' } });
+			let fetched;
+			try {
+				fetched = await fetchWithSession(fetchImpl, `${baseUrl}/v1/messages`, { method: 'POST', headers, body: JSON.stringify(body) }, session);
+			} catch (error) {
+				if (session && session.signal && session.signal.aborted) return cancelledProviderResult();
+				if (error && (error.name === 'TimeoutError' || error.name === 'AbortError')) return timeoutResult();
+				return networkResult('Claude API connection failed.');
+			}
 			if (fetched.error) return fetched.error;
 			const response = fetched.response;
 			recordRateLimitHeaders(response.headers);
@@ -2022,8 +2038,9 @@ function createAnthropicApiDriver(options = {}) {
 			} catch (error) {
 				if (error instanceof SyntaxError) parsed = null;
 				else if (session && session.signal && session.signal.aborted) return cancelledProviderResult();
-				else if (error && (error.name === 'TimeoutError' || error.name === 'AbortError')) return { success: false, category: 'timeout', code: 'anthropic_api_timeout', message: 'Claude API request timed out.', retryable: true, details: { provider: 'anthropic-api' } };
-				else return { success: false, category: 'api', code: 'anthropic_api_failed', message: 'Claude API response exceeded the maximum size.', details: { provider: 'anthropic-api' } };
+				else if (error && (error.name === 'TimeoutError' || error.name === 'AbortError')) return timeoutResult();
+				else if (error && error.message === 'Provider download exceeds the maximum size.') return { success: false, category: 'api', code: 'anthropic_api_failed', message: 'Claude API response exceeded the maximum size.', details: { provider: 'anthropic-api' } };
+				else return networkResult('Claude API connection failed while reading the response.');
 			}
 			if (!response.ok) {
 				const status = response.status;

@@ -1779,6 +1779,7 @@ function statusPageHtml() {
 						models: (document.getElementById('relayAnthropicModels') || {}).value || '',
 						monthly_limit_usd: ((document.getElementById('relayAnthropicMonthlyLimit') || {}).value || '').trim(),
 						credit_balance_usd: ((document.getElementById('relayAnthropicCreditBalance') || {}).value || '').trim(),
+						credit_balance_rebaseline: !!(document.getElementById('relayAnthropicCreditRebaseline') && document.getElementById('relayAnthropicCreditRebaseline').checked),
 					},
 					xai: {
 						api_key: (document.getElementById('relayXaiApiKey') || {}).value || '',
@@ -1871,6 +1872,7 @@ function statusPageHtml() {
 			setValue('relayAnthropicModels', anthropicPreserved.models);
 			setValue('relayAnthropicMonthlyLimit', anthropicPreserved.monthly_limit_usd);
 			setValue('relayAnthropicCreditBalance', anthropicPreserved.credit_balance_usd);
+			setChecked('relayAnthropicCreditRebaseline', anthropicPreserved.credit_balance_rebaseline);
 			setValue('relayXaiApiKey', xai.api_key);
 			setChecked('relayXaiApiKeyClear', xai.clear_api_key);
 			setValue('relayXaiBaseUrl', xai.base_url);
@@ -2872,8 +2874,8 @@ function statusPageHtml() {
 					'<small class="muted">Admin keys (sk-ant-admin…) are created under platform.claude.com → Settings → Admin keys and are only used to read month-to-date cost. Not available for individual accounts.</small>',
 					'<label class="field"><span>Claude API base URL</span><input id="relayAnthropicBaseUrl" value="' + escapeHtml(anthropic.base_url || '') + '" placeholder="https://api.anthropic.com" autocomplete="off" spellcheck="false"></label>',
 					'<label class="field"><span>Claude chat models</span><input id="relayAnthropicModels" value="' + escapeHtml(Array.isArray(anthropic.models) ? anthropic.models.join(',') : (anthropic.models || '')) + '" placeholder="claude-opus-5-5,claude-sonnet-5-5,claude-haiku-5-5" autocomplete="off" spellcheck="false"><small class="muted">Comma-separated model IDs.</small></label>',
-					'<label class="field"><span>Monthly spend limit (USD)</span><input type="number" min="0" step="0.01" inputmode="decimal" id="relayAnthropicMonthlyLimit" value="' + escapeHtml(anthropic.monthly_limit_usd == null ? '' : String(anthropic.monthly_limit_usd)) + '" autocomplete="off"><small class="muted">Your tier or custom limit from the Claude dashboard, e.g. 500.</small></label>',
-					'<label class="field"><span>Organization credit balance (USD)</span><input type="number" min="0" step="0.01" inputmode="decimal" id="relayAnthropicCreditBalance" value="' + escapeHtml(anthropic.credit_balance_usd == null ? '' : String(anthropic.credit_balance_usd)) + '" autocomplete="off"><small class="muted">Copy "Organization credits" from platform.claude.com/dashboard. Relay subtracts the cost reported since you saved it to estimate what is left.' + (anthropic.credit_balance_as_of && formatLocalDateTime(anthropic.credit_balance_as_of) ? ' Saved ' + escapeHtml(formatLocalDateTime(anthropic.credit_balance_as_of)) : '') + '</small></label>',
+					'<label class="field"><span>Monthly spend limit (USD)</span><input type="text" inputmode="decimal" id="relayAnthropicMonthlyLimit" value="' + escapeHtml(anthropic.monthly_limit_usd == null ? '' : String(anthropic.monthly_limit_usd)) + '" autocomplete="off"><small class="muted">Your tier or custom limit from the Claude dashboard, e.g. 500.</small></label>',
+					'<label class="field"><span>Organization credit balance (USD)</span><input type="text" inputmode="decimal" id="relayAnthropicCreditBalance" value="' + escapeHtml(anthropic.credit_balance_usd == null ? '' : String(anthropic.credit_balance_usd)) + '" autocomplete="off"><small class="muted">Copy "Organization credits" from platform.claude.com/dashboard. Relay subtracts the Cost API spend from the start of the UTC day you saved it. Changing this amount restarts that count; tick the box below only to restart it with an unchanged amount.' + (anthropic.credit_balance_as_of && formatLocalDateTime(anthropic.credit_balance_as_of) ? ' Saved ' + escapeHtml(formatLocalDateTime(anthropic.credit_balance_as_of)) : '') + '</small></label><label class="checkbox-row"><input type="checkbox" id="relayAnthropicCreditRebaseline"><span>Recount spend from today</span></label>',
 					secretInput('relayXaiApiKey', 'xAI API key', xai.api_key, 'XAI_API_KEY'),
 					'<label class="field"><span>xAI base URL</span><input id="relayXaiBaseUrl" value="' + escapeHtml(xai.base_url || '') + '" placeholder="https://api.x.ai/v1" autocomplete="off" spellcheck="false"></label>',
 					'<label class="field"><span>xAI chat models</span><input id="relayXaiModels" value="' + escapeHtml(xai.models || '') + '" placeholder="grok-4.6,grok-4.5,grok-4.3,latest" autocomplete="off" spellcheck="false"><small class="muted">Comma-separated native model IDs.</small></label>',
@@ -2901,7 +2903,8 @@ function statusPageHtml() {
 				{ key: 'antigravity_media_ms', label: 'Antigravity media timeout (ms)', placeholder: '600000' },
 				{ key: 'cli_process_ms', label: 'CLI process timeout (ms)', placeholder: '600000' },
 				{ key: 'cli_probe_ms', label: 'CLI probe timeout (ms)', placeholder: '10000' },
-				{ key: 'provider_fetch_ms', label: 'HTTP provider fetch timeout (ms)', placeholder: '60000' },
+				{ key: 'provider_fetch_ms', label: 'HTTP provider fetch timeout (ms, not Claude chat)', placeholder: '60000' },
+				{ key: 'anthropic_chat_ms', label: 'Claude API chat timeout (ms)', placeholder: '600000' },
 				{ key: 'xai_poll_timeout_ms', label: 'xAI video poll timeout (ms)', placeholder: '600000' },
 				{ key: 'xai_poll_interval_ms', label: 'xAI video poll interval (ms)', placeholder: '3000' },
 				{ key: 'openai_poll_timeout_ms', label: 'OpenAI Videos poll timeout (ms)', placeholder: '600000' },
@@ -3321,7 +3324,7 @@ function statusPageHtml() {
 			const creditSub = creditBalance === null
 				? 'Enter your dashboard credit balance in Settings → Providers'
 				: (creditRemaining === null
-					? 'Saved ' + (credits.as_of ? formatLocalDate(credits.as_of) : '') + '; spend since then unavailable' + (costReport.reason ? ' (' + costReport.reason + ')' : '')
+					? 'Saved balance ' + formatUsd(creditBalance) + (credits.as_of && formatLocalDate(credits.as_of) ? ' on ' + formatLocalDate(credits.as_of) : '') + '; spend since then unavailable' + (credits.reason || costReport.reason ? ' — ' + (credits.reason || costReport.reason) : '')
 					: 'From ' + formatUsd(creditBalance) + ' saved' + (credits.as_of ? ' ' + formatLocalDate(credits.as_of) : '') + ' minus ' + formatUsd(creditSpent === null ? 0 : creditSpent) + ' spent since');
 			const monthParts = [];
 			if (limit !== null) monthParts.push('of ' + formatUsd(limit) + ' limit');
@@ -3355,13 +3358,13 @@ function statusPageHtml() {
 			}
 			const notes = [];
 			if (costReport.note) notes.push(escapeHtml(costReport.note));
-			notes.push('Anthropic does not publish the credit balance through its API; the credit figure is an estimate.');
+			notes.push('Anthropic does not publish the credit balance through its API; the credit figure is an estimate: saved balance minus Cost API spend from the start of the UTC day you saved it (daily granularity, about 5 minutes of lag, excludes Priority Tier).');
 			panel.innerHTML = [
 				'<div class="claude-usage-head"><div class="label">Claude API usage</div>',
 				'<a class="muted" href="' + escapeHtml(dashboardUrl) + '" target="_blank" rel="noopener">Open dashboard</a>',
 				'<button type="button" data-claude-usage-refresh>Refresh</button></div>',
 				'<div class="claude-usage-grid">',
-				'<div class="claude-usage-card"><span class="health-title">Organization credits (estimated)</span><span class="health-value' + creditClass + '">' + escapeHtml(creditRemaining !== null ? formatUsd(creditRemaining) : (creditBalance !== null ? formatUsd(creditBalance) : '—')) + '</span><span class="health-hint">' + escapeHtml(creditSub) + '</span></div>',
+				'<div class="claude-usage-card"><span class="health-title">Organization credits (estimated)</span><span class="health-value' + creditClass + '">' + escapeHtml(creditRemaining !== null ? formatUsd(creditRemaining) : '—') + '</span><span class="health-hint">' + escapeHtml(creditSub) + '</span></div>',
 				'<div class="claude-usage-card"><span class="health-title">Spend this month</span><span class="health-value">' + escapeHtml(spend === null ? '—' : formatUsd(spend)) + '</span>' + bar + (monthSub ? '<span class="health-hint">' + escapeHtml(monthSub) + '</span>' : '') + '</div>',
 				'<div class="claude-usage-card"><span class="health-title">Rate limits (last request)</span>' + rateHtml + '</div>',
 				'</div>',
@@ -3369,15 +3372,19 @@ function statusPageHtml() {
 			].join('');
 		}
 
+		let claudeUsageSequence = 0;
 		async function loadClaudeUsage({ force } = {}) {
 			const panel = document.getElementById('claudeUsagePanel');
 			if (!panel) return;
+			const sequence = ++claudeUsageSequence;
 			try {
 				const response = await fetch(claudeUsageUrl + (force ? '?refresh=1' : ''), { cache: 'no-store' });
 				const payload = await response.json();
+				if (sequence !== claudeUsageSequence) return;
 				if (!response.ok || payload.success === false) throw new Error(payload.message || 'Claude usage unavailable');
 				renderClaudeUsage(payload);
 			} catch (error) {
+				if (sequence !== claudeUsageSequence) return;
 				panel.innerHTML = '<div class="claude-usage-head"><div class="label">Claude API usage</div><button type="button" data-claude-usage-refresh>Refresh</button></div><div class="muted">' + escapeHtml((error && error.message) || 'Claude usage unavailable') + '</div>';
 			}
 		}
@@ -3385,6 +3392,16 @@ function statusPageHtml() {
 		async function saveRelaySettings(options = {}) {
 			const section = options.section || 'relay';
 			const settings = collectRelaySettingsPayload(section);
+			const usdChecks = section === 'runtime' || !settings.providers || !settings.providers.anthropic ? [] : [
+				{ value: settings.providers.anthropic.monthly_limit_usd, message: 'Monthly spend limit must be a dollar amount like 500 or 500.25 (max 100,000,000).' },
+				{ value: settings.providers.anthropic.credit_balance_usd, message: 'Credit balance must be a dollar amount like 500 or 500.25 (max 100,000,000).' },
+			];
+			for (const check of usdChecks) {
+				if (check.value && (!/^\\d+([.,]\\d{1,2})?$/.test(check.value) || Number.parseFloat(check.value.replace(',', '.')) > 100000000)) {
+					if (!options.quiet) fields.relaySettingsMessage.textContent = check.message;
+					return { success: false, message: check.message };
+				}
+			}
 			const otherSection = section === 'runtime' ? 'relay' : 'runtime';
 			let preserved = null;
 			try { preserved = collectRelaySettingsPayload(otherSection); } catch (error) {}
@@ -4342,7 +4359,7 @@ function statusPageHtml() {
 		initProviderTestTabs();
 		setInterval(tickElapsedCells, 1000);
 		fields.rawStatusFilter.addEventListener('input', applyRawStatusFilter);
-		fields.relaySettingsForm.addEventListener('input', () => {
+		fields.relaySettingsForm.addEventListener('input', (event) => {
 			fields.relaySettingsMessage.textContent = 'Unsaved changes';
 			updateSettingsDirtyState();
 		});
@@ -4438,7 +4455,7 @@ function statusPageHtml() {
 			if (event.target.closest('[data-claude-usage-refresh]')) loadClaudeUsage({ force: true });
 		});
 		loadClaudeUsage({ force: false });
-		setInterval(() => { loadClaudeUsage({ force: false }); }, 5 * 60 * 1000);
+		setInterval(() => { if (!document.hidden) loadClaudeUsage({ force: false }); }, 5 * 60 * 1000);
 		refresh().then(connectJobEvents).catch(() => {
 			startFallbackPolling();
 		});

@@ -148,6 +148,31 @@ function optionalUsdAmount(value, previous = '') {
 	return String(Math.round(parsed * 100) / 100);
 }
 
+const USD_INPUT_PATTERN = /^\d+([.,]\d{1,2})?$/;
+const ANTHROPIC_USD_FIELDS = [
+	{ key: 'monthly_limit_usd', message: 'Monthly spend limit must be a dollar amount like 500 or 500.25 (max 100,000,000).' },
+	{ key: 'credit_balance_usd', message: 'Credit balance must be a dollar amount like 500 or 500.25 (max 100,000,000).' },
+];
+
+function validateSettings(next = {}) {
+	const providers = next && typeof next === 'object' && next.providers && typeof next.providers === 'object' ? next.providers : null;
+	const anthropic = providers && providers.anthropic && typeof providers.anthropic === 'object' ? providers.anthropic : null;
+	if (!anthropic) return;
+	for (const field of ANTHROPIC_USD_FIELDS) {
+		const value = anthropic[field.key];
+		if (value === undefined || value === null) continue;
+		const text = String(value).trim();
+		if (!text) continue;
+		const parsed = USD_INPUT_PATTERN.test(text) ? Number.parseFloat(text.replace(',', '.')) : NaN;
+		if (!Number.isFinite(parsed) || parsed < 0 || parsed > 100000000) {
+			const error = new Error(field.message);
+			error.code = 'invalid_settings';
+			error.field = 'providers.anthropic.' + field.key;
+			throw error;
+		}
+	}
+}
+
 function normalizeAnthropic(source = {}, prior = {}, now = () => new Date()) {
 	const balance = optionalUsdAmount(source.credit_balance_usd, prior.credit_balance_usd);
 	const priorBalance = prior.credit_balance_usd === undefined || prior.credit_balance_usd === null ? '' : String(prior.credit_balance_usd);
@@ -155,7 +180,8 @@ function normalizeAnthropic(source = {}, prior = {}, now = () => new Date()) {
 	const priorAsOf = validDate(prior.credit_balance_as_of);
 	const sourceAsOf = validDate(source.credit_balance_as_of);
 	let asOf = '';
-	if (balance && balance === priorBalance && priorAsOf) asOf = priorAsOf;
+	if (balance && source.credit_balance_rebaseline === true) asOf = now().toISOString();
+	else if (balance && balance === priorBalance && priorAsOf) asOf = priorAsOf;
 	// Stored records carry their own timestamp; UI saves never send one, so a new balance is stamped now.
 	else if (balance && sourceAsOf && optionalUsdAmount(source.credit_balance_usd, '') === balance) asOf = sourceAsOf;
 	else if (balance) asOf = now().toISOString();
@@ -480,6 +506,7 @@ function driverOptions() {
 }
 
 function saveSettings(next = {}) {
+	validateSettings(next);
 	security.updateState((state) => {
 		const relay = state.relay && typeof state.relay === 'object' ? state.relay : {};
 		const hasCliPaths = Object.prototype.hasOwnProperty.call(next, 'cli_paths');
@@ -493,8 +520,15 @@ function saveSettings(next = {}) {
 			? next.defaults
 			: (keepExisting ? relay.defaults : next);
 		const tokenDefaultsSource = hasTokenDefaults ? next.token_defaults : relay.token_defaults;
+		// A client-supplied credit_balance_as_of is never trusted; only stored records (re-normalized below) carry one.
+		let incomingProviders = next.providers;
+		if (hasProviders && incomingProviders && typeof incomingProviders === 'object' && incomingProviders.anthropic && typeof incomingProviders.anthropic === 'object') {
+			const anthropicIncoming = { ...incomingProviders.anthropic };
+			delete anthropicIncoming.credit_balance_as_of;
+			incomingProviders = { ...incomingProviders, anthropic: anthropicIncoming };
+		}
 		const providers = hasProviders
-			? normalizeProviders(next.providers, relay.providers)
+			? normalizeProviders(incomingProviders, relay.providers)
 			: normalizeProviders(relay.providers, emptyProviders());
 		state.relay = {
 			...relay,
@@ -532,4 +566,5 @@ module.exports = {
 	resolved,
 	saveSettings,
 	settings,
+	validateSettings,
 };
