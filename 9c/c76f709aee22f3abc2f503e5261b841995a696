@@ -1,0 +1,53 @@
+src/anthropic-usage.js
+  s_302299dca5a0bf::t_2b737a97d7a843 1-113,117-118,120-206,211,215-226
+  s_302299dca5a0bf::t_750d020e55d0ab 114-116,119,207-210,212-214
+src/status-page.js
+  s_302299dca5a0bf::t_fd0a1553fee805 587-621,1197-1200,1472,1773-1782,1865-1873,2861,2870-2876,3271-3322,3326-3363,3365-3384,3406,4437-4441
+  s_302299dca5a0bf::t_a34ec74f5aeaec 3323-3325
+  s_302299dca5a0bf::t_1bf16436fe697f 3364
+package.json
+  s_302299dca5a0bf::t_fde8091f179f3e 12-13
+test/relay-settings.test.js
+  s_302299dca5a0bf::t_dd77ba79ad5bfb 189-224,226-234,243-260
+  s_302299dca5a0bf::t_b6449dfb9d5b5d 235-242
+  s_302299dca5a0bf::t_402e8ec1b43670 225
+src/server.js
+  s_302299dca5a0bf::t_36ba7278ac7cc5 22,846-859,1471-1477,1502
+src/backend-registry.js
+  s_302299dca5a0bf::t_24df9bb91ed11b 16,150-152,1886-1890,1892-1893,1903,1907-1911,1913-1924,1926-1944,1946-1953,1955-1961,1964-2051,2053-2069,2091,2112-2114,2212
+  s_302299dca5a0bf::t_c8343806f221a4 1891,1894-1902,1904-1906,1912,1925,1945,1954,1962-1963,2052
+test/status-page.test.js
+  s_302299dca5a0bf::t_fd0a1553fee805 11-14
+test/relay-routes.test.js
+  s_302299dca5a0bf::t_fde8091f179f3e 194,354-364
+src/relay-settings.js
+  s_302299dca5a0bf::t_93cc0352fc9e16 36,133-144,147-153,162-172,210-211,213,275,277-285,388-396,456-461,524
+  s_302299dca5a0bf::t_eecdb03be6ccec 154-161
+  s_302299dca5a0bf::t_0f2dd7389df76e 145-146
+README.md
+  s_302299dca5a0bf::t_1bf16436fe697f 25,291-296
+docs/operations.md
+  s_302299dca5a0bf::t_1bf16436fe697f 221-222
+test/anthropic-api.test.js
+  s_302299dca5a0bf::t_7779b1549518f2 216-224,228,232-238,348
+  s_302299dca5a0bf::t_b6449dfb9d5b5d 68-70,83-92,145-188,305-335,346
+  s_302299dca5a0bf::t_197660cc9b17eb 1-67,71-82,93-144,189-215,225-227,229-231,239-304,336-345,347,349-361
+docs/architecture.md
+  s_302299dca5a0bf::t_1bf16436fe697f 39-42
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "9cc76f709aee22f3abc2f503e5261b841995a696",
+  "prompts": {},
+  "sessions": {
+    "s_302299dca5a0bf": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "70612418-085e-405d-9206-0244d9396144",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
