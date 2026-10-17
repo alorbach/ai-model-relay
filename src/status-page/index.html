@@ -1,0 +1,460 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<meta name="color-scheme" content="light dark">
+	<link rel="icon" href="/favicon.ico" sizes="any">
+	<title>{{PRODUCT_NAME}} Status</title>
+	<script id="relay-theme-init">
+		/* Applies a saved Light/Dark choice before the first paint. System keeps no attribute. */
+		(function () {
+			try {
+				var saved = window.localStorage.getItem('relay-status-theme');
+				if (saved === 'light' || saved === 'dark') document.documentElement.setAttribute('data-theme', saved);
+			} catch (error) {}
+		})();
+	</script>
+	<style>
+<!-- RELAY_STYLES -->
+	</style>
+</head>
+<body>
+	<a class="skip-link" href="#main-content">Skip to content</a>
+	<div class="app-shell">
+		<div class="sidebar" id="sidebar">
+			<div class="sidebar-brand">
+				<span class="brand-mark" aria-hidden="true"></span>
+				<div class="brand-text">
+					<div class="brand-name">{{PRODUCT_NAME}}</div>
+					<div class="brand-sub">formerly {{LEGACY_PRODUCT_NAME}}</div>
+				</div>
+			</div>
+			<nav class="sidebar-nav" id="sidebar-nav" aria-label="Status page sections">
+				<ul class="nav-list">
+					<li><a class="nav-item" href="#overview" data-route="overview" aria-current="page"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/></svg><span class="nav-label">Overview</span></a></li>
+					<li><a class="nav-item" href="#live" data-route="live"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><polyline points="3 12 7.5 12 10 5 14 19 16.5 12 21 12"/></svg><span class="nav-label">Live</span><span class="nav-badge" id="navBadge-live" data-nav-badge="live" hidden>0</span></a></li>
+				</ul>
+				<div class="nav-heading">Settings</div>
+				<ul class="nav-list">
+					<li><a class="nav-item" href="#providers" data-route="providers"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3.5" y="4" width="17" height="6" rx="1.5"/><rect x="3.5" y="14" width="17" height="6" rx="1.5"/><line x1="7" y1="7" x2="7.01" y2="7"/><line x1="7" y1="17" x2="7.01" y2="17"/></svg><span class="nav-label">Providers</span><span class="nav-badge dirty" id="navBadge-providers" data-nav-badge="providers" role="img" aria-label="Unsaved changes" hidden></span></a></li>
+					<li><a class="nav-item" href="#tests" data-route="tests"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="8.5"/><polyline points="8.5 12.5 11 15 15.5 9.5"/></svg><span class="nav-label">Tests</span></a></li>
+					<li><a class="nav-item" href="#runtime" data-route="runtime"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="17" x2="20" y2="17"/><circle cx="9" cy="7" r="2.2"/><circle cx="15" cy="17" r="2.2"/></svg><span class="nav-label">Runtime</span><span class="nav-badge dirty" id="navBadge-runtime" data-nav-badge="runtime" role="img" aria-label="Unsaved changes" hidden></span></a></li>
+				</ul>
+				<div class="nav-heading">Local engines</div>
+				<ul class="nav-list">
+					<li><a class="nav-item" href="#asr" data-route="asr"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="3.5" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0"/><line x1="12" y1="18" x2="12" y2="21"/></svg><span class="nav-label">Local ASR</span><span class="nav-badge dirty" id="navBadge-asr" data-nav-badge="asr" role="img" aria-label="Unsaved changes" hidden></span></a></li>
+					<li><a class="nav-item" href="#image" data-route="image"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><circle cx="9" cy="10" r="1.6"/><polyline points="4 17 10 12 14 16 16.5 13.5 20 17"/></svg><span class="nav-label">Local Image</span><span class="nav-badge dirty" id="navBadge-image" data-nav-badge="image" role="img" aria-label="Unsaved changes" hidden></span></a></li>
+					<li><a class="nav-item" href="#upscale" data-route="upscale"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><polyline points="14 4 20 4 20 10"/><line x1="20" y1="4" x2="13" y2="11"/><polyline points="10 20 4 20 4 14"/><line x1="4" y1="20" x2="11" y2="13"/></svg><span class="nav-label">CUDA Upscale</span><span class="nav-badge dirty" id="navBadge-upscale" data-nav-badge="upscale" role="img" aria-label="Unsaved changes" hidden></span></a></li>
+					<li><a class="nav-item" href="#music" data-route="music"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 18V6l10-2v12"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="16.5" cy="16" r="2.5"/></svg><span class="nav-label">Music Analysis</span><span class="nav-badge dirty" id="navBadge-music" data-nav-badge="music" role="img" aria-label="Unsaved changes" hidden></span></a></li>
+				</ul>
+				<div class="nav-heading">System</div>
+				<ul class="nav-list">
+					<li><a class="nav-item" href="#pairing" data-route="pairing"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg><span class="nav-label">Pairing</span></a></li>
+					<li><a class="nav-item" href="#debug" data-route="debug"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><polyline points="5 8 10 12 5 16"/><line x1="12" y1="17" x2="19" y2="17"/></svg><span class="nav-label">Debug</span><span class="nav-badge bad" id="navBadge-debug" data-nav-badge="debug" hidden>0</span></a></li>
+				</ul>
+			</nav>
+		</div>
+		<div class="sidebar-backdrop" id="sidebarBackdrop" hidden></div>
+		<div class="app-body">
+			<header class="topbar">
+				<button type="button" class="menu-toggle" id="menuToggle" aria-controls="sidebar" aria-expanded="false" aria-label="Open navigation"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/></svg></button>
+				<h1 class="page-title" id="pageTitle" tabindex="-1">Overview</h1>
+				<div class="topbar-meta">
+					<div class="topbar-live">
+						<span class="pill connection-pill warn" id="connectionPill"><span class="dot"></span><span>Connecting</span></span>
+						<div class="topbar-times">
+							<span class="updated" id="updated">Loading</span>
+							<span class="updated" id="lastEvent">No live events yet</span>
+							<span class="updated render-error" id="renderError" role="status" hidden>Status page error while rendering — see console</span>
+						</div>
+					</div>
+					<div class="theme-toggle" role="group" aria-label="Color theme">
+						<button type="button" data-theme-choice="system" aria-pressed="true">System</button>
+						<button type="button" data-theme-choice="light" aria-pressed="false">Light</button>
+						<button type="button" data-theme-choice="dark" aria-pressed="false">Dark</button>
+					</div>
+				</div>
+			</header>
+			<main id="main-content" tabindex="-1">
+				<section class="view" id="view-overview" data-view="overview" aria-labelledby="pageTitle">
+					<div class="summary-grid">
+						<section class="card" aria-labelledby="overviewRelayTitle">
+							<div class="card-head">
+								<h2 class="card-title" id="overviewRelayTitle">Relay</h2>
+								<span class="pill checking" id="bridgePill"><span class="dot"></span><span>Checking</span></span>
+							</div>
+							<dl class="kv">
+								<div><dt>Version</dt><dd id="version">-</dd></div>
+								<div><dt>Port</dt><dd id="overviewPort">-</dd></div>
+								<div><dt>Paired sites</dt><dd id="overviewPairedCount">0</dd></div>
+								<div><dt>Max parallel jobs</dt><dd id="maxConcurrent">-</dd></div>
+							</dl>
+						</section>
+						<section class="card" aria-labelledby="overviewJobsTitle">
+							<div class="card-head">
+								<h2 class="card-title" id="overviewJobsTitle">Jobs</h2>
+							</div>
+							<div class="stat" id="jobCounts">Running 0 / Queued 0</div>
+							<div class="card-foot"><a class="card-link" href="#live" data-nav-hash="live">Open Live</a></div>
+						</section>
+						<section class="card" aria-labelledby="overviewProvidersTitle">
+							<div class="card-head">
+								<h2 class="card-title" id="overviewProvidersTitle">Providers</h2>
+							</div>
+							<div class="stat" id="overviewProviderSummary">Checking</div>
+							<div class="stat-sub" id="overviewProviderSummarySub">Waiting for provider detection</div>
+							<div class="card-foot"><a class="card-link" href="#providers" data-nav-hash="providers">Manage providers</a></div>
+						</section>
+					</div>
+					<section class="card" aria-labelledby="overviewGridTitle">
+						<div class="card-head">
+							<h2 class="card-title" id="overviewGridTitle">Provider status</h2>
+							<span class="card-hint">Select a provider to open its settings</span>
+						</div>
+						<div class="provider-grid" id="overviewProviderGrid"><div class="empty-state">Waiting for provider detection</div></div>
+					</section>
+					<section class="card claude-card" id="claudeUsagePanel" aria-label="Claude API usage">
+						<div class="label">Claude API usage</div>
+						<div class="muted">Loading…</div>
+					</section>
+					<details class="card disclosure" id="overviewCodexDetails">
+						<summary><span class="disclosure-title">Codex CLI details</span><span class="pill checking" id="codexPill"><span class="dot"></span><span>Checking</span></span></summary>
+						<div class="disclosure-body">
+							<table class="table">
+								<tbody>
+									<tr><th scope="row">Version</th><td><code id="codexCliVersion">-</code></td></tr>
+									<tr><th scope="row">Binary</th><td><code id="codexBinary">-</code> <button type="button" class="copy-value" data-copy-from="codexBinary">Copy</button></td></tr>
+								</tbody>
+							</table>
+						</div>
+					</details>
+					<details class="card disclosure" id="overviewAsrDetails">
+						<summary><span class="disclosure-title">Local ASR runtime</span><span class="pill checking" id="asrPill"><span class="dot"></span><span>Checking</span></span></summary>
+						<div class="disclosure-body">
+							<table class="table">
+								<tbody id="asrDetails"><tr><td class="muted">Loading</td></tr></tbody>
+							</table>
+						</div>
+					</details>
+				</section>
+
+				<section class="view" id="view-live" data-view="live" aria-labelledby="pageTitle" hidden>
+					<div class="live-inspector">
+						<div class="live-list-panel">
+							<div class="live-list-toolbar" role="toolbar" aria-label="Job filters">
+								<div class="live-filter-row" role="group" aria-label="Filter by status">
+									<button type="button" class="live-filter" data-live-filter="all" aria-pressed="true">All <span class="live-filter-count" data-live-filter-count="all">0</span></button>
+									<button type="button" class="live-filter" data-live-filter="running" aria-pressed="false">Running <span class="live-filter-count" data-live-filter-count="running">0</span></button>
+									<button type="button" class="live-filter" data-live-filter="queued" aria-pressed="false">Queued <span class="live-filter-count" data-live-filter-count="queued">0</span></button>
+									<button type="button" class="live-filter" data-live-filter="completed" aria-pressed="false">Completed <span class="live-filter-count" data-live-filter-count="completed">0</span></button>
+									<button type="button" class="live-filter" data-live-filter="failed" aria-pressed="false">Failed <span class="live-filter-count" data-live-filter-count="failed">0</span></button>
+									<button type="button" class="live-filter" data-live-filter="cancelled" aria-pressed="false">Cancelled <span class="live-filter-count" data-live-filter-count="cancelled">0</span></button>
+								</div>
+								<div class="live-filter-row live-filter-controls">
+									<label class="live-type">
+										<span class="visually-hidden">Filter by job type</span>
+										<select id="liveTypeFilter"><option value="all">All types</option></select>
+									</label>
+									<label class="live-search">
+										<span class="visually-hidden">Search jobs</span>
+										<input type="search" id="liveJobSearch" placeholder="Search id, model, provider" autocomplete="off">
+									</label>
+								</div>
+							</div>
+							<div class="live-job-list" id="liveJobList" role="group" aria-label="Job activity"></div>
+						</div>
+						<div class="live-detail-panel">
+							<div class="live-detail-empty" id="liveDetailEmpty">Select a job to inspect live output, artifacts, and debug logs.</div>
+							<div class="live-detail-content" id="liveDetailContent" hidden>
+								<div class="live-detail-header">
+									<div class="live-detail-heading">
+										<div class="label">Job inspector</div>
+										<div class="live-detail-title-row">
+											<div class="value" id="liveDetailTitle">-</div>
+											<span id="liveDetailStatus"></span>
+										</div>
+										<div class="muted" id="liveDetailSubtitle"></div>
+									</div>
+									<div class="live-detail-actions">
+										<button type="button" class="btn-sm live-toggle" id="liveWrapToggle" aria-pressed="true" title="Wrap long lines in session input and output">Wrap lines</button>
+										<button type="button" class="btn-sm live-toggle" id="liveFollowToggle" aria-pressed="true" title="Keep the newest output in view while the job runs" hidden>Auto-scroll</button>
+										<button type="button" class="btn-danger btn-sm" id="liveDetailCancel" hidden>Cancel generation</button>
+										<button type="button" class="copy-value" id="liveDetailCopyId">Copy request id</button>
+									</div>
+								</div>
+								<div class="live-detail-body" id="liveDetailBody"></div>
+							</div>
+						</div>
+					</div>
+				</section>
+
+				<section class="view" id="view-providers" data-view="providers" aria-labelledby="pageTitle" hidden>
+					<form class="settings-editor" id="relaySettingsForm" novalidate>
+						<div class="view-head">
+							<p class="view-intro">One card per provider. Expand a card to edit its executable path, keys, and models, or to run a quick test. Optional executable paths are used only by this local bridge; leave a field blank to use its configured environment variable or PATH lookup. Refresh detection saves only edited executable paths before probing every provider; keys, routing, and other edits stay unsaved until you press Save changes.</p>
+							<div class="view-actions">
+								<span class="muted" id="relaySettingsMessage" aria-live="polite">Loading routing settings</span>
+								<button type="button" id="reloadRelaySettings">Reload</button>
+								<button type="button" id="refreshRelayProviders" disabled>Refresh detection</button>
+							</div>
+						</div>
+						<div class="provider-card-list" id="providerSettings"><div class="empty-state">Loading providers</div></div>
+						<section class="card routing-card" aria-labelledby="routingTitle">
+							<div class="card-head">
+								<h2 class="card-title" id="routingTitle">Routing</h2>
+								<span class="card-hint">Default model per job type, and default token limits</span>
+							</div>
+							<div class="settings-grid" id="relayDefaultSettings"></div>
+							<div class="settings-grid" id="relayTokenDefaults"></div>
+						</section>
+						<div class="save-bar" id="relaySaveBar" role="region" aria-label="Unsaved provider changes" hidden>
+							<span class="save-bar-text" id="relaySaveBarText" aria-live="polite">Unsaved changes</span>
+							<div class="save-bar-actions">
+								<button type="button" id="discardRelaySettings">Discard</button>
+								<button type="button" class="btn-primary" id="saveRelaySettings" disabled>Save changes</button>
+							</div>
+						</div>
+					</form>
+				</section>
+
+				<section class="view" id="view-runtime" data-view="runtime" aria-labelledby="pageTitle" hidden>
+					<div class="card settings-editor">
+						<h2 class="card-title">Runtime options</h2>
+						<p class="muted">Blank timeout and concurrency fields keep the environment variable or code default. The listen port is set at process start and is not editable here.</p>
+						<div class="settings-grid" id="relayRuntimeSettings"></div>
+						<p class="muted" id="relayRuntimeMessage" aria-live="polite">Loading runtime settings</p>
+					</div>
+					<div class="save-bar" id="runtimeSaveBar" role="region" aria-label="Unsaved runtime changes" hidden>
+						<span class="save-bar-text" id="runtimeSaveBarText" aria-live="polite">Unsaved changes</span>
+						<div class="save-bar-actions">
+							<button type="button" id="discardRuntimeSettings">Discard</button>
+							<button type="button" class="btn-primary" id="saveRelayRuntimeSettings" disabled>Save runtime</button>
+						</div>
+					</div>
+				</section>
+
+				<section class="view" id="view-pairing" data-view="pairing" aria-labelledby="pageTitle" hidden>
+					<div class="card">
+						<h2 class="card-title">Pairing code</h2>
+						<p class="muted">Use a fixed six-digit code when you need the same code after Relay restarts and successful pairings. It is encrypted with the operating-system secure storage. A fixed numeric code is weaker than a one-time code; pairing attempts are rate-limited across origins and survive restarts.</p>
+						<form class="settings-editor" id="persistentPairingCodeForm">
+							<label class="field"><span>Fixed pairing code</span><input id="persistentPairingCodeInput" type="password" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="new-password" placeholder="Enter six digits" aria-describedby="pairingCodeStatus pairingCodeMessage"></label>
+							<div class="settings-actions">
+								<span class="muted" id="pairingCodeStatus">Loading pairing status</span>
+								<button type="submit" class="btn-primary" id="saveFixedPairingCode">Save fixed code</button>
+								<button type="button" id="disableFixedPairingCode">Use rotating code</button>
+							</div>
+							<p class="muted" id="pairingCodeMessage" aria-live="polite"></p>
+						</form>
+					</div>
+				</section>
+
+				<section class="view" id="view-tests" data-view="tests" aria-labelledby="pageTitle" hidden>
+					<div class="card">
+						<h2 class="card-title">Provider media and audio tests</h2>
+						<p class="muted">Runs a real request against the selected ready provider, including chat tests for every ready CLI and API chat provider. Provider usage or API charges may apply. Selecting xAI Speech-to-Text uploads the chosen audio to xAI; Local ASR and Local Music Analysis stay on this computer.</p>
+						<div class="segmented provider-test-tabs" role="tablist" aria-label="Provider test types">
+							<button class="seg-button" type="button" role="tab" id="provider-test-tab-chat" data-provider-test-tab aria-controls="provider-test-panel-chat" aria-selected="true"><span>Chat</span><span class="seg-count" data-test-count="chat" hidden>0</span></button>
+							<button class="seg-button" type="button" role="tab" id="provider-test-tab-images" data-provider-test-tab aria-controls="provider-test-panel-images" aria-selected="false" tabindex="-1"><span>Image</span><span class="seg-count" data-test-count="images" hidden>0</span></button>
+							<button class="seg-button" type="button" role="tab" id="provider-test-tab-videos" data-provider-test-tab aria-controls="provider-test-panel-videos" aria-selected="false" tabindex="-1"><span>Video</span><span class="seg-count" data-test-count="videos" hidden>0</span></button>
+							<button class="seg-button" type="button" role="tab" id="provider-test-tab-analysis" data-provider-test-tab aria-controls="provider-test-panel-analysis" aria-selected="false" tabindex="-1"><span>Video analysis</span><span class="seg-count" data-test-count="analysis" hidden>0</span></button>
+							<button class="seg-button" type="button" role="tab" id="provider-test-tab-audio" data-provider-test-tab aria-controls="provider-test-panel-audio" aria-selected="false" tabindex="-1"><span>Audio</span><span class="seg-count" data-test-count="audio" hidden>0</span></button>
+						</div>
+						<p class="test-focus-notice" id="testFocusNotice" role="status" hidden></p>
+						<div class="provider-test-panel" id="provider-test-panel-chat" role="tabpanel" aria-labelledby="provider-test-tab-chat">
+							<div class="provider-chat-toolbar test-summary-bar" id="chatSummaryBar" data-state="idle">
+								<div class="test-summary-main">
+									<button type="button" class="btn-primary" id="runAllChatTests" disabled>Run all chat tests</button>
+									<button type="button" id="cancelAllChatTests" hidden>Cancel</button>
+									<div class="test-summary-text">
+										<strong class="test-summary-line" id="chatRunAllSummary" aria-live="polite">Runs the visible chat tests one after another using each card's prompt. Each test is a real request and may incur charges.</strong>
+										<div class="count-chips" id="chatRunAllCounts"></div>
+									</div>
+								</div>
+								<div class="test-progress" id="chatRunAllProgress" role="progressbar" aria-label="Run all chat tests progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" hidden><span></span></div>
+							</div>
+							<div class="provider-media-tests" id="providerChatTests">Load routing settings to see ready chat providers.</div>
+						</div>
+						<div class="provider-test-panel" id="provider-test-panel-images" role="tabpanel" aria-labelledby="provider-test-tab-images" hidden>
+							<div class="provider-media-tests" id="providerImageTests">Load routing settings to see ready image providers.</div>
+						</div>
+						<div class="provider-test-panel" id="provider-test-panel-videos" role="tabpanel" aria-labelledby="provider-test-tab-videos" hidden>
+							<div class="provider-media-tests" id="providerVideoTests">Load routing settings to see ready video providers.</div>
+						</div>
+						<div class="provider-test-panel" id="provider-test-panel-analysis" role="tabpanel" aria-labelledby="provider-test-tab-analysis" hidden>
+							<div class="provider-media-tests" id="providerAnalysisTests">Load routing settings to see ready video-analysis providers.</div>
+						</div>
+						<div class="provider-test-panel" id="provider-test-panel-audio" role="tabpanel" aria-labelledby="provider-test-tab-audio" hidden>
+							<div class="provider-media-tests" id="providerAudioTests">Load routing settings to see ready transcription and music-analysis providers.</div>
+						</div>
+					</div>
+				</section>
+
+				<section class="view" id="view-upscale" data-view="upscale" aria-labelledby="pageTitle" hidden>
+					<div class="card">
+						<h2 class="card-title">Local CUDA Upscale Settings</h2>
+						<p class="muted">Installs a selected, pinned local Upscale model on this computer. Native ×2 and ×4 outputs are never downsampled; setup never runs during a job and never falls back to CPU.</p>
+						<form class="settings-editor" id="upscaleSettingsForm">
+							<div class="settings-grid" id="upscaleSettings"></div>
+							<div class="muted" id="upscaleModelStates">Models: not checked</div>
+							<div class="settings-grid" id="upscaleInstallActions"></div>
+							<div class="settings-actions">
+								<span class="muted" id="upscaleSettingsMessage">Loading settings</span>
+								<button type="button" id="reloadUpscaleSettings">Reload</button>
+							</div>
+							<pre class="setup-log" id="upscaleSetupLog" hidden></pre>
+							<div class="save-bar" id="upscaleSaveBar" role="region" aria-label="Unsaved CUDA Upscale changes" hidden>
+								<span class="save-bar-text" id="upscaleSaveBarText" aria-live="polite">Unsaved changes</span>
+								<div class="save-bar-actions">
+									<button type="button" id="discardUpscaleSettings">Discard</button>
+									<button type="button" class="btn-primary" id="saveUpscaleSettings" disabled>Save settings</button>
+								</div>
+							</div>
+						</form>
+					</div>
+				</section>
+
+				<section class="view" id="view-image" data-view="image" aria-labelledby="pageTitle" hidden>
+					<div class="card">
+						<h2 class="card-title">Local Image Generation</h2>
+						<p class="muted">Sets up a CUDA Diffusers runtime for the available local image models with CPU offload and VAE tiling. Use Setup Environment for the venv and packages; Install Model downloads weights only when you press the button.</p>
+						<form class="settings-editor" id="imageSettingsForm">
+							<div class="settings-grid" id="imageSettings"></div>
+							<div class="muted" id="imageModelStates">Models: not checked</div>
+							<div class="settings-grid" id="imageInstallActions"></div>
+							<div class="settings-actions">
+								<span class="muted" id="imageSettingsMessage">Loading settings</span>
+								<button type="button" id="reloadImageSettings">Reload</button>
+								<button type="button" id="setupImageEnvironment">Setup Environment</button>
+							</div>
+							<pre class="setup-log" id="imageSetupLog" hidden></pre>
+							<div class="save-bar" id="imageSaveBar" role="region" aria-label="Unsaved Local Image changes" hidden>
+								<span class="save-bar-text" id="imageSaveBarText" aria-live="polite">Unsaved changes</span>
+								<div class="save-bar-actions">
+									<button type="button" id="discardImageSettings">Discard</button>
+									<button type="button" class="btn-primary" id="saveImageSettings" disabled>Save settings</button>
+								</div>
+							</div>
+						</form>
+					</div>
+				</section>
+
+				<section class="view" id="view-music" data-view="music" aria-labelledby="pageTitle" hidden>
+					<div class="card">
+						<h2 class="card-title">Local Music Analysis Settings</h2>
+						<p class="muted">Core album metrics run privately with ffmpeg/ffprobe, librosa, and pyloudnorm. Setup downloads Python packages only when you press Setup.</p>
+						<form class="settings-editor" id="musicAnalysisSettingsForm">
+							<div class="settings-grid" id="musicAnalysisSettings"></div>
+							<div class="settings-actions">
+								<span class="muted" id="musicAnalysisSettingsMessage">Loading settings</span>
+								<button type="button" id="reloadMusicAnalysisSettings">Reload</button>
+								<button type="button" id="refreshMusicAnalysisRuntime">Refresh runtime</button>
+								<button type="button" id="setupMusicAnalysis">Setup local runtime</button>
+							</div>
+							<div class="save-bar" id="musicSaveBar" role="region" aria-label="Unsaved Music Analysis changes" hidden>
+								<span class="save-bar-text" id="musicSaveBarText" aria-live="polite">Unsaved changes</span>
+								<div class="save-bar-actions">
+									<button type="button" id="discardMusicAnalysisSettings">Discard</button>
+									<button type="button" class="btn-primary" id="saveMusicAnalysisSettings" disabled>Save settings</button>
+								</div>
+							</div>
+						</form>
+					</div>
+				</section>
+
+				<section class="view" id="view-asr" data-view="asr" aria-labelledby="pageTitle" hidden>
+					<div class="card">
+						<h2 class="card-title">Local ASR Settings</h2>
+						<p class="muted">Install a Whisper or Qwen model onto this computer with the per-model Install button. That download is explicit; transcription jobs stay offline unless you also enable Allow ASR model downloads.</p>
+						<form class="settings-editor" id="asrSettingsForm">
+							<div class="settings-grid" id="asrGeneralSettings"></div>
+							<div>
+								<div class="settings-actions">
+									<span class="label">Models</span>
+									<button type="button" id="addAsrModel">Add model</button>
+								</div>
+								<div class="model-settings-grid" id="asrModelSettings"></div>
+							</div>
+							<details class="settings-advanced">
+								<summary>Advanced JSON</summary>
+								<textarea id="asrSettingsJson" spellcheck="false"></textarea>
+								<div class="settings-actions">
+									<button type="button" id="applyAsrSettingsJson">Apply JSON to form</button>
+								</div>
+							</details>
+							<div class="settings-actions">
+								<span class="muted" id="asrSettingsMessage">Loading settings</span>
+								<button type="button" id="reloadAsrSettings">Reload</button>
+								<button type="button" id="refreshAsrRuntime">Refresh runtime</button>
+							</div>
+							<pre class="setup-log" id="asrSetupLog" hidden></pre>
+							<div class="save-bar" id="asrSaveBar" role="region" aria-label="Unsaved Local ASR changes" hidden>
+								<span class="save-bar-text" id="asrSaveBarText" aria-live="polite">Unsaved changes</span>
+								<div class="save-bar-actions">
+									<button type="button" id="discardAsrSettings">Discard</button>
+									<button type="button" class="btn-primary" id="saveAsrSettings" disabled>Save settings</button>
+								</div>
+							</div>
+						</form>
+					</div>
+				</section>
+
+				<section class="view" id="view-debug" data-view="debug" aria-labelledby="pageTitle" hidden>
+					<section class="card" aria-labelledby="debugHealthTitle">
+						<div class="card-head">
+							<h2 class="card-title" id="debugHealthTitle">Health checks</h2>
+							<span class="pill checking" id="debugHealthOverall"><span class="dot"></span><span>Checking</span></span>
+						</div>
+						<div class="count-chips" id="debugHealthSummary" aria-live="polite"></div>
+						<div class="debug-health-list" id="debugHealthList"></div>
+					</section>
+					<section class="card" aria-labelledby="debugFailuresTitle">
+						<div class="card-head">
+							<h2 class="card-title" id="debugFailuresTitle">Recent failures</h2>
+							<span class="card-hint" id="debugFailureHint">Failed jobs kept in the live window</span>
+						</div>
+						<div class="debug-failure-list" id="debugFailureList"><div class="muted">No recent failures</div></div>
+					</section>
+					<div class="debug-grid">
+						<section class="card" aria-labelledby="debugFeaturesTitle">
+							<h2 class="card-title" id="debugFeaturesTitle">Detected features</h2>
+							<div class="feature-grid" id="detectedFeatures"></div>
+						</section>
+						<section class="card" aria-labelledby="debugDriversTitle">
+							<h2 class="card-title" id="debugDriversTitle">Backend drivers</h2>
+							<div class="driver-list" id="backendDrivers"></div>
+						</section>
+						<section class="card" aria-labelledby="debugPairedTitle">
+							<h2 class="card-title" id="debugPairedTitle">Paired sites</h2>
+							<div id="pairedSites" class="chip-row muted">None</div>
+						</section>
+						<section class="card" aria-labelledby="debugCodexTitle">
+							<h2 class="card-title" id="debugCodexTitle">Codex details</h2>
+							<table class="table">
+								<tbody id="codexDetails"></tbody>
+							</table>
+						</section>
+					</div>
+					<details class="card disclosure" id="rawStatusDetails">
+						<summary><span class="disclosure-title">Raw status JSON</span><span class="muted">filter and copy</span></summary>
+						<div class="raw-toolbar">
+							<div class="raw-filter"><input type="search" id="rawStatusFilter" placeholder="Filter JSON keys or values" autocomplete="off" spellcheck="false" aria-label="Filter raw status JSON"></div>
+							<button type="button" class="copy-session-output" id="copyRawStatus">Copy diagnostics JSON</button>
+						</div>
+						<pre class="raw-status" id="rawStatus" tabindex="0">{}</pre>
+					</details>
+				</section>
+			</main>
+		</div>
+	</div>
+	<div class="image-lightbox" id="imageLightbox" role="dialog" aria-modal="true" aria-label="Generated media preview" hidden>
+		<button type="button" class="copy-session-output image-lightbox-close" id="closeImageLightbox">Close</button>
+		<img id="imageLightboxContent" alt="Generated image full preview">
+		<video id="mediaLightboxVideo" controls preload="metadata" playsinline hidden></video>
+	</div>
+	<script>
+<!-- RELAY_SCRIPT -->
+	</script>
+</body>
+</html>

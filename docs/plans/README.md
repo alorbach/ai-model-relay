@@ -28,7 +28,7 @@ Wave 4  Optional product polish
         09 → 10
 
 Wave 5  New backends / backlog
-        11  12 (independent)
+        11  12  13 (independent)
 ```
 
 Later waves assume earlier waves are merged. Plans inside a wave are sequential unless a plan says otherwise.
@@ -71,6 +71,7 @@ Later waves assume earlier waves are merged. Plans inside a wave are sequential 
 |------|-------|------|
 | [11](11-cursor-agent-images.md) | Cursor Agent images | Gateway image jobs via Cursor `GenerateImage` |
 | [12](12-chat-provider-tests.md) | Chat provider tests | Settings → Tests runs real chat requests against every ready chat provider |
+| [13](13-status-page-redesign.md) | Status page redesign | Split the page into files; light/dark sidebar layout, provider cards, readable Tests / Live / Debug |
 
 ## Constraints that apply to every plan
 
@@ -97,3 +98,4 @@ Mark a plan done in this table when its **Done when** section is complete:
 - [x] 10 Settings token overrides
 - [ ] 11 Cursor Agent images
 - [x] 12 Chat provider tests
+- [x] 13 Status page redesign

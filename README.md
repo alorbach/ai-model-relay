@@ -43,6 +43,21 @@ Double-click the tray icon or use `Open status page` to open the local status pa
 
 ![Codex Local Bridge status page with local paths redacted](docs/images/status-page.png)
 
+The screenshot above shows the earlier single-page layout. The page now has a fixed left sidebar (a menu button on narrow windows) and a light and dark theme: it follows the system setting by default, and the header toggle (System / Light / Dark) is remembered in the browser. A sticky **Save changes / Discard** bar appears at the bottom of a settings page only while it has unsaved edits, and the sidebar shows a dot on pages with unsaved changes.
+
+| Sidebar entry | What it shows |
+| --- | --- |
+| **Overview** | Relay status (reachable, version, port, paired sites), job counts, a provider summary and one status tile per provider, Claude API usage, and Codex / Local ASR runtime details behind disclosures. |
+| **Live** | Running, queued, and recent jobs with status pills, provider, model, type, and elapsed time. Filter by status or job type, search, and select a job to read its session input and output (wrap and auto-scroll toggles, copy buttons), error details, and artifact previews. |
+| **Providers** | One expandable card per provider (Codex CLI, Claude API, Grok / xAI API, Grok CLI, Cursor Agent, Antigravity, OpenAI Videos, API-key chat, CLI Process, and the local engines): status, executable path, API keys (saved keys show their last characters with **Replace** / **Clear**), models, an inline chat test, and links to the matching media tests. A **Routing** card holds the default model per job type and the token defaults. **Refresh detection** re-probes every provider. |
+| **Tests** | Chat, Image, Video, Video analysis, and Audio tests in a segmented control. **Run all chat tests** shows live progress (`Running 2 of 5 ...`) and colored pass / fail counts; replies and previews are large and copyable. Every test is a real request and can cost money. |
+| **Runtime** | Timeouts and the maximum number of parallel jobs. |
+| **Local ASR**, **Local Image**, **CUDA Upscale**, **Music Analysis** | Settings and explicit setup of the local engines. |
+| **Pairing** | Save or disable a fixed six-digit pairing code. |
+| **Debug** | Health checks with a summary, recent failed jobs with expandable details, detected features, backend drivers, paired sites, Codex details, and the raw status JSON (collapsed by default, with filter and copy). |
+
+Pages can be linked by hash: `#overview`, `#live`, `#live/<request id>`, `#providers`, `#providers/<provider id>`, `#tests`, `#tests/<chat|image|video|analysis|audio>`, `#tests/<type>/<provider id>` (selects the test type and highlights that provider's test cards), `#runtime`, `#asr`, `#image`, `#upscale`, `#music`, `#pairing`, and `#debug`. The older `#settings/<section>` links still work. The header pill shows whether the status page has a healthy live event stream (**Connected**), is polling (**Polling fallback**), keeps the last good state while a request fails (**Status delayed**), or cannot reach the Relay (**Relay unreachable**, after 3 failed polls or 30 s, or at once if nothing was loaded yet); a stream that goes silent for about 35 s is treated as stalled and replaced by polling, and the page reconnects on its own after a Relay restart; the Relay is reported as reachable as soon as it answers, even while the Codex check is still running.
+
 ## Requirements
 
 - Windows 10 or later.
@@ -68,19 +83,19 @@ codex login
 5. In WordPress, enable `AI Gateway -> Settings -> Providers / Import -> User-owned local Codex`.
 6. Keep the bridge URL as `http://127.0.0.1:8765` unless a custom port is required.
 7. Choose a Local Codex model such as `codex-local:auto` or `codex-local:image`.
-8. Enter the pairing code shown in the tray app when WordPress prompts for it. To keep the same code across restarts and successful pairings, open the local status page → Settings → Pairing and save a fixed six-digit code.
+8. Enter the pairing code shown in the tray app when WordPress prompts for it. To keep the same code across restarts and successful pairings, open the local status page → Pairing and save a fixed six-digit code.
 
-For local audio transcription, open the bridge status page after installation and review `Local ASR Settings`. Use each model's **Install model** button to create the private Python environment, install packages, and download that Hugging Face snapshot onto this computer. That action is explicit; transcription jobs do not pip-install packages. Jobs stay offline unless you also enable **Allow ASR model downloads**. Qwen setup matches Local CUDA Upscale: it uninstalls any CPU PyTorch wheel, installs CUDA PyTorch from the official cu128 index only, pins it before `qwen-asr`, and verifies the downloaded snapshot. Whisper setup installs `faster-whisper`, `huggingface_hub`, and Whisper CUDA runtime packages during Install. Default venvs: `%USERPROFILE%\.alorbach-codex-bridge\asr-venv` (faster-whisper) and `%USERPROFILE%\.alorbach-codex-bridge\qwen-asr-venv` (Qwen3 ASR/ForcedAligner).
+For local audio transcription, open the bridge status page after installation and choose **Local ASR** in the sidebar. Use each model's **Install model** button to create the private Python environment, install packages, and download that Hugging Face snapshot onto this computer. That action is explicit; transcription jobs do not pip-install packages. Jobs stay offline unless you also enable **Allow ASR model downloads**. Qwen setup matches Local CUDA Upscale: it uninstalls any CPU PyTorch wheel, installs CUDA PyTorch from the official cu128 index only, pins it before `qwen-asr`, and verifies the downloaded snapshot. Whisper setup installs `faster-whisper`, `huggingface_hub`, and Whisper CUDA runtime packages during Install. Default venvs: `%USERPROFILE%\.alorbach-codex-bridge\asr-venv` (faster-whisper) and `%USERPROFILE%\.alorbach-codex-bridge\qwen-asr-venv` (Qwen3 ASR/ForcedAligner).
 
-For local album metrics, use the separate `Local Music Analysis Settings` panel. Its setup button creates `%USERPROFILE%\.alorbach-codex-bridge\music-analysis-venv` and installs the local analysis packages only after you ask it to. It returns tempo/beat grid, key estimate, loudness, spectral descriptors, and neutral numbered sections; it does not perform stem separation, chord recognition, melody/MIDI extraction, or automatic transcription.
+For local album metrics, use the separate **Music Analysis** page of the status page. Its setup button creates `%USERPROFILE%\.alorbach-codex-bridge\music-analysis-venv` and installs the local analysis packages only after you ask it to. It returns tempo/beat grid, key estimate, loudness, spectral descriptors, and neutral numbered sections; it does not perform stem separation, chord recognition, melody/MIDI extraction, or automatic transcription.
 
 ### BuchWerk local KDP upscale
 
 This optional workflow accepts only a signed binary image from a paired BuchWerk browser. It creates a new candidate asset after the browser has reviewed a KDP crop; it never modifies the original asset.
 
-1. Open the Relay status page **Settings** tab and use **Local CUDA Upscale Settings**.
+1. Open the Relay status page and choose **CUDA Upscale** in the sidebar.
 2. Choose a model card. SwinIR ×2, Real-ESRGAN ×2plus, HAT-S ×2/×4, and DRCT ×4 have pinned official checkouts and weights. DRCT ×2 pins its runtime but stays unavailable until an operator supplies a separately verified checkpoint because no official ×2 release is published. APISR ×2 needs an explicit GPL-3.0/academic-only acknowledgement.
-3. Setup clones the official GitHub checkout, downloads the pinned model weight where available, installs CUDA PyTorch into the BasicSR `upscale-venv` or isolated APISR runtime, and verifies the weight SHA-256. Jobs never download a model or fall back to CPU. If install fails, the Settings panel shows pip/Python stdout and stderr below the model cards.
+3. Setup clones the official GitHub checkout, downloads the pinned model weight where available, installs CUDA PyTorch into the BasicSR `upscale-venv` or isolated APISR runtime, and verifies the weight SHA-256. Jobs never download a model or fall back to CPU. If install fails, the CUDA Upscale page shows pip/Python stdout and stderr below the model cards.
 4. Wait until the model state shows `installed`. The first install can take a long time.
 5. In BuchWerk choose **KDP first + local CUDA ×2**, review the crop, explicitly approve it, and start one local job. The Relay permits only one CUDA upscale job per GPU and reports free VRAM before it starts.
 
@@ -223,7 +238,7 @@ Legacy requests can keep using `codex-local:auto` and `codex-local:image`. New p
 }
 ```
 
-The `/status` page auto-refreshes and shows active, queued, and recent job activity with bounded live Codex session output for running jobs. Failed bridge requests include a `debug_help` object with the request id when available, links to `/status` and `/v1/status`, and safe troubleshooting checks. Recent failed jobs keep bounded Codex session output such as stderr/stdout/last response text when available.
+The `/status` page updates from the `/v1/status/events` stream (with automatic reconnect and a polling fallback) and shows active, queued, and recent job activity in its **Live** view, with bounded live Codex session output for running jobs. Failed bridge requests include a `debug_help` object with the request id when available, links to `/status` and `/v1/status`, and safe troubleshooting checks. Recent failed jobs keep bounded Codex session output such as stderr/stdout/last response text when available.
 
 Each local model invocation also writes full temporary debug files under `%TEMP%\alorbach-codex-local-bridge-debug`. The bridge deletes that directory on startup. Each invocation folder contains `prompt.txt`, `output.txt`, `stdout.txt`, `stderr.txt`, and `metadata.json`; these files are intentionally full-fidelity and can include prompt text, transcripts, lyrics, and local temp paths.
 
@@ -298,12 +313,12 @@ for await (const chunk of response.body.pipeThrough(new TextDecoderStream())) {
 - `AI_MODEL_RELAY_CLI_ARGS`: optional arguments for the CLI process backend. The prompt is sent on stdin.
 - `AI_MODEL_RELAY_CLI_TIMEOUT_MS`: CLI process timeout. Default: `600000`.
 - `AI_MODEL_RELAY_ANTIGRAVITY_BINARY`: explicit path to the authenticated `agy` executable. If unset, the bridge looks for `agy` on PATH; it never installs or logs in to Antigravity.
-- The local **Settings → Providers and Model Routing** panel can persist an executable path for Codex CLI, Grok CLI, Antigravity CLI, Cursor Agent, or the generic CLI Process. **Save paths & routing** automatically re-probes the CLI providers when any path changed; **Refresh detection** always forces a probe. Neither changes Windows PATH nor requires a bridge restart. Blank fields retain the environment-variable/PATH lookup.
+- The status page's **Providers** cards (and their **Routing** card) can persist an executable path for Codex CLI, Grok CLI, Antigravity CLI, Cursor Agent, or the generic CLI Process. **Save changes** (the sticky bar that appears while there are unsaved edits) automatically re-probes the CLI providers when any path changed; **Refresh detection** always forces a probe; if executable paths were edited it saves just those paths first, while typed API keys, routing, and other pending edits stay unsaved until **Save changes**. Neither changes Windows PATH nor requires a bridge restart. Blank fields retain the environment-variable/PATH lookup.
 - Antigravity CLI 1.1.4 exposes non-interactive `-p`/`--print`, but not JSON-output flags. The relay accepts that supported print mode and normalizes its text result locally; newer CLI builds that advertise `-o` or `--output-format` use JSON output automatically.
 - `AI_MODEL_RELAY_ANTIGRAVITY_STATE_DIR`: Antigravity CLI artifact state root. Default: `%USERPROFILE%\.gemini\antigravity-cli`.
 - `AI_MODEL_RELAY_ANTIGRAVITY_CHAT_TIMEOUT_MS`, `AI_MODEL_RELAY_ANTIGRAVITY_IMAGE_TIMEOUT_MS`, `AI_MODEL_RELAY_ANTIGRAVITY_MEDIA_TIMEOUT_MS`: Antigravity CLI timeouts. Defaults: `600000`, `1800000`, and `600000` ms.
 - `AI_MODEL_RELAY_CHAT_API_KEY`, `AI_MODEL_RELAY_CHAT_BASE_URL`, and `AI_MODEL_RELAY_CHAT_MODEL`: optional OpenAI-compatible API-key chat backend profile for Cursor-style or other provider keys.
-- `AI_MODEL_RELAY_UPSCALE_PYTHON`: base Python used by **Settings → Local CUDA Upscale** to create `upscale-venv`. Default auto-detects Python 3.10 or 3.12.
+- `AI_MODEL_RELAY_UPSCALE_PYTHON`: base Python used by the **CUDA Upscale** page to create `upscale-venv`. Default auto-detects Python 3.10 or 3.12.
 - `AI_MODEL_RELAY_UPSCALE_TORCH_INDEX_URL`: CUDA wheel index for `torch`/`torchvision`. Default: `https://download.pytorch.org/whl/cu128`. Setup uses only this index so pip cannot pick a CPU wheel from PyPI.
 - `AI_MODEL_RELAY_SWINIR_ROOT`, `AI_MODEL_RELAY_SWINIR_MODEL_PATH`, `AI_MODEL_RELAY_SWINIR_WEIGHT_SHA256`: official SwinIR checkout, local ×2 weight path, and pinned lowercase SHA-256.
 - `AI_MODEL_RELAY_REALESRGAN_ROOT`, `AI_MODEL_RELAY_REALESRGAN_MODEL_PATH`, `AI_MODEL_RELAY_REALESRGAN_WEIGHT_SHA256`: official Real-ESRGAN checkout, local ×2plus weight path, and pinned lowercase SHA-256.
