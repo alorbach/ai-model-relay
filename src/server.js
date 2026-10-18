@@ -27,7 +27,7 @@ const { appendLog, safeError, safeProcessSend } = require('./diagnostics');
 const STATUS_PAGE_COOKIE_NAME = 'ai_model_relay_status_page';
 const STATUS_PAGE_COOKIE_PATH = '/v1/status';
 const BRIDGE_ERROR_ORIGIN_NOT_PAIRED = 'origin_not_paired';
-const FORWARDING_HEADERS = ['x-forwarded-for', 'x-forwarded-host', 'x-forwarded-proto', 'x-forwarded-port', 'forwarded', 'x-real-ip', 'cf-connecting-ip', 'true-client-ip'];
+const FORWARDING_HEADERS = ['x-forwarded-for', 'x-forwarded-host', 'x-forwarded-proto', 'x-forwarded-port', 'forwarded', 'x-real-ip', 'cf-connecting-ip', 'true-client-ip', 'via', 'x-forwarded-server', 'x-original-host', 'x-host', 'x-forwarded-ssl'];
 let pairingCode = security.createPairingCode();
 let persistentPairingCode = false;
 let pairingCodePersistenceAvailable = false;
@@ -305,7 +305,7 @@ function isTrustedStatusViewer(req, bridgeSecurity) {
 		}
 	}
 	const pairedOrigin = pairedStatusPageOrigin(req, bridgeSecurity);
-	return !!(pairedOrigin && (isHttpsOrigin(pairedOrigin) || isLoopbackHttpOrigin(req, pairedOrigin)));
+	return !!pairedOrigin;
 }
 
 function isLocalStatusViewer(req, bridgeSecurity) {
@@ -619,7 +619,10 @@ function capabilitiesPayload(context) {
 function statusPayload(context, options = {}) {
 	const includePairedOrigins = options.includePairedOrigins === true;
 	const includeDiagnostics = options.includeDiagnostics !== false;
-	const jobsSnapshot = context.jobManager.snapshot(String(options.jobsOrigin || ''));
+	let jobsSnapshot = context.jobManager.snapshot(String(options.jobsOrigin || ''));
+	if (options.hideJobs) {
+		jobsSnapshot = { ...jobsSnapshot, running_count: 0, queued_count: 0, active: [], queued: [], recent: [] };
+	}
 	const jobs = includeDiagnostics ? jobsSnapshot : publicJobsSnapshot(jobsSnapshot);
 	if (context.statusCache) {
 		const cachedStatus = context.statusCache.status();
@@ -852,7 +855,7 @@ function isLocalPageOrigin(req, origin) {
 	let parsed;
 	try { parsed = new URL(origin); } catch (error) { return false; }
 	if (parsed.protocol !== 'http:') return false;
-	const localHosts = new Set(['127.0.0.1', 'localhost', '::1']);
+	const localHosts = new Set(['127.0.0.1', 'localhost', '[::1]']);
 	if (!localHosts.has(parsed.hostname)) return false;
 	const hostHeader = String(req.headers.host || '').trim();
 	if (!hostHeader) return false;
@@ -980,10 +983,6 @@ async function route(req, res, context) {
 		const localViewer = isLocalStatusViewer(req, bridgeSecurity);
 		const pairedOrigin = localViewer ? '' : pairedStatusPageOrigin(req, bridgeSecurity) || requirePairing(req, res, bridgeSecurity);
 		if (!localViewer && !pairedOrigin) return;
-		if (!localViewer && !isHttpsOrigin(pairedOrigin) && !isLoopbackHttpOrigin(req, pairedOrigin)) {
-			sendErrorJson(req, res, 403, { success: false, message: 'Remote status-page artifacts require HTTPS.' }, pairedOrigin);
-			return;
-		}
 		const artifact = jobManager.artifact(artifactMatch[1], artifactMatch[2], pairedOrigin);
 		if (!artifact) {
 			sendJson(res, 404, { success: false, message: 'Generated job artifact was not found.' }, pairedOrigin || undefined);
@@ -994,12 +993,9 @@ async function route(req, res, context) {
 	}
 	const relayArtifactMatch = url.pathname.match(/^\/v1\/relay\/jobs\/([^/]+)\/artifact$/);
 	if (req.method === 'GET' && relayArtifactMatch) {
+		if (rejectQueryToken(req, res, url, 'artifact')) return;
 		const pairedOrigin = requirePairing(req, res, bridgeSecurity);
 		if (!pairedOrigin) return;
-		if (!isLocalPageOrigin(req, pairedOrigin) && !isHttpsOrigin(pairedOrigin) && !isLoopbackHttpOrigin(req, pairedOrigin)) {
-			sendErrorJson(req, res, 403, { success: false, message: 'Remote job artifacts require HTTPS.' }, pairedOrigin);
-			return;
-		}
 		const artifact = jobManager.artifactByRequestId(relayArtifactMatch[1], pairedOrigin);
 		if (!artifact) {
 			sendJson(res, 404, { success: false, message: 'Generated job artifact was not found.' }, pairedOrigin);
@@ -1046,6 +1042,7 @@ async function route(req, res, context) {
 			includePairedOrigins: localViewer,
 			includeDiagnostics: trusted,
 			jobsOrigin: localViewer || !trusted ? '' : pairedStatusPageOrigin(req, bridgeSecurity),
+			hideJobs: !localViewer && !trusted,
 		});
 		sendJson(res, status.success ? 200 : 503, status, corsOrigin(req, bridgeSecurity, { bootstrap: true }));
 		return;
@@ -1114,10 +1111,6 @@ async function route(req, res, context) {
 		}
 		const pairedOrigin = pairedStatusPageOrigin(req, bridgeSecurity) || requirePairing(req, res, bridgeSecurity);
 		if (!pairedOrigin) {
-			return;
-		}
-		if (!isLocalPageOrigin(req, pairedOrigin) && !isHttpsOrigin(pairedOrigin) && !isLoopbackHttpOrigin(req, pairedOrigin)) {
-			sendErrorJson(req, res, 403, { success: false, message: 'Remote status streams require HTTPS.' }, pairedOrigin);
 			return;
 		}
 		const jobsOrigin = isLocalStatusViewer(req, bridgeSecurity) ? '' : pairedOrigin;

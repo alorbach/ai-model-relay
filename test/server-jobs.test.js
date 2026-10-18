@@ -291,10 +291,10 @@ function createMockSecurity() {
 		assert.strictEqual(unpairedStatus.headers['access-control-allow-origin'], 'https://evil.example');
 		assert.strictEqual(unpairedStatus.body.bridge.version, require('../package.json').version);
 		assert.ok(!Object.prototype.hasOwnProperty.call(unpairedStatus.body.bridge, 'paired_origins'));
-		assert.ok(!Object.prototype.hasOwnProperty.call(unpairedStatus.body.jobs.active[0], 'session_output'));
-		assert.ok(!Object.prototype.hasOwnProperty.call(unpairedStatus.body.jobs.active[0], 'session_input'));
-		assert.ok(!Object.prototype.hasOwnProperty.call(unpairedStatus.body.jobs.active[0], 'debug_logs'));
-		assert.ok(!Object.prototype.hasOwnProperty.call(unpairedStatus.body.jobs.active[0], 'artifacts'));
+		// Unpaired callers learn nothing about any job (ids, models, errors belong to paired origins).
+		assert.deepStrictEqual(unpairedStatus.body.jobs.active.concat(unpairedStatus.body.jobs.queued, unpairedStatus.body.jobs.recent), []);
+		assert.deepStrictEqual([unpairedStatus.body.jobs.running_count, unpairedStatus.body.jobs.queued_count], [0, 0]);
+		assert.ok(!JSON.stringify(unpairedStatus.body).includes('request-1'));
 		const serializedState = JSON.stringify(stateUpdates);
 		assert.ok(serializedState.includes('request-1'));
 		assert.ok(serializedState.includes('codex-local:gpt-5.4'));
@@ -388,17 +388,25 @@ function createMockSecurity() {
 		assert.deepStrictEqual(otherStatus.body.jobs.active, []);
 		assert.ok(!JSON.stringify(otherStatus.body).includes('request-1'));
 		assert.ok(!Object.prototype.hasOwnProperty.call(otherStatus.body.bridge, 'paired_origins'));
+		// Integration clients paired from a plain-HTTP site keep the stream and artifact access they had before remote status pages.
+		const httpSite = { Origin: 'http://wp.test', 'X-Alorbach-Bridge-Token': 'test-token' };
+		const httpSiteStream = await requestEvents(port, '/v1/status/stream', httpSite, ['jobs']);
+		assert.strictEqual(httpSiteStream.statusCode, 200);
+		assert.strictEqual((await requestJson(port, 'GET', '/v1/status/jobs/999/artifacts/0', null, httpSite)).statusCode, 404);
+		assert.strictEqual((await requestJson(port, 'GET', '/v1/relay/jobs/none/artifact', null, httpSite)).statusCode, 404);
+		assert.strictEqual((await requestJson(port, 'GET', '/v1/relay/jobs/none/artifact?bridge_token=test-token', null, { ...httpSite, 'X-Alorbach-Bridge-Token': '' })).statusCode, 400);
 		const ownStatus = await requestJson(port, 'GET', '/v1/status');
 		assert.strictEqual(ownStatus.body.jobs.active.length, 2);
 
 		// Host and Origin are client-controlled: a proxied request must never count as the local viewer.
 		const localPage = { Origin: `http://127.0.0.1:${port}`, 'X-Alorbach-Bridge-Token': '' };
-		for (const forwarding of [{ 'X-Forwarded-For': '203.0.113.9' }, { 'X-Forwarded-Host': 'relay.example' }, { 'X-Forwarded-Proto': 'https' }, { Forwarded: 'for=203.0.113.9' }, { 'X-Real-IP': '203.0.113.9' }, { 'CF-Connecting-IP': '203.0.113.9' }]) {
+		for (const forwarding of [{ 'X-Forwarded-For': '203.0.113.9' }, { 'X-Forwarded-Host': 'relay.example' }, { 'X-Forwarded-Proto': 'https' }, { Forwarded: 'for=203.0.113.9' }, { 'X-Real-IP': '203.0.113.9' }, { 'CF-Connecting-IP': '203.0.113.9' }, { Via: '1.1 proxy' }, { 'X-Forwarded-Server': 'proxy' }, { 'X-Original-Host': 'relay.example' }, { 'X-Host': 'relay.example' }, { 'X-Forwarded-SSL': 'on' }]) {
 			const headers = { ...localPage, ...forwarding };
 			const label = Object.keys(forwarding)[0];
 			const forwardedStatus = await requestJson(port, 'GET', '/v1/status', null, headers);
 			assert.ok(!Object.prototype.hasOwnProperty.call(forwardedStatus.body.bridge, 'paired_origins'), label);
-			assert.ok(!Object.prototype.hasOwnProperty.call(forwardedStatus.body.jobs.active[0], 'session_output'), label);
+			assert.deepStrictEqual(forwardedStatus.body.jobs.active, [], label);
+			assert.ok(!JSON.stringify(forwardedStatus.body).includes('request-1'), label);
 			assert.strictEqual((await requestJson(port, 'GET', '/v1/status/events', null, headers)).statusCode, 403, label);
 			assert.strictEqual((await requestJson(port, 'GET', '/v1/relay/pairing-code', null, headers)).statusCode, 403, label);
 			assert.strictEqual((await requestJson(port, 'POST', '/v1/relay/pairing-code', { pairing_code: '123456' }, headers)).statusCode, 403, label);
@@ -419,7 +427,7 @@ function createMockSecurity() {
 		const streamQueryToken = await requestJson(port, 'GET', '/v1/status/stream?bridge_token=test-token', null, { Origin: 'https://remote.example', 'X-Alorbach-Bridge-Token': '' });
 		assert.strictEqual(streamQueryToken.statusCode, 400);
 		const statusQueryToken = await requestJson(port, 'GET', '/v1/status?bridge_token=test-token', null, { Origin: 'https://remote.example', 'X-Alorbach-Bridge-Token': '' });
-		assert.ok(!Object.prototype.hasOwnProperty.call(statusQueryToken.body.jobs.active[0], 'session_output'), 'a query token does not unlock status diagnostics');
+		assert.deepStrictEqual(statusQueryToken.body.jobs.active, [], 'a query token does not unlock status diagnostics');
 
 		pending[1].resolve({ success: true, response: { id: 'second' } });
 		const secondResult = await second;
