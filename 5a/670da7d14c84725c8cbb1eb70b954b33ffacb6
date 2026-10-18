@@ -1,0 +1,38 @@
+src/asr.js
+  s_302299dca5a0bf::t_24961705663d03 33
+test/tray-menu.test.js
+  s_302299dca5a0bf::t_fc510d87c835d8 6,25,54,65,95,99-100,129-130,146-168,180-187
+  s_302299dca5a0bf::t_dcee54683fd262 188
+docs/operations.md
+  s_302299dca5a0bf::t_6b63750ee12600 41
+  s_302299dca5a0bf::t_6e975b7610bc80 168
+docs/local-bridge-api.md
+  s_302299dca5a0bf::t_c36abf4ca6c084 282,457
+  s_302299dca5a0bf::t_6b63750ee12600 54
+scripts/capture-screenshots.js
+  s_302299dca5a0bf::t_d9d5905caabf84 399-400
+  s_302299dca5a0bf::t_6b63750ee12600 29-30
+README.md
+  s_302299dca5a0bf::t_24961705663d03 93
+src/tray-menu.js
+  s_302299dca5a0bf::t_d9d5905caabf84 73-76,78-97,100-104,124,128,192,195
+  s_302299dca5a0bf::t_6b63750ee12600 5
+src/main.js
+  s_302299dca5a0bf::t_d9d5905caabf84 349-350
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "5a670da7d14c84725c8cbb1eb70b954b33ffacb6",
+  "prompts": {},
+  "sessions": {
+    "s_302299dca5a0bf": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "70612418-085e-405d-9206-0244d9396144",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
