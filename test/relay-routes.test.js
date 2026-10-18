@@ -85,7 +85,7 @@ function createMockSecurity() {
 		},
 		removePairing: () => {},
 		savePairing: () => {},
-		validateBridgeToken: (origin, token) => !!origin && token === 'test-token',
+		validateBridgeToken: (origin, token) => ['http://127.0.0.1:8787', 'http://127.0.0.1:9999', 'https://wp.example'].includes(origin) && token === 'test-token',
 	};
 }
 
@@ -298,7 +298,8 @@ function createMockSecurity() {
 		assert.strictEqual(staleTokenModels.headers['access-control-allow-origin'], 'http://127.0.0.1:8787');
 		assert.strictEqual(staleTokenModels.headers['access-control-allow-private-network'], 'true');
 		assert.ok(staleTokenModels.headers['access-control-allow-headers'].toLowerCase().includes('x-alorbach-bridge-token'));
-		assert.strictEqual(staleTokenModels.body.message, 'This WordPress origin is not paired with the local Codex bridge.');
+		assert.strictEqual(staleTokenModels.body.message, 'This browser origin is not paired with AI Model Relay.');
+		assert.strictEqual(staleTokenModels.body.code, 'origin_not_paired');
 
 		const missingTokenModels = await requestJson(port, 'GET', '/v1/relay/models', null, { Origin: 'http://127.0.0.1:8787', 'X-Alorbach-Bridge-Token': null });
 		assert.strictEqual(missingTokenModels.statusCode, 403);
@@ -700,6 +701,31 @@ function createMockSecurity() {
 		assert.strictEqual(pairOk.body.success, true);
 		assert.strictEqual(pairOk.headers['access-control-allow-origin'], 'https://wp.example');
 		assert.strictEqual(getPairingCode(), fixedPairingCode, 'a fixed code stays stable after successful pairing');
+
+		// Status-page pairing over HTTPS also sets an HttpOnly, Secure, SameSite=Strict cookie scoped to the status routes.
+		assert.ok(!pairOk.headers['set-cookie'], 'integration clients get no cookie');
+		const statusPagePair = await requestJson(port, 'POST', '/v1/pair', { origin: 'https://wp.example', pairing_code: getPairingCode(), client: 'status-page' }, { Origin: 'https://wp.example', 'X-Alorbach-Bridge-Token': '' });
+		assert.strictEqual(statusPagePair.statusCode, 200);
+		const pairCookie = String(statusPagePair.headers['set-cookie'] || '');
+		for (const attribute of ['ai_model_relay_status_page=test-token', 'HttpOnly', 'Secure', 'SameSite=Strict', 'Path=/v1/status']) assert.ok(pairCookie.includes(attribute), attribute);
+		const insecureStatusPagePair = await requestJson(port, 'POST', '/v1/pair', { origin: 'http://wp.example', pairing_code: getPairingCode(), client: 'status-page' }, { Origin: 'http://wp.example', 'X-Alorbach-Bridge-Token': '' });
+		assert.strictEqual(insecureStatusPagePair.statusCode, 403, 'remote status-page pairing requires HTTPS');
+		assert.ok(!insecureStatusPagePair.headers['set-cookie']);
+		// The cookie authenticates same-origin status reads, but only for an HTTPS origin and not through a query token.
+		const cookieHeaders = { Origin: 'https://wp.example', 'X-Alorbach-Bridge-Token': '', Cookie: 'ai_model_relay_status_page=test-token' };
+		const cookieArtifact = await requestJson(port, 'GET', '/v1/status/jobs/999/artifacts/0', null, cookieHeaders);
+		assert.strictEqual(cookieArtifact.statusCode, 404, 'a valid cookie is accepted (the artifact itself does not exist)');
+		const noCookieArtifact = await requestJson(port, 'GET', '/v1/status/jobs/999/artifacts/0', null, { ...cookieHeaders, Cookie: null });
+		assert.strictEqual(noCookieArtifact.statusCode, 403);
+		assert.strictEqual(noCookieArtifact.body.code, 'origin_not_paired');
+		const badCookieArtifact = await requestJson(port, 'GET', '/v1/status/jobs/999/artifacts/0', null, { ...cookieHeaders, Cookie: 'ai_model_relay_status_page=wrong' });
+		assert.strictEqual(badCookieArtifact.statusCode, 403, 'a wrong cookie is rejected');
+		const cookieQueryArtifact = await requestJson(port, 'GET', '/v1/status/jobs/999/artifacts/0?bridge_token=test-token', null, { ...cookieHeaders, Cookie: null });
+		assert.strictEqual(cookieQueryArtifact.statusCode, 400);
+		const unpair = await requestJson(port, 'POST', '/v1/unpair', {}, { Origin: 'https://wp.example' });
+		assert.strictEqual(unpair.statusCode, 200);
+		const clearedCookie = String(unpair.headers['set-cookie'] || '');
+		assert.ok(clearedCookie.includes('ai_model_relay_status_page=;') && clearedCookie.includes('Max-Age=0'), 'unpairing clears the cookie');
 
 		const disableFixedPairing = await requestJson(port, 'POST', '/v1/relay/pairing-code', { enabled: false }, pageOrigin);
 		assert.strictEqual(disableFixedPairing.statusCode, 200);

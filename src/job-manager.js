@@ -536,16 +536,22 @@ class JobManager {
 		return recent ? this.artifact(recent.id, 0) : null;
 	}
 
-	snapshot() {
+	/* An origin limits the snapshot to the jobs that origin created. Local
+	 * viewers pass no origin and see every job. */
+	snapshot(origin = '') {
 		this.pruneRecent();
+		const scoped = !!String(origin || '').trim();
+		const visible = (job) => !scoped || jobMatchesOrigin(job, origin);
+		const active = Array.from(this.running.values()).filter(visible);
+		const queued = this.queue.filter(visible);
 		return {
-			running_count: this.running.size,
-			queued_count: this.queue.length,
+			running_count: active.length,
+			queued_count: queued.length,
 			max_concurrent: this.maxConcurrent,
 			retention_ms: this.retentionMs,
-			active: Array.from(this.running.values()).map((job) => this.compact(job)),
-			queued: this.queue.map((job) => this.compact(job)),
-			recent: this.recent.map((job) => this.compact(job)),
+			active: active.map((job) => this.compact(job)),
+			queued: queued.map((job) => this.compact(job)),
+			recent: this.recent.filter(visible).map((job) => this.compact(job)),
 		};
 	}
 

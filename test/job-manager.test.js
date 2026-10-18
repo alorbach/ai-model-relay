@@ -374,6 +374,33 @@ function deferredRunner(label, started, resolvers, result = { success: true }) {
 	assert.ok(!Object.prototype.hasOwnProperty.call(publicJobs.recent[0], 'debug_logs'));
 	assert.ok(!Object.prototype.hasOwnProperty.call(publicJobs.recent[0], 'artifacts'));
 
+	// A snapshot limited to an origin only contains that origin's jobs; no origin means every job.
+	{
+		const started = [];
+		const resolvers = {};
+		const manager = new JobManager({ maxConcurrent: 1 });
+		const a = manager.run({ requestId: 'scope-a', type: 'chat', model: 'm', origin: 'https://a.example' }, deferredRunner('a', started, resolvers));
+		const b = manager.run({ requestId: 'scope-b', type: 'chat', model: 'm', origin: 'https://b.example' }, deferredRunner('b', started, resolvers));
+		const local = manager.run({ requestId: 'scope-local', type: 'chat', model: 'm' }, deferredRunner('local', started, resolvers));
+		await tick();
+		const ids = (snapshot) => snapshot.active.concat(snapshot.queued, snapshot.recent).map((job) => job.request_id);
+		assert.deepStrictEqual(ids(manager.snapshot()), ['scope-a', 'scope-b', 'scope-local']);
+		assert.deepStrictEqual(ids(manager.snapshot('https://a.example')), ['scope-a']);
+		assert.deepStrictEqual([manager.snapshot('https://a.example').running_count, manager.snapshot('https://a.example').queued_count], [1, 0]);
+		assert.deepStrictEqual(ids(manager.snapshot('https://b.example')), ['scope-b']);
+		assert.deepStrictEqual(ids(manager.snapshot('https://c.example')), []);
+		resolvers.a();
+		await a;
+		await tick();
+		resolvers.b();
+		await b;
+		await tick();
+		resolvers.local();
+		await local;
+		assert.deepStrictEqual(manager.snapshot('https://b.example').recent.map((job) => job.request_id), ['scope-b']);
+		assert.deepStrictEqual(manager.snapshot('https://c.example').recent, []);
+	}
+
 	console.log('job manager tests passed');
 })().catch((error) => {
 	console.error(error);

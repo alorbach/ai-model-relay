@@ -252,7 +252,8 @@ function createMockSecurity() {
 		assert.ok(page.body.includes('?refresh=1'));
 		assert.ok(page.body.includes('Structured exec JSON'));
 		assert.ok(page.body.includes('OpenAI video route'));
-		assert.ok(page.body.includes('new window.EventSource(jobEventsUrl)'));
+		assert.ok(page.body.includes('new window.EventSource(eventsUrl)'));
+		assert.ok(page.body.includes("'/v1/status/stream'"));
 		assert.ok(page.body.includes('startFallbackPolling'));
 		assert.ok(page.body.includes('<details class="card disclosure" id="rawStatusDetails">'));
 		assert.ok(page.body.includes('<span class="disclosure-title">Raw status JSON</span>'));
@@ -321,7 +322,7 @@ function createMockSecurity() {
 				req.destroy();
 				reject(new Error('Timed out waiting for status events.'));
 			}, 2000);
-			const req = http.get({ hostname: '127.0.0.1', port, path: '/v1/status/events' }, (res) => {
+			const req = http.get({ hostname: '127.0.0.1', port, path: '/v1/status/events', headers: { Referer: `http://127.0.0.1:${port}/status` } }, (res) => {
 				let raw = '';
 				res.setEncoding('utf8');
 				res.on('data', (chunk) => {
@@ -366,9 +367,59 @@ function createMockSecurity() {
 		assert.ok(!pairedStream.raw.includes('test-token'));
 		assert.ok(!pairedStream.raw.includes('secret prompt'));
 
-		const localStatusEvents = await requestEvents(port, '/v1/status/events', {}, ['status']);
+		const localStatusEvents = await requestEvents(port, '/v1/status/events', { Referer: `http://127.0.0.1:${port}/status` }, ['status']);
 		assert.strictEqual(localStatusEvents.statusCode, 200);
 		assert.ok(Array.isArray(localStatusEvents.events.status.bridge.paired_origins));
+
+		// A paired origin only sees the jobs it created. Every job above belongs to http://127.0.0.1:8787.
+		const otherOrigin = { Origin: 'http://127.0.0.1:9999', 'X-Alorbach-Bridge-Token': 'test-token' };
+		const ownStream = await requestEvents(port, '/v1/status/stream', { Origin: 'http://127.0.0.1:8787', 'X-Alorbach-Bridge-Token': 'test-token' }, ['status', 'jobs']);
+		assert.strictEqual(ownStream.events.jobs.running_count, 2);
+		assert.strictEqual(ownStream.events.status.jobs.running_count, 2);
+		const otherStream = await requestEvents(port, '/v1/status/stream', otherOrigin, ['status', 'jobs']);
+		assert.strictEqual(otherStream.statusCode, 200);
+		assert.deepStrictEqual([otherStream.events.jobs.running_count, otherStream.events.jobs.queued_count], [0, 0]);
+		assert.deepStrictEqual(otherStream.events.jobs.active.concat(otherStream.events.jobs.queued, otherStream.events.jobs.recent), []);
+		assert.deepStrictEqual(otherStream.events.status.jobs.active, []);
+		assert.ok(!otherStream.raw.includes('request-1'));
+		assert.ok(!otherStream.raw.includes('live output'));
+		const otherStatus = await requestJson(port, 'GET', '/v1/status', null, otherOrigin);
+		assert.strictEqual(otherStatus.statusCode, 200);
+		assert.deepStrictEqual(otherStatus.body.jobs.active, []);
+		assert.ok(!JSON.stringify(otherStatus.body).includes('request-1'));
+		assert.ok(!Object.prototype.hasOwnProperty.call(otherStatus.body.bridge, 'paired_origins'));
+		const ownStatus = await requestJson(port, 'GET', '/v1/status');
+		assert.strictEqual(ownStatus.body.jobs.active.length, 2);
+
+		// Host and Origin are client-controlled: a proxied request must never count as the local viewer.
+		const localPage = { Origin: `http://127.0.0.1:${port}`, 'X-Alorbach-Bridge-Token': '' };
+		for (const forwarding of [{ 'X-Forwarded-For': '203.0.113.9' }, { 'X-Forwarded-Host': 'relay.example' }, { 'X-Forwarded-Proto': 'https' }, { Forwarded: 'for=203.0.113.9' }, { 'X-Real-IP': '203.0.113.9' }, { 'CF-Connecting-IP': '203.0.113.9' }]) {
+			const headers = { ...localPage, ...forwarding };
+			const label = Object.keys(forwarding)[0];
+			const forwardedStatus = await requestJson(port, 'GET', '/v1/status', null, headers);
+			assert.ok(!Object.prototype.hasOwnProperty.call(forwardedStatus.body.bridge, 'paired_origins'), label);
+			assert.ok(!Object.prototype.hasOwnProperty.call(forwardedStatus.body.jobs.active[0], 'session_output'), label);
+			assert.strictEqual((await requestJson(port, 'GET', '/v1/status/events', null, headers)).statusCode, 403, label);
+			assert.strictEqual((await requestJson(port, 'GET', '/v1/relay/pairing-code', null, headers)).statusCode, 403, label);
+			assert.strictEqual((await requestJson(port, 'POST', '/v1/relay/pairing-code', { pairing_code: '123456' }, headers)).statusCode, 403, label);
+			assert.strictEqual((await requestJson(port, 'POST', '/v1/relay/refresh', {}, headers)).statusCode, 403, label);
+			assert.strictEqual((await requestJson(port, 'POST', '/v1/relay/settings', {}, headers)).statusCode, 403, label);
+			assert.strictEqual((await requestJson(port, 'GET', '/v1/relay/providers/anthropic/usage', null, headers)).statusCode, 403, label);
+		}
+		// Without forwarding headers the same local page request is still trusted.
+		const directStatus = await requestJson(port, 'GET', '/v1/status', null, localPage);
+		assert.ok(Array.isArray(directStatus.body.bridge.paired_origins));
+		assert.strictEqual((await requestJson(port, 'GET', '/v1/relay/pairing-code', null, localPage)).statusCode, 200);
+
+		// Tokens in the URL are not accepted on the status-page routes.
+		const usageQueryToken = await requestJson(port, 'GET', '/v1/relay/providers/anthropic/usage?bridge_token=test-token', null, { Origin: 'https://remote.example', 'X-Alorbach-Bridge-Token': '' });
+		assert.strictEqual(usageQueryToken.statusCode, 400);
+		const testQueryToken = await requestJson(port, 'POST', '/v1/relay/test?bridge_token=test-token', {}, { Origin: 'https://remote.example', 'X-Alorbach-Bridge-Token': '' });
+		assert.strictEqual(testQueryToken.statusCode, 400);
+		const streamQueryToken = await requestJson(port, 'GET', '/v1/status/stream?bridge_token=test-token', null, { Origin: 'https://remote.example', 'X-Alorbach-Bridge-Token': '' });
+		assert.strictEqual(streamQueryToken.statusCode, 400);
+		const statusQueryToken = await requestJson(port, 'GET', '/v1/status?bridge_token=test-token', null, { Origin: 'https://remote.example', 'X-Alorbach-Bridge-Token': '' });
+		assert.ok(!Object.prototype.hasOwnProperty.call(statusQueryToken.body.jobs.active[0], 'session_output'), 'a query token does not unlock status diagnostics');
 
 		pending[1].resolve({ success: true, response: { id: 'second' } });
 		const secondResult = await second;

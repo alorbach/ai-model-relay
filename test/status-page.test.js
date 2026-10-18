@@ -64,6 +64,9 @@ assert.ok(html.includes('Local Music Analysis Settings'));
 assert.ok(html.includes("const musicAnalysisSettingsUrl = '/v1/music-analysis/settings'"));
 assert.ok(html.includes('Selecting xAI Speech-to-Text uploads the chosen audio to xAI'));
 assert.ok(html.includes("const relayTestUrl = '/v1/relay/test'"));
+// The saved pairing token is cleared on the stable server error code, not on message text.
+assert.ok(html.includes("payload.code === 'origin_not_paired'"));
+assert.ok(!html.includes("payload.message === 'This browser origin is not paired"));
 assert.ok(html.includes('test_request_id: requestId'));
 assert.ok(html.includes('function updateProviderTestProgress('));
 assert.ok(html.includes('data-test-progress'));
@@ -383,10 +386,10 @@ function loadProviderTestApi(deps = {}) {
 	const override = deps.override || {};
 	const names = PROVIDER_TEST_FUNCTIONS.concat(deps.extra || []).filter((name) => !(name in override));
 	const source = names.map(extractPageFunction).join('\n\n') + (names.includes('refresh') ? '\n\n' + extractPageFunction('fetchJsonWithTimeout') : '');
-	const factory = new Function('fields', 'chatRunAll', 'document', 'fetch', 'refresh', 'currentStatus', 'selectRoute', 'selectLiveJob', 'relayTestUrl', 'overrides',
+	const factory = new Function('fields', 'chatRunAll', 'document', 'fetch', 'refresh', 'currentStatus', 'selectRoute', 'selectLiveJob', 'relayTestUrl', 'overrides', 'relayPairingHeaders', 'clearRemotePairingToken',
 		'const statusFetchTimeoutMs = 10000; const statusFailureHardCount = 3; const statusFailureHardMs = 30000; let statusRefreshPending = null; ' + CONNECTION_STATE_PRELUDE + ' const {' + Object.keys(override).join(',') + '} = overrides;\nconst providerTestWaiters = new WeakMap(); const providerTestPanels = new WeakMap(); let pendingProviderTestRender = null; let providerTestStatusSerial = 0; let providerTestLastKnownJobs = (currentStatus && currentStatus.jobs) || null; let providerTestLastFreshAt = 0; let providerTestFeedStale = false; let providerTestStaleSince = 0; const providerTestStatusTimeoutMs = 120000; const providerTestMissingMinMs = 45000; const providerTestMissingMinSnapshots = 3; const providerTestNotFoundMs = 60000; const providerTestPollMs = 5000; let providerTestPollInFlight = false; let providerTestLastPollAt = 0;\n' + source +
 		'\nreturn { ' + names.join(', ') + ', pending: () => pendingProviderTestRender, getStatus: () => currentStatus, connectionState };');
-	return factory(deps.fields, deps.chatRunAll, deps.document, deps.fetch, deps.refresh || (async () => {}), deps.currentStatus, deps.selectRoute || (() => false), deps.selectLiveJob || (() => {}), '/v1/relay/test', override);
+	return factory(deps.fields, deps.chatRunAll, deps.document, deps.fetch, deps.refresh || (async () => {}), deps.currentStatus, deps.selectRoute || (() => false), deps.selectLiveJob || (() => {}), '/v1/relay/test', override, (extra = {}) => ({ ...extra }), deps.clearRemotePairingToken || (() => {}));
 }
 
 // ---- Redesign shell: routes, theme preference, Overview provider tiles ----
@@ -2236,7 +2239,7 @@ function loadProviderTestApi(deps = {}) {
 			assert.strictEqual(stable(env.body.innerHTML), stable(failedHtml), 'the error block is back');
 		}
 		// The page keeps the Live behaviors the redesign must not lose.
-		for (const keep of ['function selectLiveJob(requestId, options = {})', "setHash('live/' + encodeURIComponent(selectedLiveRequestId))", 'data-open-live-job', 'data-open-live', "new EventSource".replace('new EventSource', 'new window.EventSource(jobEventsUrl)'), 'function openMediaLightbox(url, mimeType)', 'pendingLiveJob(selectedLiveRequestId)']) assert.ok(script.includes(keep), keep);
+		for (const keep of ['function selectLiveJob(requestId, options = {})', "setHash('live/' + encodeURIComponent(selectedLiveRequestId))", 'data-open-live-job', 'data-open-live', "const eventsUrl = isLocalStatusPage() ? jobEventsUrl : '/v1/status/stream';", 'new window.EventSource(eventsUrl)', 'function openMediaLightbox(url, mimeType)', 'pendingLiveJob(selectedLiveRequestId)']) assert.ok(script.includes(keep), keep);
 		for (const markup of ['id="liveTypeFilter"', 'data-live-filter="cancelled"', 'id="liveWrapToggle"', 'id="liveFollowToggle"', 'aria-pressed="true" title="Wrap long lines', 'id="liveJobSearch"', 'role="toolbar" aria-label="Job filters"']) assert.ok(html.includes(markup), markup);
 	}
 
@@ -2556,10 +2559,10 @@ function loadProviderTestApi(deps = {}) {
 			};
 			const prelude = 'const statusFetchTimeoutMs = 10000; const statusFailureHardCount = 3; const statusFailureHardMs = 30000; let statusRefreshPending = null; ' + CONNECTION_STATE_PRELUDE;
 			const names = ['fetchJsonWithTimeout', 'refresh', 'refreshStatusOnce', 'handleStatusPollFailure', 'recordStatusSuccess', 'recordStatusFailure', 'connectionView', 'applyConnectionView', 'statusReachable', 'reportRenderError', 'guardedRender'];
-			const api = load(names, ['fields', 'fetch', 'statusUrl', 'capabilitiesUrl', 'renderStatus', 'renderCapabilities', 'updateProviderTestProgress', 'retryRelaySettingsLoad', 'setConnection', 'setTimeout', 'clearTimeout', 'Date', 'console'], prelude,
+			const api = load(names, ['fields', 'fetch', 'statusUrl', 'capabilitiesUrl', 'renderStatus', 'renderCapabilities', 'updateProviderTestProgress', 'retryRelaySettingsLoad', 'setConnection', 'setTimeout', 'clearTimeout', 'Date', 'console', 'relayPairingHeaders'], prelude,
 				[fields, fetch, '/status', '/caps', renderStatus, (payload) => calls.caps.push(payload), (options) => calls.stale.push(options), () => { calls.retries += 1; },
 					(state, label) => { if (statusBehavior.setConnectionThrows && statusBehavior.setConnectionThrows-- > 0) throw new Error('pill boom'); calls.connection.push([state, label]); },
-					(fn, ms) => calls.timers.setTimeout(fn, ms), (id) => calls.timers.clearTimeout(id), FakeDate, { error: (...args) => calls.consoleErrors.push(args) }], '{ ' + names.join(', ') + ', connectionState }');
+					(fn, ms) => calls.timers.setTimeout(fn, ms), (id) => calls.timers.clearTimeout(id), FakeDate, { error: (...args) => calls.consoleErrors.push(args) }, () => ({})], '{ ' + names.join(', ') + ', connectionState }');
 			model = api.connectionState;
 			return { api: api.refresh, state: api.connectionState, calls, fields, clock, behavior: statusBehavior, lastPill: () => calls.connection[calls.connection.length - 1] };
 		};
@@ -2793,12 +2796,12 @@ function loadProviderTestApi(deps = {}) {
 			}
 			const names = ['nextJobEventsRetryDelay', 'scheduleJobEventsReconnect', 'startFallbackPolling', 'stopFallbackPolling', 'connectJobEvents', 'handleLiveEvent', 'recordStatusSuccess', 'recordStatusFailure', 'connectionView', 'applyConnectionView', 'statusReachable', 'reportRenderError', 'clearRenderError', 'guardedRender', 'checkJobEventsStall'];
 			const prelude = 'const statusFailureHardCount = 3; const statusFailureHardMs = 30000; ' + CONNECTION_STATE_PRELUDE + ' let jobEvents = null; let jobEventsRetryTimer = null; const jobEventsRetryMinMs = 2000; const jobEventsRetryMaxMs = 30000; const jobEventsStallMs = 35000; let jobEventsRetryDelay = jobEventsRetryMinMs; let fallbackPollTimer = null; let settingsLoaded = ' + (options.settingsLoaded ? 'true' : 'false') + ';';
-			const api = load(names, ['fields', 'window', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'setConnection', 'refresh', 'markLiveEvent', 'renderStatus', 'renderCapabilities', 'renderJobs', 'jobEventsUrl', 'loadRelaySettings', 'Date', 'console'], prelude,
+			const api = load(names, ['fields', 'window', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'setConnection', 'refresh', 'markLiveEvent', 'renderStatus', 'renderCapabilities', 'renderJobs', 'jobEventsUrl', 'loadRelaySettings', 'Date', 'console', 'isLocalStatusPage'], prelude,
 				[{ updated: env.updated, renderError: env.renderError }, options.noEventSource ? {} : { EventSource: FakeEventSource },
 					(fn, ms) => { const id = env.nextId++; env.timeouts.set(id, { fn, ms }); return id; }, (id) => { env.cleared.push(id); env.timeouts.delete(id); },
 					(fn, ms) => { const id = env.nextId++; env.intervals.set(id, { fn, ms }); return id; }, (id) => { env.cleared.push(id); env.intervals.delete(id); },
 					(state, label) => env.connection.push([state, label]), (options) => { env.refreshes += 1; (env.refreshArgs = env.refreshArgs || []).push(options); }, () => {},
-					(payload, ok) => { if (env.throwOn === 'status') throw new Error('status render boom'); env.rendered.status.push([payload, ok]); }, (payload) => { if (env.throwOn === 'capabilities') throw new Error('capabilities render boom'); env.rendered.capabilities.push(payload); }, (payload) => { if (env.throwOn === 'jobs') throw new Error('jobs render boom'); env.rendered.jobs.push(payload); }, '/v1/status/events', () => { env.loaded += 1; }, FakeDate, { error: (...args) => env.consoleErrors.push(args) }],
+					(payload, ok) => { if (env.throwOn === 'status') throw new Error('status render boom'); env.rendered.status.push([payload, ok]); }, (payload) => { if (env.throwOn === 'capabilities') throw new Error('capabilities render boom'); env.rendered.capabilities.push(payload); }, (payload) => { if (env.throwOn === 'jobs') throw new Error('jobs render boom'); env.rendered.jobs.push(payload); }, '/v1/status/events', () => { env.loaded += 1; }, FakeDate, { error: (...args) => env.consoleErrors.push(args) }, () => !options.remotePage],
 				'{ ' + names.join(', ') + ', state: () => ({ jobEvents, jobEventsLive: connectionState.sseLive, jobEventsRetryTimer, jobEventsRetryDelay, fallbackPollTimer }), connectionState }');
 			env.api = api;
 			env.open = () => env.sources.filter((source) => !source.closed);
@@ -2815,6 +2818,12 @@ function loadProviderTestApi(deps = {}) {
 			assert.strictEqual(nextJobEventsRetryDelay('garbage'), 4000);
 			assert.strictEqual(nextJobEventsRetryDelay(1), 4000, 'never below the 2 s minimum');
 			assert.strictEqual(nextJobEventsRetryDelay(1e9), 30000);
+		}
+		// A remote (paired) status page opens the cookie-authenticated stream instead of the local-only events route.
+		{
+			const env = build({ remotePage: true });
+			env.api.connectJobEvents();
+			assert.strictEqual(env.sources[0].url, '/v1/status/stream');
 		}
 		// One EventSource at a time; opening it switches to live updates.
 		{

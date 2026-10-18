@@ -26,6 +26,8 @@ const { appendLog, safeError, safeProcessSend } = require('./diagnostics');
 
 const STATUS_PAGE_COOKIE_NAME = 'ai_model_relay_status_page';
 const STATUS_PAGE_COOKIE_PATH = '/v1/status';
+const BRIDGE_ERROR_ORIGIN_NOT_PAIRED = 'origin_not_paired';
+const FORWARDING_HEADERS = ['x-forwarded-for', 'x-forwarded-host', 'x-forwarded-proto', 'x-forwarded-port', 'forwarded', 'x-real-ip', 'cf-connecting-ip', 'true-client-ip'];
 let pairingCode = security.createPairingCode();
 let persistentPairingCode = false;
 let pairingCodePersistenceAvailable = false;
@@ -138,6 +140,7 @@ function sseHeaders(origin = '') {
 
 function createStatusEvents(options = {}) {
 	const clients = new Set();
+	const jobsFor = options.jobsFor;
 	const maxBufferedBytes = Math.max(16 * 1024, Number(options.maxBufferedBytes || 2 * 1024 * 1024) || 2 * 1024 * 1024);
 	function bufferedBytes(res) {
 		return Number(res && res.writableLength || 0);
@@ -161,6 +164,7 @@ function createStatusEvents(options = {}) {
 			const client = {
 				res,
 				origin: String(options.origin || ''),
+				jobsOrigin: String(options.jobsOrigin || ''),
 				events: new Set(options.events || ['jobs']),
 				heartbeatTimer: null,
 				closed: false,
@@ -214,8 +218,15 @@ function createStatusEvents(options = {}) {
 			let data;
 			try {
 				let outbound = payload;
-				if (event === 'status' && payload && payload.bridge && !client.includePairedOrigins && Object.prototype.hasOwnProperty.call(payload.bridge, 'paired_origins')) {
-					outbound = { ...payload, bridge: { ...payload.bridge } };
+				if (client.jobsOrigin && typeof jobsFor === 'function') {
+					if (event === 'jobs') {
+						outbound = jobsFor(client.jobsOrigin);
+					} else if (event === 'status' && payload && payload.jobs) {
+						outbound = { ...payload, jobs: jobsFor(client.jobsOrigin) };
+					}
+				}
+				if (event === 'status' && outbound && outbound.bridge && !client.includePairedOrigins && Object.prototype.hasOwnProperty.call(outbound.bridge, 'paired_origins')) {
+					outbound = { ...outbound, bridge: { ...outbound.bridge } };
 					delete outbound.bridge.paired_origins;
 				}
 				data = JSON.stringify(outbound);
@@ -314,7 +325,7 @@ function isHttpsOrigin(origin) {
 	}
 }
 
-function isPairedSameOriginReferer(req, bridgeSecurity, token = bridgeToken(req)) {
+function isPairedSameOriginReferer(req, bridgeSecurity, token = headerBridgeToken(req)) {
 	if (exposeOrigin(req, bridgeSecurity)) return false;
 	const referer = refererOrigin(req, bridgeSecurity);
 	if (!referer) return false;
@@ -332,7 +343,7 @@ function isPairedSameOriginReferer(req, bridgeSecurity, token = bridgeToken(req)
 function isSecurePairedStatusViewer(req, bridgeSecurity) {
 	const origin = exposeOrigin(req, bridgeSecurity);
 	if (origin) {
-		return isHttpsOrigin(origin) && bridgeSecurity.validateBridgeToken(origin, bridgeToken(req));
+		return isHttpsOrigin(origin) && bridgeSecurity.validateBridgeToken(origin, headerBridgeToken(req));
 	}
 	const referer = refererOrigin(req, bridgeSecurity);
 	return !!(isHttpsOrigin(referer) && isPairedSameOriginReferer(req, bridgeSecurity));
@@ -497,8 +508,12 @@ function exposeOrigin(req, bridgeSecurity) {
 	return bridgeSecurity.normalizeOrigin(req.headers.origin || '');
 }
 
+function headerBridgeToken(req) {
+	return String(req.headers['x-alorbach-bridge-token'] || '').trim();
+}
+
 function bridgeToken(req) {
-	const header = String(req.headers['x-alorbach-bridge-token'] || '').trim();
+	const header = headerBridgeToken(req);
 	if (header) return header;
 	try {
 		return String(new URL(req.url, 'http://127.0.0.1').searchParams.get('bridge_token') || '').trim();
@@ -530,7 +545,7 @@ function clearStatusPageCookie() {
 
 function pairedStatusPageOrigin(req, bridgeSecurity) {
 	const origin = exposeOrigin(req, bridgeSecurity);
-	const explicitToken = bridgeToken(req);
+	const explicitToken = headerBridgeToken(req);
 	if (origin && explicitToken && bridgeSecurity.validateBridgeToken(origin, explicitToken)) {
 		return origin;
 	}
@@ -545,12 +560,20 @@ function pairedStatusPageOrigin(req, bridgeSecurity) {
 	return referer;
 }
 
+/* Status-page routes added for paired remote pages accept the token only in the
+ * header or the cookie. Older WordPress/plugin routes keep ?bridge_token=. */
+function rejectQueryToken(req, res, url, what) {
+	if (!url.searchParams.has('bridge_token')) return false;
+	sendErrorJson(req, res, 400, { success: false, message: `Pairing tokens must not be sent in the ${what} URL.` });
+	return true;
+}
+
 function requirePairing(req, res, bridgeSecurity) {
 	const origin = exposeOrigin(req, bridgeSecurity);
 	const token = bridgeToken(req);
 	const allowedOrigin = origin && bridgeSecurity.getPairing(origin) ? origin : corsOrigin(req, bridgeSecurity);
 	if (!origin || !bridgeSecurity.validateBridgeToken(origin, token)) {
-		sendErrorJson(req, res, 403, { success: false, message: 'This browser origin is not paired with AI Model Relay.' }, allowedOrigin);
+		sendErrorJson(req, res, 403, { success: false, code: BRIDGE_ERROR_ORIGIN_NOT_PAIRED, message: 'This browser origin is not paired with AI Model Relay.' }, allowedOrigin);
 		return null;
 	}
 	return origin;
@@ -596,7 +619,8 @@ function capabilitiesPayload(context) {
 function statusPayload(context, options = {}) {
 	const includePairedOrigins = options.includePairedOrigins === true;
 	const includeDiagnostics = options.includeDiagnostics !== false;
-	const jobs = includeDiagnostics ? context.jobManager.snapshot() : publicJobsSnapshot(context.jobManager.snapshot());
+	const jobsSnapshot = context.jobManager.snapshot(String(options.jobsOrigin || ''));
+	const jobs = includeDiagnostics ? jobsSnapshot : publicJobsSnapshot(jobsSnapshot);
 	if (context.statusCache) {
 		const cachedStatus = context.statusCache.status();
 		const cached = includeDiagnostics ? cachedStatus : publicStatusProjection(cachedStatus);
@@ -807,8 +831,24 @@ const STATUS_BOOTSTRAP_PATHS = new Set([
 ]);
 const setupLocks = new Set();
 
+/* A request is only treated as coming from the local user when it reached the
+ * loopback listener directly. A reverse proxy or tunnel on this machine can
+ * rewrite Host to 127.0.0.1 and a remote client controls Origin and Referer, so
+ * neither header proves locality. Proxies add forwarding headers; requests that
+ * carry them (or that do not arrive from a loopback peer) must pair instead. */
+function isForwardedRequest(req) {
+	const headers = req && req.headers || {};
+	return FORWARDING_HEADERS.some((name) => headers[name] !== undefined);
+}
+
+function isLoopbackSocket(req) {
+	const address = String(req && req.socket && req.socket.remoteAddress || '').trim().toLowerCase();
+	return address === '::1' || address === '127.0.0.1' || /^(::ffff:)?127\.\d+\.\d+\.\d+$/.test(address);
+}
+
 function isLocalPageOrigin(req, origin) {
 	if (!origin) return false;
+	if (isForwardedRequest(req) || !isLoopbackSocket(req)) return false;
 	let parsed;
 	try { parsed = new URL(origin); } catch (error) { return false; }
 	if (parsed.protocol !== 'http:') return false;
@@ -970,6 +1010,7 @@ async function route(req, res, context) {
 	}
 
 	if (req.method === 'GET' && url.pathname === '/v1/relay/providers/anthropic/usage') {
+		if (rejectQueryToken(req, res, url, 'usage')) return;
 		const trusted = isLocalStatusViewer(req, bridgeSecurity) || isSecurePairedStatusViewer(req, bridgeSecurity);
 		if (!trusted) {
 			sendErrorJson(req, res, 403, { success: false, message: 'Claude API usage requires a local or paired status-page viewer.' });
@@ -1004,6 +1045,7 @@ async function route(req, res, context) {
 		const status = statusPayload(context, {
 			includePairedOrigins: localViewer,
 			includeDiagnostics: trusted,
+			jobsOrigin: localViewer || !trusted ? '' : pairedStatusPageOrigin(req, bridgeSecurity),
 		});
 		sendJson(res, status.success ? 200 : 503, status, corsOrigin(req, bridgeSecurity, { bootstrap: true }));
 		return;
@@ -1078,13 +1120,15 @@ async function route(req, res, context) {
 			sendErrorJson(req, res, 403, { success: false, message: 'Remote status streams require HTTPS.' }, pairedOrigin);
 			return;
 		}
+		const jobsOrigin = isLocalStatusViewer(req, bridgeSecurity) ? '' : pairedOrigin;
 		context.statusEvents.add(res, {
 			origin: pairedOrigin,
+			jobsOrigin,
 			events: ['status', 'capabilities', 'jobs'],
 			initialEvents: [
-				['status', statusPayload(context, { includePairedOrigins: false, includeDiagnostics: true })],
+				['status', statusPayload(context, { includePairedOrigins: false, includeDiagnostics: true, jobsOrigin })],
 				['capabilities', capabilitiesPayload(context)],
-				['jobs', jobManager.snapshot()],
+				['jobs', jobManager.snapshot(jobsOrigin)],
 			],
 		});
 		return;
@@ -1135,6 +1179,7 @@ async function route(req, res, context) {
 
 	let providerTestOrigin = '';
 	if (url.pathname === '/v1/relay/test') {
+		if (rejectQueryToken(req, res, url, 'provider test')) return;
 		if (isLocalPageOrigin(req, origin)) {
 			providerTestOrigin = origin;
 		} else if (origin && !isHttpsOrigin(origin) && !isLoopbackHttpOrigin(req, origin)) {
@@ -1640,7 +1685,7 @@ function applyRelayCliPaths(context) {
 }
 
 function createServer(options = {}) {
-	const statusEvents = createStatusEvents();
+	const statusEvents = createStatusEvents({ jobsFor: (origin) => context.jobManager.snapshot(origin) });
 	const onJobState = (snapshot) => {
 		if (typeof options.onJobState === 'function') {
 			options.onJobState(snapshot);

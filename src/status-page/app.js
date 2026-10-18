@@ -3430,7 +3430,7 @@
 				const response = await fetch(relayTestUrl, { method: 'POST', headers: relayPairingHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify(body) });
 				const payload = await response.json().catch(() => ({}));
 				if (!response.ok || !payload.success) {
-					if (response.status === 403 && payload.message === 'This browser origin is not paired with AI Model Relay.') {
+					if (response.status === 403 && payload.code === 'origin_not_paired') {
 						clearRemotePairingToken('The saved pairing token was rejected and has been cleared. Pair this browser again with the current tray code.');
 					}
 					const failure = new Error(payload.error_message || payload.message || 'Provider test failed.');
