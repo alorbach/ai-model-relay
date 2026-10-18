@@ -10,7 +10,7 @@
  * Options:
  *   --out <dir>        output directory (default docs/images)
  *   --port <number>    port for the temporary Relay (default: a free port from 8920)
- *   --only a,b         capture only the named shots (for example overview-light,tests-light)
+ *   --only a,b         capture only the named shots (for example overview-light,tests-light,tray-menu)
  *   --no-demo-jobs     do not add the three illustrative jobs shown in Overview and Live
  *   --keep-temp        keep the temporary state directory (for debugging)
  *
@@ -23,6 +23,11 @@
  *      windows, waits until the page shows live data, and anonymizes the DOM (user name, home path,
  *      host name, e-mail addresses, key suffixes, pairing code) before every capture.
  *   3. Writes the PNGs, stops the Relay, and deletes the temporary directories.
+ *
+ * The tray-menu shot is different: native tray menus cannot be captured headlessly, so it renders an HTML
+ * replica of the Windows 11 dark context menu. The menu items come from the real template builder
+ * (src/tray-menu.js, the same function src/main.js uses) filled with demo values, so the image cannot
+ * drift from the actual menu. It needs no Relay data and shows no real code, path, or site.
  *
  * Provider detection reflects the machine the script runs on (installed CLIs and versions); only
  * the paths are anonymized. Always look at the resulting images before committing them.
@@ -95,6 +100,7 @@ const SHOTS = [
 	{ name: 'tests-light', route: 'tests/chat', theme: 'light', width: 1440, height: 900, ready: 'tests' },
 	{ name: 'live-dark', route: 'live', theme: 'dark', width: 1440, height: 900, ready: 'live', selectDemoJob: true },
 	{ name: 'status-page-mobile', route: 'overview', theme: 'dark', width: 390, height: 844, ready: 'overview' },
+	{ name: 'tray-menu', kind: 'tray' },
 ];
 const DEFAULT_COPY = { from: 'overview-light', to: 'status-page' };
 
@@ -346,6 +352,73 @@ async function capture(shot, base, context) {
 	}
 }
 
+// --- Tray menu replica ---
+// Demo values only: a placeholder pairing code, no real paths or sites. The build number is a demo value too.
+function trayDemoModel() {
+	const packageInfo = require(path.join(REPO_ROOT, 'package.json'));
+	return {
+		displayVersion: packageInfo.version + ' (26)',
+		bridgeState: 'Running',
+		bridgeUrl: 'http://127.0.0.1:8765',
+		codexStatus: { success: true, message: 'Local Codex CLI is installed and logged in.', details: { codex_binary: 'C:\\Tools\\codex\\codex.exe', codex_home: 'C:\\Users\\demo\\.codex', version: 'codex-cli 0.0.0' } },
+		jobState: { running_count: 0, queued_count: 0, max_concurrent: 2, active: [], queued: [], recent: [] },
+		pairingCode: '000000',
+		pairingCodePersistent: false,
+		pairedOrigins: ['https://example.com', 'https://shop.example.org'],
+		launchOnLogin: true,
+	};
+}
+
+function escapeHtml(text) {
+	return String(text).replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+}
+
+function renderTrayMenuHtml(template, scale) {
+	const check = '<svg class="check" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M3 8.5l3.2 3.2L13 4.8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+	const chevron = '<svg class="chevron" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M6 3.5L10.5 8 6 12.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+	const rows = template.map((item) => {
+		if (item.type === 'separator') return '<div class="sep"></div>';
+		const classes = ['item'];
+		if (item.enabled === false) classes.push('disabled');
+		return '<div class="' + classes.join(' ') + '"><span class="gutter">' + (item.type === 'checkbox' && item.checked ? check : '') + '</span><span class="label">' + escapeHtml(item.label) + '</span>' + (item.submenu ? chevron : '') + '</div>';
+	}).join('');
+	return '<!doctype html><html><head><meta charset="utf-8"><style>'
+		+ 'html,body{margin:0;background:transparent;overflow:hidden}'
+		+ '#frame{display:inline-block;padding:20px 28px 36px 28px;zoom:' + scale + '}'
+		+ '#menu{display:inline-block;min-width:260px;box-sizing:border-box;padding:4px 0;background:#2b2b2b;color:#ffffff;border:1px solid #454545;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.45),0 1px 3px rgba(0,0,0,.3);font:12px/16px "Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;-webkit-font-smoothing:antialiased;white-space:nowrap}'
+		+ '.item{display:flex;align-items:center;height:30px;margin:0 4px;padding:0 10px 0 0;border-radius:4px}'
+		+ '.item.disabled{color:#8f8f8f}'
+		+ '.gutter{flex:0 0 32px;display:flex;align-items:center;justify-content:center;color:#ffffff}'
+		+ '.label{flex:1 1 auto;padding-right:28px}'
+		+ '.chevron{flex:0 0 auto;color:#ffffff;margin-right:2px}'
+		+ '.sep{height:1px;margin:4px 0;background:#484848}'
+		+ '</style></head><body><div id="frame"><div id="menu">' + rows + '</div></div></body></html>';
+}
+
+async function captureTrayMenu(shot) {
+	const { buildTrayMenuTemplate } = require(path.join(REPO_ROOT, 'src', 'tray-menu.js'));
+	const template = buildTrayMenuTemplate(trayDemoModel());
+	const scale = shot.scale || 2;
+	// CSS zoom (not device scale) because hidden windows only capture at the display scale; the text is re-rasterized, so it stays crisp.
+	const html = renderTrayMenuHtml(template, scale);
+	const win = new BrowserWindow({ show: false, width: 520, height: 800, useContentSize: true, transparent: true, backgroundColor: '#00000000', webPreferences: { backgroundThrottling: false, contextIsolation: true, nodeIntegration: false, sandbox: true } });
+	try {
+		await win.loadURL('about:blank');
+		await win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
+		await win.webContents.executeJavaScript('document.fonts.ready.then(() => true)', true);
+		const box = await win.webContents.executeJavaScript('(function(){var r=document.getElementById("frame").getBoundingClientRect();return {width:Math.ceil(r.width),height:Math.ceil(r.height)};})()', true);
+		win.setContentSize(box.width, box.height);
+		await sleep(400);
+		const image = await win.webContents.capturePage();
+		const size = image.getSize();
+		const file = path.join(outDir, shot.name + '.png');
+		fs.writeFileSync(file, image.toPNG());
+		process.stdout.write('Wrote ' + path.relative(process.cwd(), file) + ' (' + size.width + 'x' + size.height + ', ' + fs.statSync(file).size + ' bytes)\n');
+	} finally {
+		await closeWindow(win);
+	}
+}
+
 // Three illustrative jobs so Live and the Overview job count are not empty. They never reach a provider.
 async function addDemoJobs(jobManager) {
 	const origin = 'https://example.com';
@@ -408,15 +481,17 @@ async function main() {
 	try {
 		// The first page load makes the Relay probe the installed CLIs, which can block it for several seconds.
 		// Load the page once and wait for that to finish, so the demo jobs below get realistic timings.
-		await warmUp(base);
-		if (!args['no-demo-jobs']) {
+		const only = args.only ? String(args.only).split(',').map((item) => item.trim()).filter(Boolean) : null;
+		const selected = SHOTS.filter((shot) => !only || only.includes(shot.name));
+		const needsRelay = selected.some((shot) => shot.kind !== 'tray');
+		if (needsRelay) await warmUp(base);
+		if (needsRelay && !args['no-demo-jobs']) {
 			demo = await addDemoJobs(started.server.jobManager);
 			context.demoRequestId = demo.requestId;
 		}
-		const only = args.only ? String(args.only).split(',').map((item) => item.trim()).filter(Boolean) : null;
-		for (const shot of SHOTS) {
-			if (only && !only.includes(shot.name)) continue;
-			await capture(shot, base, context);
+		for (const shot of selected) {
+			if (shot.kind === 'tray') await captureTrayMenu(shot);
+			else await capture(shot, base, context);
 		}
 		const source = path.join(outDir, DEFAULT_COPY.from + '.png');
 		if (fs.existsSync(source) && (!only || only.includes(DEFAULT_COPY.from))) {

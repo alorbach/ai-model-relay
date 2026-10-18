@@ -665,7 +665,7 @@ async function setup(options = {}) {
 		basePython = resolved && fs.existsSync(resolved) ? resolved : '';
 	}
 	if (!basePython) {
-		return { success: false, category: 'configuration', code: 'local_image_python_missing', message: 'Local image setup needs a Python executable. Install Python 3.10+ or set the path in Settings.' };
+		return { success: false, category: 'configuration', code: 'local_image_python_missing', message: 'Local image setup needs a Python executable. Install Python 3.10+ or set the path on the Local Image page of the status page.' };
 	}
 
 	const venvDir = current.venv_path || DEFAULT_VENV_PATH;
@@ -828,7 +828,7 @@ function createLocalImageDriver(options = {}) {
 		const diagnostic = !runtimeReady
 			? (probe.state === 'cuda_unavailable'
 				? 'CUDA is not available in the local image environment.'
-				: 'Use Setup on the Status Page to configure the local image runtime.')
+				: 'Open Local Image on the status page and press Setup Environment to configure the local image runtime.')
 			: !ready
 				? (models.find((model) => model.state === 'vram_insufficient')
 					? `${models.find((model) => model.state === 'vram_insufficient').label} needs more GPU memory than the detected device provides. See the model VRAM note before installing its weights.`
@@ -911,7 +911,7 @@ function createLocalImageDriver(options = {}) {
 					success: false,
 					category: 'configuration',
 					code: 'local_image_not_ready',
-					message: state.diagnostic || 'Local image runtime is not ready. Run setup on the Status Page.',
+					message: state.diagnostic || 'Local image runtime is not ready. Open Local Image on the status page and press Setup Environment.',
 					details: state,
 				};
 			}
@@ -929,7 +929,7 @@ function createLocalImageDriver(options = {}) {
 					code: insufficientVram ? 'local_image_vram_insufficient' : 'local_image_model_not_ready',
 					message: insufficientVram
 						? `${modelProfile.label} needs approximately ${Math.ceil(modelProfile.min_vram_mb / 1024)} GB VRAM with this loader; the detected GPU has ${Math.floor(modelState.vram_total_mb / 1024)} GB.`
-						: `${modelProfile.label} is not installed or its required pipeline is unavailable. Install this model from the Status Page first.`,
+						: `${modelProfile.label} is not installed or its required pipeline is unavailable. Install this model on the Local Image page of the status page first.`,
 					details: { model: modelId, state: modelState || null },
 				};
 			}

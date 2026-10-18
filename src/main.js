@@ -11,6 +11,7 @@ const { appendLog, safeError } = require('./diagnostics');
 const { killProcessTree } = require('./cuda-torch-venv');
 const security = require('./security');
 const securePairingCode = require('./secure-pairing-code');
+const { buildTrayMenuTemplate, shortText, formatElapsed } = require('./tray-menu');
 
 let buildInfo = {};
 try {
@@ -54,23 +55,6 @@ function trayIcon() {
 		trayIconImage = loadTrayIcon();
 	}
 	return trayIconImage;
-}
-
-function shortPath(value) {
-	const text = String(value || '');
-	return text.length > 52 ? '...' + text.slice(-49) : text;
-}
-
-function shortText(value, maxLength = 42) {
-	const text = String(value || '').trim();
-	return text.length > maxLength ? `${text.slice(0, maxLength - 3)}...` : text;
-}
-
-function formatElapsed(ms) {
-	const totalSeconds = Math.max(0, Math.floor(Number(ms || 0) / 1000));
-	const minutes = Math.floor(totalSeconds / 60);
-	const seconds = totalSeconds % 60;
-	return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
 }
 
 function bridgeUrl() {
@@ -347,134 +331,38 @@ async function restartBridge() {
 	await startBridge();
 }
 
-function buildPairedSitesMenu(pairedOrigins) {
-	if (!pairedOrigins.length) {
-		return [{ label: 'No paired WordPress sites', enabled: false }];
-	}
-	return pairedOrigins.flatMap((origin) => [
-		{
-			label: origin,
-			click: () => clipboard.writeText(origin),
-		},
-		{
-			label: 'Unpair this site',
-			click: () => {
-				security.removePairing(origin);
-				refreshTray();
-			},
-		},
-		{ type: 'separator' },
-	]).slice(0, -1);
-}
-
-function jobLabel(job) {
-	const id = job.short_request_id || job.request_id || job.id || 'job';
-	const model = job.model ? ` ${shortText(job.model, 28)}` : '';
-	return `${id}: ${job.type}${model} (${formatElapsed(job.elapsed_ms)})`;
-}
-
-function buildJobMenuItems() {
-	const items = [
-		{ label: `Jobs: Running ${jobState.running_count || 0} / Queued ${jobState.queued_count || 0}`, enabled: false },
-	];
-	if (jobState.active && jobState.active.length) {
-		for (const job of jobState.active.slice(0, 5)) {
-			items.push({ label: `Running: ${jobLabel(job)}`, enabled: false });
-		}
-	}
-	if (jobState.queued && jobState.queued.length) {
-		for (const job of jobState.queued.slice(0, 5)) {
-			const id = job.short_request_id || job.request_id || job.id || 'job';
-			const model = job.model ? ` ${shortText(job.model, 28)}` : '';
-			items.push({ label: `Queued: ${id}: ${job.type}${model}`, enabled: false });
-		}
-	}
-	return items;
-}
-
 function buildMenu() {
 	const status = cachedCodexStatus;
 	const pairedOrigins = Object.keys(security.getPairings());
-	const details = status.details || {};
-	const codexLabel = status.success ? 'Codex: Ready' : 'Codex: Needs attention';
-	return Menu.buildFromTemplate([
-		{ label: `${PRODUCT_NAME} ${displayVersion()}`, enabled: false },
-		{ label: `formerly ${LEGACY_PRODUCT_NAME}`, enabled: false },
-		{ label: `Bridge: ${bridgeState}`, enabled: false },
-		{ label: `URL: ${bridgeUrl()}`, enabled: false },
-		{ label: codexLabel, enabled: false },
-		{ label: status.message || 'Status unavailable', enabled: false },
-		...buildJobMenuItems(),
-		{ type: 'separator' },
-		{ label: 'Pairing code' + (currentPairingCodePersistent ? ' (fixed)' : '') + ': ' + (currentPairingCode || 'starting'), enabled: false },
-		{
-			label: 'Copy pairing code',
-			enabled: !!currentPairingCode,
-			click: () => clipboard.writeText(currentPairingCode || ''),
+	return Menu.buildFromTemplate(buildTrayMenuTemplate({
+		displayVersion: displayVersion(),
+		bridgeState,
+		bridgeUrl: bridgeUrl(),
+		codexStatus: status,
+		jobState,
+		pairingCode: currentPairingCode,
+		pairingCodePersistent: currentPairingCodePersistent,
+		pairedOrigins,
+		launchOnLogin: app.getLoginItemSettings().openAtLogin,
+	}, {
+		copyText: (text) => clipboard.writeText(text),
+		copyDiagnostics: () => copyDiagnostics(status, pairedOrigins),
+		refreshCodexStatus: () => refreshCodexStatus(),
+		openStatusPage: () => openStatusPage(),
+		openStatusJson: () => shell.openExternal(bridgeUrl() + '/v1/status'),
+		openDataFolder: () => {
+			fs.mkdirSync(security.stateDir, { recursive: true });
+			shell.openPath(security.stateDir);
 		},
-		{
-			label: 'Copy bridge URL',
-			click: () => clipboard.writeText(bridgeUrl()),
+		setLaunchOnLogin: (checked) => app.setLoginItemSettings({ openAtLogin: checked }),
+		openCodexLoginHelp: () => shell.openExternal('https://help.openai.com/'),
+		unpairSite: (origin) => {
+			security.removePairing(origin);
+			refreshTray();
 		},
-		{
-			label: 'Copy diagnostics',
-			click: () => copyDiagnostics(status, pairedOrigins),
-		},
-		{
-			label: 'Refresh Codex status',
-			click: () => refreshCodexStatus(),
-		},
-		{
-			label: 'Open status page',
-			enabled: bridgeState === 'Running',
-			click: () => openStatusPage(),
-		},
-		{
-			label: 'Open status JSON',
-			enabled: bridgeState === 'Running',
-			click: () => shell.openExternal(bridgeUrl() + '/v1/status'),
-		},
-		{
-			label: 'Open relay data folder',
-			click: () => {
-				fs.mkdirSync(security.stateDir, { recursive: true });
-				shell.openPath(security.stateDir);
-			},
-		},
-		{
-			label: 'Launch on login',
-			type: 'checkbox',
-			checked: app.getLoginItemSettings().openAtLogin,
-			click: (item) => app.setLoginItemSettings({ openAtLogin: item.checked }),
-		},
-		{ type: 'separator' },
-		{
-			label: 'Codex details',
-			submenu: [
-				{ label: `Binary: ${shortPath(details.codex_binary || 'not found')}`, enabled: false },
-				{ label: `Home: ${shortPath(details.codex_home || '')}`, enabled: false },
-				{ label: `Version: ${shortPath(details.version || 'unknown')}`, enabled: false },
-				{
-					label: 'Copy Codex binary path',
-					enabled: !!details.codex_binary,
-					click: () => clipboard.writeText(details.codex_binary || ''),
-				},
-			],
-		},
-		{
-			label: 'Open Codex login help',
-			click: () => shell.openExternal('https://help.openai.com/'),
-		},
-		{ type: 'separator' },
-		{
-			label: `Paired WordPress sites (${pairedOrigins.length})`,
-			submenu: buildPairedSitesMenu(pairedOrigins),
-		},
-		{ type: 'separator' },
-		{ label: 'Restart bridge', click: () => restartBridge() },
-		{ type: 'separator' },
-		{ label: 'Quit', click: () => app.quit() },
-	]);
+		restartBridge: () => restartBridge(),
+		quit: () => app.quit(),
+	}));
 }
 
 function setTrayIcon() {

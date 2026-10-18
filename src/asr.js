@@ -30,7 +30,7 @@ const DEFAULT_PYTHON312 = path.join(os.homedir(), 'AppData', 'Local', 'Programs'
 const DEFAULT_VENV_PATH = path.join(security.stateDir, 'asr-venv');
 const DEFAULT_QWEN_VENV_PATH = path.join(security.stateDir, 'qwen-asr-venv');
 const DEFAULT_QWEN_TORCH_INDEX_URL = process.env.ALORBACH_QWEN_TORCH_INDEX_URL || DEFAULT_TORCH_INDEX;
-const JOB_RUNTIME_MESSAGE = 'Open Local ASR Settings and use Install model on the status page. Transcription jobs do not pip-install packages or download models unless Allow ASR model downloads is enabled.';
+const JOB_RUNTIME_MESSAGE = 'Open Local ASR on the status page and use Install model. Transcription jobs do not pip-install packages or download models unless Allow ASR model downloads is enabled.';
 const MAX_AUDIO_BASE64_LENGTH = 67108864;
 let probeCache = null;
 
@@ -1235,7 +1235,7 @@ async function transcribe(payload, session = {}) {
 		}
 	}
 	if (!selected.model_path) {
-		return { success: false, category: 'configuration', code: 'asr_model_missing', message: `Local Whisper model ${selected.model_id} is not cached or configured. Enable model downloads or set a local model path in the bridge status page.`, details: { selected, hardware } };
+		return { success: false, category: 'configuration', code: 'asr_model_missing', message: `Local Whisper model ${selected.model_id} is not cached or configured. Allow ASR model downloads or set a local model path on the Local ASR page of the status page.`, details: { selected, hardware } };
 	}
 	const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'alorbach-whisper-transcribe-'));
 	try {
@@ -1365,7 +1365,7 @@ async function transcribeQwen(payload, audioBytes, selected, config, hardware, s
 			success: false,
 			category: 'configuration',
 			code: 'qwen_asr_model_incomplete',
-			message: `Local Qwen ASR model cache is incomplete at ${selected.incomplete_model_path}. Missing files: ${(selected.incomplete_model_missing_files || []).join(', ') || 'required processor files'}. Enable model downloads or clear/redownload the Hugging Face cache snapshot.`,
+			message: `Local Qwen ASR model cache is incomplete at ${selected.incomplete_model_path}. Missing files: ${(selected.incomplete_model_missing_files || []).join(', ') || 'required processor files'}. Allow ASR model downloads or clear/redownload the Hugging Face cache snapshot.`,
 			details: { selected, hardware },
 		};
 	}
@@ -1374,7 +1374,7 @@ async function transcribeQwen(payload, audioBytes, selected, config, hardware, s
 			success: false,
 			category: 'configuration',
 			code: 'qwen_asr_aligner_incomplete',
-			message: `Local Qwen ASR aligner cache is incomplete at ${selected.incomplete_aligner_path}. Missing files: ${(selected.incomplete_aligner_missing_files || []).join(', ') || 'required processor files'}. Enable model downloads or clear/redownload the Hugging Face cache snapshot.`,
+			message: `Local Qwen ASR aligner cache is incomplete at ${selected.incomplete_aligner_path}. Missing files: ${(selected.incomplete_aligner_missing_files || []).join(', ') || 'required processor files'}. Allow ASR model downloads or clear/redownload the Hugging Face cache snapshot.`,
 			details: { selected, hardware },
 		};
 	}
@@ -1383,7 +1383,7 @@ async function transcribeQwen(payload, audioBytes, selected, config, hardware, s
 			success: false,
 			category: 'configuration',
 			code: 'qwen_asr_model_missing',
-			message: `Local Qwen ASR model ${selected.model_id} is not cached or configured. Enable model downloads or set a local model path in the bridge status page.`,
+			message: `Local Qwen ASR model ${selected.model_id} is not cached or configured. Allow ASR model downloads or set a local model path on the Local ASR page of the status page.`,
 			details: { selected, hardware },
 		};
 	}
@@ -1392,7 +1392,7 @@ async function transcribeQwen(payload, audioBytes, selected, config, hardware, s
 			success: false,
 			category: 'configuration',
 			code: 'qwen_asr_aligner_missing',
-			message: `Local Qwen ASR aligner ${selected.aligner_repo_id} is not cached or configured. Enable model downloads or set an aligner local path in the bridge status page.`,
+			message: `Local Qwen ASR aligner ${selected.aligner_repo_id} is not cached or configured. Allow ASR model downloads or set an aligner local path on the Local ASR page of the status page.`,
 			details: { selected, hardware },
 		};
 	}
@@ -1528,7 +1528,7 @@ async function alignQwen(payload, audioBytes, selected, config, hardware, sessio
 			success: false,
 			category: 'configuration',
 			code: 'qwen_aligner_model_missing',
-			message: `Local Qwen ForcedAligner model ${selected.model_id} is not cached or configured. Enable model downloads or set a local model path in the bridge status page.`,
+			message: `Local Qwen ForcedAligner model ${selected.model_id} is not cached or configured. Allow ASR model downloads or set a local model path on the Local ASR page of the status page.`,
 			details: { selected, hardware },
 		};
 	}
@@ -1742,7 +1742,7 @@ async function setup(options = {}) {
 		const runtime = String(options.runtime || '').trim();
 		if (runtime === 'qwen' || runtime === 'qwen-asr') return ensureQwen(config, session);
 		if (runtime === 'whisper' || runtime === 'faster-whisper') return ensureWhisper(config, session);
-		return { success: false, category: 'validation', code: 'asr_setup_model_required', message: 'Choose a Local ASR model on the status page to install.' };
+		return { success: false, category: 'validation', code: 'asr_setup_model_required', message: 'Choose a Local ASR model to install on the Local ASR page of the status page.' };
 	}
 	const model = (config.models || []).find((entry) => entry && entry.id === modelId);
 	if (!model) return { success: false, category: 'validation', code: 'asr_model_unavailable', message: `Unknown Local ASR model: ${modelId}` };

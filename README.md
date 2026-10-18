@@ -35,7 +35,7 @@ Windows tray companion for Alorbach AI Subscription Gateway. It exposes a secure
 
 ## Tray Menu
 
-![Codex Local Bridge tray menu](docs/images/tray-menu.png)
+![AI Model Relay tray menu](docs/images/tray-menu.png)
 
 ## Status Page
 

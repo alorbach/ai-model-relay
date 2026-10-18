@@ -1317,7 +1317,7 @@ function createLocalAsrDriver(codex) {
 				enabled: caps.enabled !== false,
 				ready: caps.ready === true,
 				runtime_checked: caps.runtime_checked,
-				diagnostic: caps.ready === true ? '' : (caps.ready === false ? 'Install a model under Local ASR Settings or press Refresh runtime.' : 'Press Refresh runtime in Local ASR Settings to probe the Python environment.'),
+				diagnostic: caps.ready === true ? '' : (caps.ready === false ? 'Open Local ASR on the status page and install a model, or press Refresh runtime.' : 'Open Local ASR on the status page and press Refresh runtime to probe the Python environment.'),
 				models: caps.models || [],
 			};
 		},
@@ -1999,7 +1999,7 @@ function createAnthropicApiDriver(options = {}) {
 		models: () => defaultModels.map((id) => ({ id: relayModel('anthropic', id), type: 'text', backend: 'anthropic-api', job_types: ['chat'] })),
 		async chat(payload = {}, session = {}) {
 			if (!apiKey) {
-				return { success: false, category: 'configuration', code: 'anthropic_api_key_missing', message: 'Claude API requires an Anthropic API key (Settings → Providers or ANTHROPIC_API_KEY).' };
+				return { success: false, category: 'configuration', code: 'anthropic_api_key_missing', message: 'Claude API requires an Anthropic API key (add a key under Providers on the status page, or set ANTHROPIC_API_KEY).' };
 			}
 			if (!fetchImpl) {
 				return { success: false, category: 'configuration', code: 'fetch_unavailable', message: 'This Node runtime does not provide fetch for API-backed drivers.' };

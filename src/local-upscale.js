@@ -431,7 +431,7 @@ async function setup(options = {}) {
 	const legacyModel = String(options.engine || '').trim() || 'swinir';
 	const modelId = String(options.model || '').trim() || Object.keys(MODELS).find((id) => MODELS[id].install_key === legacyModel || MODELS[id].engine === legacyModel) || 'model-relay:local-upscale:swinir-classical-x2';
 	const profile = MODELS[modelId];
-	if (!profile) return { success: false, category: 'validation', code: 'local_upscale_model_invalid', message: 'Choose a supported local CUDA upscale model on the status page.' };
+	if (!profile) return { success: false, category: 'validation', code: 'local_upscale_model_invalid', message: 'Choose a supported local CUDA upscale model on the CUDA Upscale page of the status page.' };
 	const spec = manifests[profile.install_key] || manifests[profile.engine];
 	if (!spec) return { success: false, category: 'validation', code: 'local_upscale_manifest_missing', message: `The ${profile.label} installation manifest is unavailable.` };
 	if (profile.installation_acknowledgement_required && options.accept_restricted !== true) return { success: false, category: 'validation', code: 'local_upscale_restriction_acknowledgement_required', message: 'APISR is experimental, GPL-3.0-only, and academic-only. Confirm that restriction before installation.' };
@@ -448,7 +448,7 @@ async function setup(options = {}) {
 	const git = options.gitCommand || resolveCommand(['git']);
 	const config = normalizeSettings(options.settings || settings());
 	const basePython = options.pythonCommand || discoverBasePython(config);
-	if (!basePython) return setupFailure('local_upscale_python_missing', 'Local CUDA upscale setup needs a Python executable. Set the Python path in Settings or AI_MODEL_RELAY_UPSCALE_PYTHON.');
+	if (!basePython) return setupFailure('local_upscale_python_missing', 'Local CUDA upscale setup needs a Python executable. Set the Python path on the CUDA Upscale page of the status page or AI_MODEL_RELAY_UPSCALE_PYTHON.');
 	const runtimeVenv = profile.runtime_group === 'apisr-cuda' ? config.apisr_venv_path : config.venv_path;
 	const venvPython = venvPythonPath(runtimeVenv);
 	if (!fs.existsSync(venvPython)) {
@@ -568,7 +568,7 @@ function createLocalUpscaleDriver(options = {}) {
 				? 'CUDA PyTorch and at least one pinned local upscale checkout are ready.'
 				: (torch.state === 'cpu_torch'
 					? `The upscale venv has CPU PyTorch (${torch.version || 'unknown'}); jobs never fall back to CPU.`
-					: 'Use Settings to install a local CUDA upscale model; jobs never download weights or fall back to CPU.'),
+					: 'Open CUDA Upscale on the status page and install a local model; jobs never download weights or fall back to CPU.'),
 			python: runtimes['basicsr-cuda'].python,
 			gpu,
 			torch,
