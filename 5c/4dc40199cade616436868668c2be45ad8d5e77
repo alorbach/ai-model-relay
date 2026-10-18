@@ -1,0 +1,35 @@
+README.md
+  s_b6da945fa1aa17::t_6ef34c15d3b32c 112
+  s_b6da945fa1aa17::t_646d807f1ef5a8 109
+  s_b6da945fa1aa17::t_a1932d09c144fc 3,5,7,11,13,15,17-23,25,27,29-35,37-41,44-47,49,51-65,67-68,70,72,74-75,77-79,81-84,86,88,90,92-108,114,116,118,120,122-134,136,138,140-143,145,147-151,153,155-161,163,167-171,174,176,178
+docs/architecture.md
+  s_b6da945fa1aa17::t_22b6409b807c3e 35-39
+  s_b6da945fa1aa17::t_4eb4f2b202fe4a 3
+docs/gateway-integration.md
+  s_b6da945fa1aa17::t_12c2e37f9dd387 202,209-211
+package.json
+  s_b6da945fa1aa17::t_c8dcfeb949d06d 4
+docs/configuration.md
+  s_b6da945fa1aa17::t_23e2c3db71bdd1 92-93
+  s_b6da945fa1aa17::t_0297ec90606982 1-91,94-114
+docs/README.md
+  s_b6da945fa1aa17::t_ad143bbc583235 3-10
+docs/operations.md
+  s_b6da945fa1aa17::t_4acc4eb3650cc0 51-56,58-60,238-253
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "5c4dc40199cade616436868668c2be45ad8d5e77",
+  "prompts": {},
+  "sessions": {
+    "s_b6da945fa1aa17": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "df949e70-3733-4f55-b5bd-23a747bec609",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
