@@ -55,7 +55,7 @@ Shows a local HTML status page for the same runtime data exposed by `GET /v1/sta
 
 ## `GET /v1/status`
 
-Returns the cached bridge and provider-readiness snapshot. `GET /v1/relay/status` is an alias with the same response shape. This route does not run a CLI process: startup and explicit refreshes probe providers in the background. This route does not require pairing.
+Returns the cached bridge and provider-readiness snapshot. `GET /v1/relay/status` is an alias with the same response shape. This route does not run a CLI process: startup and explicit refreshes probe providers in the background. The public projection does not require pairing; local viewers receive full diagnostics, and paired loopback clients or paired non-loopback HTTPS origins receive full diagnostics through a pairing token or the remote status-page cookie. Other remote requests receive the public projection, without the `details` object or private job diagnostics and artifact metadata.
 
 Example response:
 
@@ -119,7 +119,7 @@ Full prompt/output debug files are written separately under `%TEMP%\alorbach-cod
 
 ## `GET /v1/status/events`
 
-Streams local status-page updates as server-sent events. This route does not require pairing because the bridge still accepts only localhost socket clients. It emits:
+Streams local status-page updates as server-sent events. It is restricted to the local status page; requests through a remote proxy or tunnel are rejected. Remote status pages use the paired `/v1/status/stream` route instead. It emits:
 
 - `status`: JSON payload compatible with `GET /v1/status`, including cached refresh progress.
 - `capabilities`: JSON payload compatible with `GET /v1/capabilities`, including provider discovery changes.
@@ -130,16 +130,18 @@ Existing consumers that listen only for `jobs` events remain compatible.
 
 ## `GET /v1/status/stream`
 
-Streams authenticated status updates for paired browser/API clients. This route requires:
+Streams authenticated status updates for paired browser/API clients. API clients can send:
 
 ```http
 Origin: <paired-browser-origin>
 X-Alorbach-Bridge-Token: <pairing-token>
 ```
 
-The response uses `text/event-stream`, includes CORS headers for the paired origin, and emits `status`, `capabilities`, `jobs`, and `heartbeat` events. The `status` event intentionally omits `bridge.paired_origins` so a paired site cannot enumerate other paired sites. Job payloads remain bounded diagnostics only and do not include prompts, messages, or bearer tokens.
+The response uses `text/event-stream`, includes CORS headers for the paired origin, and emits `status`, `capabilities`, `jobs`, and `heartbeat` events. The `status` event intentionally omits `bridge.paired_origins` so a paired site cannot enumerate other paired sites. Job payloads are bounded and exclude bearer tokens, but may include session input and output. Non-loopback remote origins must use HTTPS; paired loopback clients may use HTTP. Pairing tokens are accepted only in the `X-Alorbach-Bridge-Token` header, never in the URL.
 
-Browser clients should use `fetch()` streaming because native `EventSource` cannot send the required `X-Alorbach-Bridge-Token` header. Browsers set `Origin` automatically:
+The remote status page uses a host-only, secure, HTTP-only, same-site cookie scoped to `/v1/status` and its subpaths, set by its HTTPS `/v1/pair` flow. This allows native `EventSource` reconnects without putting the bearer token in the URL and also authenticates same-origin status snapshots and artifact previews. A paired stream can include bounded job session input and output, so pair only browser origins you trust.
+
+API clients should use `fetch()` streaming because native `EventSource` cannot send the required `X-Alorbach-Bridge-Token` header. The remote status page uses native `EventSource` with its secure pairing cookie instead. Browsers set `Origin` automatically:
 
 ```js
 const response = await fetch('http://127.0.0.1:8765/v1/status/stream', {
@@ -311,7 +313,7 @@ Starts one deduplicated provider-detection refresh and returns immediately with 
 
 ## `POST /v1/relay/test`
 
-Local status-page helper for deliberately testing one ready image, video, transcription, or music-analysis provider. It only accepts localhost socket clients, requires an explicit model, uses the same strict relay resolution as `/v1/relay/jobs/*`, and never falls back to another provider. It is not a WordPress integration route and does not use a signed job envelope.
+Status-page helper for deliberately testing one ready image, video, transcription, or music-analysis provider. The Relay's own localhost page can use it directly; another loopback client must pair and send its `X-Alorbach-Bridge-Token`. A non-loopback remote status page must be served over HTTPS, paired, and send its token on the request. The paired origin is checked before provider dispatch, and the route requires an explicit model, uses the same strict relay resolution as `/v1/relay/jobs/*`, and never falls back to another provider. Its preflight is available only to localhost or an already-paired origin. It is not a WordPress integration route and does not use a signed job envelope.
 
 ```json
 {
@@ -433,7 +435,7 @@ Local status-page settings for the desktop app pairing code. Requests are restri
 
 ## `POST /v1/pair`
 
-Pairs a browser origin with the bridge.
+Pairs a browser origin with the bridge. This is used by WordPress integrations and by a remote status page that needs to run provider tests. The origin must exactly match the page origin; after successful pairing the browser stores the returned bearer token and sends it only to the Relay. The status page identifies its pairing request with `client: "status-page"`; remote status-page pairing requires HTTPS. Other integration clients retain the existing HTTP pairing behavior.
 
 Request:
 
@@ -454,7 +456,7 @@ Response:
 }
 ```
 
-Store the token in browser storage scoped to the origin. Treat it as a bearer secret. Pairing success rotates the code by default; when the local user enabled a fixed code on the Pairing page of the local status page, the code remains active. Pairing failures share a persistent IP-wide rate limit.
+Store the token in browser storage scoped to the origin. Treat it as a bearer secret. The status page's Pairing page can pair and unpair its current browser; remote pairing enables `POST /v1/relay/test` and the Claude usage panel, while settings changes and fixed-code management remain local-only. Pairing success rotates the code by default; when the local user enabled a fixed code on the Pairing page of the local status page, the code remains active. Pairing failures share a persistent IP-wide rate limit.
 
 ## `POST /v1/unpair`
 
@@ -699,13 +701,13 @@ When the installed Codex CLI supports `codex exec --json`, the default `image_ge
 
 ## `GET /v1/status/jobs/{jobId}/artifacts/{index}`
 
-Returns a retained PNG, JPEG, or WebP image artifact from a recent completed job. This local status-page helper does not require pairing and is only available while the matching job remains in the in-memory recent-job cache. It returns `404` after eviction or for an invalid artifact index.
+Returns a retained PNG, JPEG, or WebP image artifact from a recent completed job. Local status-page access does not require pairing. Other loopback clients may use HTTP with a pairing token; non-loopback remote access requires HTTPS and the status-page cookie or a valid pairing token in the `X-Alorbach-Bridge-Token` header. The route only returns artifacts owned by that paired origin, and rejects pairing tokens in the URL. Artifacts are available while the matching job remains in the in-memory recent-job cache; the route returns `404` after eviction or for an invalid artifact index.
 
 The job's `artifacts` metadata in `/v1/status` and status events provides the same-origin URL, MIME type, and byte size. Artifact bytes are intentionally not embedded in JSON or SSE responses.
 
 ## `GET /v1/relay/jobs/{requestId}/artifact`
 
-Returns the paired binary PNG result for a completed local CUDA upscale. This route requires pairing and is the URL returned in `artifact_url` after `POST /v1/relay/jobs/upscale`. Status-page `<img>` / `<video>` previews continue to use the unpaired `/v1/status/jobs/{jobId}/artifacts/{index}` helper.
+Returns the paired binary PNG result for a completed local CUDA upscale. This route requires pairing and is the URL returned in `artifact_url` after `POST /v1/relay/jobs/upscale`; non-loopback remote origins must use HTTPS, while paired loopback clients may use HTTP. Status-page `<img>` / `<video>` previews use `/v1/status/jobs/{jobId}/artifacts/{index}`, which permits local access and requires pairing for other loopback clients or non-loopback HTTPS origins.
 
 ## Local Upscale capability contract
 

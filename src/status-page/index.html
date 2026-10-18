@@ -235,7 +235,20 @@
 				</section>
 
 				<section class="view" id="view-pairing" data-view="pairing" aria-labelledby="pageTitle" hidden>
-					<div class="card">
+					<div class="card" id="remotePairingCard" hidden>
+						<h2 class="card-title">Pair this browser with Relay</h2>
+						<p class="muted">Enter the current six-digit code shown in the AI Model Relay tray app. This lets this browser run provider tests through the Relay.</p>
+						<form class="settings-editor" id="remotePairingForm">
+							<label class="field"><span>Current tray pairing code</span><input id="remotePairingCodeInput" type="password" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" placeholder="Enter six digits" aria-describedby="remotePairingStatus remotePairingMessage"></label>
+							<div class="settings-actions">
+								<span class="muted" id="remotePairingStatus" role="status">Not paired with this Relay</span>
+								<button type="submit" class="btn-primary" id="pairRemotePage">Pair this browser</button>
+								<button type="button" id="unpairRemotePage" hidden>Unpair this browser</button>
+							</div>
+							<p class="muted" id="remotePairingMessage" aria-live="polite"></p>
+						</form>
+					</div>
+					<div class="card" id="localPairingSettings">
 						<h2 class="card-title">Pairing code</h2>
 						<p class="muted">Use a fixed six-digit code when you need the same code after Relay restarts and successful pairings. It is encrypted with the operating-system secure storage. A fixed numeric code is weaker than a one-time code; pairing attempts are rate-limited across origins and survive restarts.</p>
 						<form class="settings-editor" id="persistentPairingCodeForm">

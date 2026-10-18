@@ -24,6 +24,8 @@ const { createStatusCache } = require('./status-cache');
 const packageInfo = require('../package.json');
 const { appendLog, safeError, safeProcessSend } = require('./diagnostics');
 
+const STATUS_PAGE_COOKIE_NAME = 'ai_model_relay_status_page';
+const STATUS_PAGE_COOKIE_PATH = '/v1/status';
 let pairingCode = security.createPairingCode();
 let persistentPairingCode = false;
 let pairingCodePersistenceAvailable = false;
@@ -158,6 +160,7 @@ function createStatusEvents(options = {}) {
 		add(res, options = {}) {
 			const client = {
 				res,
+				origin: String(options.origin || ''),
 				events: new Set(options.events || ['jobs']),
 				heartbeatTimer: null,
 				closed: false,
@@ -189,6 +192,15 @@ function createStatusEvents(options = {}) {
 		broadcast(event, payload) {
 			for (const client of clients) {
 				this.send(client, event, payload);
+			}
+		},
+		closeOrigin(origin) {
+			const target = String(origin || '');
+			if (!target) return;
+			for (const client of clients) {
+				if (client.origin !== target) continue;
+				remove(client, 'origin unpaired or re-paired');
+				try { client.res.end(); } catch (error) {}
 			}
 		},
 		send(client, event, payload) {
@@ -281,7 +293,8 @@ function isTrustedStatusViewer(req, bridgeSecurity) {
 			return true;
 		}
 	}
-	return !!(origin && bridgeSecurity.validateBridgeToken(origin, bridgeToken(req)));
+	const pairedOrigin = pairedStatusPageOrigin(req, bridgeSecurity);
+	return !!(pairedOrigin && (isHttpsOrigin(pairedOrigin) || isLoopbackHttpOrigin(req, pairedOrigin)));
 }
 
 function isLocalStatusViewer(req, bridgeSecurity) {
@@ -293,36 +306,36 @@ function isLocalStatusViewer(req, bridgeSecurity) {
 	return !!(referer && isLocalPageOrigin(req, referer));
 }
 
-function requestHostname(req) {
-	const host = String(req.headers.host || '').trim();
-	if (!host) return '';
+function isHttpsOrigin(origin) {
 	try {
-		return new URL(`http://${host}`).hostname.toLowerCase();
+		return new URL(String(origin || '')).protocol === 'https:';
 	} catch (error) {
-		return '';
+		return false;
 	}
 }
 
-function originHostname(origin) {
-	try {
-		return new URL(String(origin || '')).hostname.toLowerCase();
-	} catch (error) {
-		return '';
-	}
-}
-
-/* Preview and download links on the status page are same-origin GETs.
- * Localhost is covered above. The public Relay host must get the same
- * read, while a cross-site embed still has to present a paired origin. */
-function isRelayHostStatusRequest(req, bridgeSecurity) {
-	const host = requestHostname(req);
-	if (!host) return false;
+function isPairedSameOriginReferer(req, bridgeSecurity, token = bridgeToken(req)) {
+	if (exposeOrigin(req, bridgeSecurity)) return false;
+	const referer = refererOrigin(req, bridgeSecurity);
+	if (!referer) return false;
 	const site = String(req.headers['sec-fetch-site'] || '').trim().toLowerCase();
-	if (site === 'cross-site' || site === 'same-site') return false;
-	const candidate = exposeOrigin(req, bridgeSecurity) || refererOrigin(req, bridgeSecurity);
-	if (!candidate) return site === 'same-origin';
-	if (originHostname(candidate) !== host) return false;
-	return site === '' || site === 'same-origin' || site === 'none';
+	if (site && site !== 'same-origin' && site !== 'none') return false;
+	const host = String(req.headers.host || '').trim().toLowerCase();
+	try {
+		if (!host || new URL(referer).host.toLowerCase() !== host) return false;
+	} catch (error) {
+		return false;
+	}
+	return bridgeSecurity.validateBridgeToken(referer, token);
+}
+
+function isSecurePairedStatusViewer(req, bridgeSecurity) {
+	const origin = exposeOrigin(req, bridgeSecurity);
+	if (origin) {
+		return isHttpsOrigin(origin) && bridgeSecurity.validateBridgeToken(origin, bridgeToken(req));
+	}
+	const referer = refererOrigin(req, bridgeSecurity);
+	return !!(isHttpsOrigin(referer) && isPairedSameOriginReferer(req, bridgeSecurity));
 }
 
 function bridgeMetadata() {
@@ -334,7 +347,7 @@ function bridgeMetadata() {
 	};
 }
 
-function sendJson(res, statusCode, payload, origin) {
+function sendJson(res, statusCode, payload, origin, additionalHeaders = {}) {
 	const headers = {
 		'Content-Type': 'application/json',
 		'Cache-Control': 'no-store',
@@ -347,6 +360,7 @@ function sendJson(res, statusCode, payload, origin) {
 		headers['Access-Control-Allow-Private-Network'] = 'true';
 		headers.Vary = 'Origin';
 	}
+	Object.assign(headers, additionalHeaders);
 	res.writeHead(statusCode, headers);
 	res.end(JSON.stringify(payload));
 }
@@ -493,12 +507,50 @@ function bridgeToken(req) {
 	}
 }
 
+function cookieValue(req, name) {
+	for (const part of String(req.headers.cookie || '').split(';')) {
+		const separator = part.indexOf('=');
+		if (separator < 0 || part.slice(0, separator).trim() !== name) continue;
+		try {
+			return decodeURIComponent(part.slice(separator + 1).trim());
+		} catch (error) {
+			return '';
+		}
+	}
+	return '';
+}
+
+function statusPageCookie(token) {
+	return `${STATUS_PAGE_COOKIE_NAME}=${encodeURIComponent(String(token || ''))}; Path=${STATUS_PAGE_COOKIE_PATH}; Max-Age=31536000; HttpOnly; Secure; SameSite=Strict`;
+}
+
+function clearStatusPageCookie() {
+	return `${STATUS_PAGE_COOKIE_NAME}=; Path=${STATUS_PAGE_COOKIE_PATH}; Max-Age=0; HttpOnly; Secure; SameSite=Strict`;
+}
+
+function pairedStatusPageOrigin(req, bridgeSecurity) {
+	const origin = exposeOrigin(req, bridgeSecurity);
+	const explicitToken = bridgeToken(req);
+	if (origin && explicitToken && bridgeSecurity.validateBridgeToken(origin, explicitToken)) {
+		return origin;
+	}
+	const cookieToken = cookieValue(req, STATUS_PAGE_COOKIE_NAME);
+	if (origin && isHttpsOrigin(origin) && bridgeSecurity.validateBridgeToken(origin, cookieToken)) {
+		return origin;
+	}
+	if (origin) return '';
+	const referer = refererOrigin(req, bridgeSecurity);
+	if (!referer || !isHttpsOrigin(referer)) return '';
+	if (!isPairedSameOriginReferer(req, bridgeSecurity, explicitToken) && !isPairedSameOriginReferer(req, bridgeSecurity, cookieToken)) return '';
+	return referer;
+}
+
 function requirePairing(req, res, bridgeSecurity) {
 	const origin = exposeOrigin(req, bridgeSecurity);
 	const token = bridgeToken(req);
 	const allowedOrigin = origin && bridgeSecurity.getPairing(origin) ? origin : corsOrigin(req, bridgeSecurity);
 	if (!origin || !bridgeSecurity.validateBridgeToken(origin, token)) {
-		sendErrorJson(req, res, 403, { success: false, message: 'This WordPress origin is not paired with the local Codex bridge.' }, allowedOrigin);
+		sendErrorJson(req, res, 403, { success: false, message: 'This browser origin is not paired with AI Model Relay.' }, allowedOrigin);
 		return null;
 	}
 	return origin;
@@ -510,7 +562,7 @@ function modelFromPayload(payload, fallback) {
 
 function capabilitiesPayload(context) {
 	if (context.statusCache) {
-		return { ...context.statusCache.capabilities(), product: { name: PRODUCT_NAME, short_name: SHORT_NAME, legacy_name: LEGACY_PRODUCT_NAME }, bridge: { version: packageInfo.version }, frontend_interfaces: { legacy_v1: true, relay_v1: true, legacy_routes: ['/v1/status', '/v1/capabilities', '/v1/models', '/v1/chat', '/v1/images', '/v1/transcribe', '/v1/videos', '/v1/media/analyze', '/v1/music/analyze'], relay_routes: ['/v1/relay/status', '/v1/relay/capabilities', '/v1/relay/models', '/v1/relay/jobs/chat', '/v1/relay/jobs/images', '/v1/relay/jobs/upscale', '/v1/relay/jobs/transcribe', '/v1/relay/jobs/videos', '/v1/relay/jobs/media/analyze', '/v1/relay/jobs/music/analyze'], local_status_test_route: '/v1/relay/test' } };
+		return { ...context.statusCache.capabilities(), product: { name: PRODUCT_NAME, short_name: SHORT_NAME, legacy_name: LEGACY_PRODUCT_NAME }, bridge: { version: packageInfo.version }, frontend_interfaces: { legacy_v1: true, relay_v1: true, legacy_routes: ['/v1/status', '/v1/capabilities', '/v1/models', '/v1/chat', '/v1/images', '/v1/transcribe', '/v1/videos', '/v1/media/analyze', '/v1/music/analyze'], relay_routes: ['/v1/relay/status', '/v1/relay/capabilities', '/v1/relay/models', '/v1/relay/jobs/chat', '/v1/relay/jobs/images', '/v1/relay/jobs/upscale', '/v1/relay/jobs/transcribe', '/v1/relay/jobs/videos', '/v1/relay/jobs/media/analyze', '/v1/relay/jobs/music/analyze'], status_test_route: '/v1/relay/test', local_status_test_route: '/v1/relay/test' } };
 	}
 	const codexCapabilities = context.codex.capabilities ? context.codex.capabilities() : { success: true, bridge_features: {} };
 	return {
@@ -532,6 +584,7 @@ function capabilitiesPayload(context) {
 			relay_v1: true,
 			legacy_routes: ['/v1/status', '/v1/capabilities', '/v1/models', '/v1/chat', '/v1/images', '/v1/transcribe', '/v1/videos', '/v1/media/analyze', '/v1/music/analyze'],
 			relay_routes: ['/v1/relay/status', '/v1/relay/capabilities', '/v1/relay/models', '/v1/relay/jobs/chat', '/v1/relay/jobs/images', '/v1/relay/jobs/upscale', '/v1/relay/jobs/transcribe', '/v1/relay/jobs/videos', '/v1/relay/jobs/media/analyze', '/v1/relay/jobs/music/analyze'],
+			status_test_route: '/v1/relay/test',
 			local_status_test_route: '/v1/relay/test',
 		},
 		video: context.video.capabilities ? context.video.capabilities() : { enabled: false },
@@ -770,6 +823,20 @@ function isLocalPageOrigin(req, origin) {
 	return localHosts.has(requestHost.hostname) && originPort === requestPort;
 }
 
+function isLoopbackHttpOrigin(req, origin) {
+	let parsed;
+	let requestHost;
+	try {
+		parsed = new URL(String(origin || ''));
+		requestHost = new URL(`http://${String(req.headers.host || '').trim()}`);
+	} catch (error) {
+		return false;
+	}
+	if (parsed.protocol !== 'http:') return false;
+	const localHosts = new Set(['127.0.0.1', 'localhost', '[::1]', '::1']);
+	return localHosts.has(parsed.hostname.toLowerCase()) && localHosts.has(requestHost.hostname.toLowerCase());
+}
+
 function requireLocalPageOrigin(req, res, origin) {
 	if (isLocalPageOrigin(req, origin)) return true;
 	sendErrorJson(req, res, 403, { success: false, message: 'Status-page install and settings are only accepted from the local Relay page.' });
@@ -833,6 +900,15 @@ async function route(req, res, context) {
 	const url = new URL(req.url, 'http://127.0.0.1');
 	if (req.method === 'OPTIONS') {
 		if (STATUS_PAGE_MUTATORS.has(url.pathname)) {
+			if (url.pathname === '/v1/relay/test') {
+				const allowedOrigin = corsOrigin(req, bridgeSecurity);
+				if (!allowedOrigin) {
+					sendErrorJson(req, res, 403, { success: false, message: 'Provider tests require a paired status-page origin.' });
+					return;
+				}
+				sendJson(res, 204, {}, allowedOrigin);
+				return;
+			}
 			if (!isLocalPageOrigin(req, origin)) {
 				sendErrorJson(req, res, 403, { success: false, message: 'Status-page install and settings are only accepted from the local Relay page.' });
 				return;
@@ -857,29 +933,33 @@ async function route(req, res, context) {
 	}
 	const artifactMatch = url.pathname.match(/^\/v1\/status\/jobs\/(\d+)\/artifacts\/(\d+)$/);
 	if (req.method === 'GET' && artifactMatch) {
-		if (isLocalStatusViewer(req, bridgeSecurity) || isRelayHostStatusRequest(req, bridgeSecurity)) {
-			const artifact = jobManager.artifact(artifactMatch[1], artifactMatch[2]);
-			if (!artifact) {
-				sendJson(res, 404, { success: false, message: 'Generated job artifact was not found.' });
-				return;
-			}
-			sendArtifact(res, artifact);
+		if (url.searchParams.has('bridge_token')) {
+			sendErrorJson(req, res, 400, { success: false, message: 'Pairing tokens must not be sent in the artifact URL.' });
 			return;
 		}
-		const pairedOrigin = requirePairing(req, res, bridgeSecurity);
-		if (!pairedOrigin) return;
+		const localViewer = isLocalStatusViewer(req, bridgeSecurity);
+		const pairedOrigin = localViewer ? '' : pairedStatusPageOrigin(req, bridgeSecurity) || requirePairing(req, res, bridgeSecurity);
+		if (!localViewer && !pairedOrigin) return;
+		if (!localViewer && !isHttpsOrigin(pairedOrigin) && !isLoopbackHttpOrigin(req, pairedOrigin)) {
+			sendErrorJson(req, res, 403, { success: false, message: 'Remote status-page artifacts require HTTPS.' }, pairedOrigin);
+			return;
+		}
 		const artifact = jobManager.artifact(artifactMatch[1], artifactMatch[2], pairedOrigin);
 		if (!artifact) {
-			sendJson(res, 404, { success: false, message: 'Generated job artifact was not found.' }, pairedOrigin);
+			sendJson(res, 404, { success: false, message: 'Generated job artifact was not found.' }, pairedOrigin || undefined);
 			return;
 		}
-		sendArtifact(res, artifact, pairedOrigin);
+		sendArtifact(res, artifact, pairedOrigin || undefined);
 		return;
 	}
 	const relayArtifactMatch = url.pathname.match(/^\/v1\/relay\/jobs\/([^/]+)\/artifact$/);
 	if (req.method === 'GET' && relayArtifactMatch) {
 		const pairedOrigin = requirePairing(req, res, bridgeSecurity);
 		if (!pairedOrigin) return;
+		if (!isLocalPageOrigin(req, pairedOrigin) && !isHttpsOrigin(pairedOrigin) && !isLoopbackHttpOrigin(req, pairedOrigin)) {
+			sendErrorJson(req, res, 403, { success: false, message: 'Remote job artifacts require HTTPS.' }, pairedOrigin);
+			return;
+		}
 		const artifact = jobManager.artifactByRequestId(relayArtifactMatch[1], pairedOrigin);
 		if (!artifact) {
 			sendJson(res, 404, { success: false, message: 'Generated job artifact was not found.' }, pairedOrigin);
@@ -890,15 +970,17 @@ async function route(req, res, context) {
 	}
 
 	if (req.method === 'GET' && url.pathname === '/v1/relay/providers/anthropic/usage') {
-		if (!isLocalStatusViewer(req, bridgeSecurity)) {
-			sendErrorJson(req, res, 403, { success: false, message: 'Claude API usage is only available to the local Relay user.' });
+		const trusted = isLocalStatusViewer(req, bridgeSecurity) || isSecurePairedStatusViewer(req, bridgeSecurity);
+		if (!trusted) {
+			sendErrorJson(req, res, 403, { success: false, message: 'Claude API usage requires a local or paired status-page viewer.' });
 			return;
 		}
+		const allowedOrigin = corsOrigin(req, bridgeSecurity);
 		try {
 			const force = /^(1|true|yes)$/i.test(url.searchParams.get('refresh') || '');
-			sendJson(res, 200, await context.anthropicUsage.report({ force }));
+			sendJson(res, 200, await context.anthropicUsage.report({ force }), allowedOrigin);
 		} catch (error) {
-			sendJson(res, 500, { success: false, message: error && error.message || 'Claude API usage could not be read.' });
+			sendJson(res, 500, { success: false, message: error && error.message || 'Claude API usage could not be read.' }, allowedOrigin);
 		}
 		return;
 	}
@@ -967,6 +1049,10 @@ async function route(req, res, context) {
 	}
 
 	if (req.method === 'GET' && url.pathname === '/v1/status/events') {
+		if (!isLocalStatusViewer(req, bridgeSecurity)) {
+			sendErrorJson(req, res, 403, { success: false, message: 'Remote status pages must use the paired /v1/status/stream endpoint.' }, corsOrigin(req, bridgeSecurity));
+			return;
+		}
 		context.statusEvents.add(res, {
 			includePairedOrigins: true,
 			events: ['status', 'capabilities', 'jobs'],
@@ -980,8 +1066,16 @@ async function route(req, res, context) {
 	}
 
 	if (req.method === 'GET' && url.pathname === '/v1/status/stream') {
-		const pairedOrigin = requirePairing(req, res, bridgeSecurity);
+		if (url.searchParams.has('bridge_token')) {
+			sendErrorJson(req, res, 400, { success: false, message: 'Pairing tokens must not be sent in the status stream URL.' });
+			return;
+		}
+		const pairedOrigin = pairedStatusPageOrigin(req, bridgeSecurity) || requirePairing(req, res, bridgeSecurity);
 		if (!pairedOrigin) {
+			return;
+		}
+		if (!isLocalPageOrigin(req, pairedOrigin) && !isHttpsOrigin(pairedOrigin) && !isLoopbackHttpOrigin(req, pairedOrigin)) {
+			sendErrorJson(req, res, 403, { success: false, message: 'Remote status streams require HTTPS.' }, pairedOrigin);
 			return;
 		}
 		context.statusEvents.add(res, {
@@ -1039,6 +1133,19 @@ async function route(req, res, context) {
 		return;
 	}
 
+	let providerTestOrigin = '';
+	if (url.pathname === '/v1/relay/test') {
+		if (isLocalPageOrigin(req, origin)) {
+			providerTestOrigin = origin;
+		} else if (origin && !isHttpsOrigin(origin) && !isLoopbackHttpOrigin(req, origin)) {
+			sendErrorJson(req, res, 403, { success: false, message: 'Remote provider tests require an HTTPS status-page origin.' }, corsOrigin(req, bridgeSecurity));
+			return;
+		} else {
+			providerTestOrigin = requirePairing(req, res, bridgeSecurity);
+		}
+		if (!providerTestOrigin) return;
+	}
+
 	let body;
 	try {
 		body = await readBody(req, bridgeSecurity.MAX_BODY_BYTES || security.MAX_BODY_BYTES);
@@ -1049,7 +1156,7 @@ async function route(req, res, context) {
 		return;
 	}
 
-	if (STATUS_PAGE_MUTATORS.has(url.pathname) && !requireLocalPageOrigin(req, res, origin)) {
+	if (STATUS_PAGE_MUTATORS.has(url.pathname) && url.pathname !== '/v1/relay/test' && !requireLocalPageOrigin(req, res, origin)) {
 		return;
 	}
 
@@ -1113,6 +1220,10 @@ async function route(req, res, context) {
 			sendErrorJson(req, res, 403, { success: false, message: 'The requesting browser origin must match the site being paired.' });
 			return;
 		}
+		if (body.client === 'status-page' && !isLocalPageOrigin(req, safeOrigin) && !isHttpsOrigin(safeOrigin)) {
+			sendErrorJson(req, res, 403, { success: false, message: 'Remote status-page pairing requires HTTPS.' }, pairCors);
+			return;
+		}
 		const limiter = pairingLimiterFor(context, req, origin, safeOrigin);
 		if (limiter && !limiter.allow()) {
 			const retryAfterMs = limiter.retryAfterMs ? limiter.retryAfterMs() : 0;
@@ -1127,11 +1238,15 @@ async function route(req, res, context) {
 		if (limiter) limiter.reset();
 		const token = bridgeSecurity.createToken();
 		bridgeSecurity.savePairing(safeOrigin, token);
+		if (context.statusEvents && typeof context.statusEvents.closeOrigin === 'function') context.statusEvents.closeOrigin(safeOrigin);
 		if (!persistentPairingCode) {
 			pairingCode = bridgeSecurity.createPairingCode();
 			safeProcessSend({ type: 'pairing-code', pairingCode, persistent: false }, { logName: 'server' });
 		}
-		sendJson(res, 200, { success: true, origin: safeOrigin, token }, safeOrigin);
+		const extraHeaders = body.client === 'status-page' && isHttpsOrigin(safeOrigin)
+			? { 'Set-Cookie': statusPageCookie(token) }
+			: {};
+		sendJson(res, 200, { success: true, origin: safeOrigin, token }, safeOrigin, extraHeaders);
 		return;
 	}
 
@@ -1141,7 +1256,8 @@ async function route(req, res, context) {
 			return;
 		}
 		bridgeSecurity.removePairing(pairedOrigin);
-		sendJson(res, 200, { success: true }, pairedOrigin);
+		if (context.statusEvents && typeof context.statusEvents.closeOrigin === 'function') context.statusEvents.closeOrigin(pairedOrigin);
+		sendJson(res, 200, { success: true }, pairedOrigin, { 'Set-Cookie': clearStatusPageCookie() });
 		return;
 	}
 
@@ -1302,6 +1418,7 @@ async function route(req, res, context) {
 		return;
 	}
 	if (url.pathname === '/v1/relay/test') {
+		const testOrigin = providerTestOrigin;
 		const jobType = String(body.job_type || '').trim();
 		const model = String(body.model || '').trim();
 		if (!['chat', 'images', 'videos', 'transcribe', 'media.analyze', 'music.analyze'].includes(jobType)) {
@@ -1370,7 +1487,7 @@ async function route(req, res, context) {
 			requestId,
 			type: jobType,
 			model: modelFromPayload(resolved.payload, model),
-			origin,
+			origin: testOrigin,
 			...display,
 		}, (session) => context.backends.run(jobType, resolved.payload, session));
 		context.statusCache.sync();

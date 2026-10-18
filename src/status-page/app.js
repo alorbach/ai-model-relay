@@ -12,6 +12,7 @@
 		const claudeUsageUrl = '/v1/relay/providers/anthropic/usage';
 		const pairingCodeSettingsUrl = '/v1/relay/pairing-code';
 		const relayTestUrl = '/v1/relay/test';
+		const remotePairingStorageKey = 'ai-model-relay-remote-pairing-token';
 		const liveImageCancelUrl = '/v1/relay/jobs/images/cancel';
 		const jobEventsUrl = '/v1/status/events';
 		let currentStatus = {};
@@ -77,6 +78,8 @@
 		const cancellingLiveImageRequests = new Set();
 		const seenLiveRequestIds = new Set();
 		let currentRoute = 'overview';
+		let remotePairingToken = null;
+		let remotePairingStorageUnavailable = false;
 		let pendingProviderFocus = '';
 		let pendingTestFocus = null;
 		const baseDocumentTitle = document.title;
@@ -121,6 +124,14 @@
 			liveDetailCopyId: document.getElementById('liveDetailCopyId'),
 			liveDetailCancel: document.getElementById('liveDetailCancel'),
 			persistentPairingCodeForm: document.getElementById('persistentPairingCodeForm'),
+			localPairingSettings: document.getElementById('localPairingSettings'),
+			remotePairingCard: document.getElementById('remotePairingCard'),
+			remotePairingForm: document.getElementById('remotePairingForm'),
+			remotePairingCodeInput: document.getElementById('remotePairingCodeInput'),
+			remotePairingStatus: document.getElementById('remotePairingStatus'),
+			remotePairingMessage: document.getElementById('remotePairingMessage'),
+			pairRemotePage: document.getElementById('pairRemotePage'),
+			unpairRemotePage: document.getElementById('unpairRemotePage'),
 			persistentPairingCodeInput: document.getElementById('persistentPairingCodeInput'),
 			pairingCodeStatus: document.getElementById('pairingCodeStatus'),
 			pairingCodeMessage: document.getElementById('pairingCodeMessage'),
@@ -233,6 +244,49 @@
 			mediaLightboxVideo: document.getElementById('mediaLightboxVideo'),
 			closeImageLightbox: document.getElementById('closeImageLightbox'),
 		};
+
+		function isLocalStatusPage() {
+			return location.protocol === 'http:' && ['127.0.0.1', 'localhost', '[::1]', '::1'].includes(location.hostname);
+		}
+
+		function readRemotePairingToken() {
+			try {
+				const token = localStorage.getItem(remotePairingStorageKey);
+				return token && token.trim() ? token : null;
+			} catch (error) {
+				remotePairingStorageUnavailable = true;
+				return null;
+			}
+		}
+
+		function relayPairingHeaders(extra = {}) {
+			const headers = { ...extra };
+			if (remotePairingToken && (isLocalStatusPage() || location.protocol === 'https:')) headers['X-Alorbach-Bridge-Token'] = remotePairingToken;
+			return headers;
+		}
+
+		function renderRemotePairingState(message = '') {
+			if (!fields.remotePairingCard) return;
+			const paired = !!remotePairingToken;
+			const securePage = isLocalStatusPage() || location.protocol === 'https:';
+			fields.remotePairingStatus.textContent = paired ? 'This browser is paired with this Relay.' : 'Not paired with this Relay';
+			fields.remotePairingCodeInput.disabled = paired || !securePage;
+			fields.pairRemotePage.disabled = paired || !securePage;
+			fields.pairRemotePage.hidden = paired;
+			fields.unpairRemotePage.hidden = !paired;
+			if (message) fields.remotePairingMessage.textContent = message;
+		}
+
+		function clearRemotePairingToken(message) {
+			let storageCleared = true;
+			try {
+				localStorage.removeItem(remotePairingStorageKey);
+			} catch (error) {
+				storageCleared = false;
+			}
+			remotePairingToken = null;
+			renderRemotePairingState(storageCleared ? message : message + ' Browser storage could not be cleared; clear this site’s storage before pairing again.');
+		}
 
 		const chatRunAll = { running: false, cancelled: false };
 		const providerTestWaiters = new WeakMap();
@@ -3373,9 +3427,12 @@
 					body.audio_format = audioFile.type || (audioFile.name.split('.').pop() || '');
 				}
 				requestSent = true;
-				const response = await fetch(relayTestUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+				const response = await fetch(relayTestUrl, { method: 'POST', headers: relayPairingHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify(body) });
 				const payload = await response.json().catch(() => ({}));
 				if (!response.ok || !payload.success) {
+					if (response.status === 403 && payload.message === 'This browser origin is not paired with AI Model Relay.') {
+						clearRemotePairingToken('The saved pairing token was rejected and has been cleared. Pair this browser again with the current tray code.');
+					}
 					const failure = new Error(payload.error_message || payload.message || 'Provider test failed.');
 					failure.code = payload.code || '';
 					failure.httpStatus = response.status;
@@ -3460,6 +3517,10 @@
 		}
 
 		async function loadPairingSettings() {
+			if (!isLocalStatusPage()) {
+				renderRemotePairingState();
+				return;
+			}
 			try {
 				const response = await fetch(pairingCodeSettingsUrl, { cache: 'no-store' });
 				const payload = await response.json();
@@ -3475,6 +3536,82 @@
 				fields.pairingCodeStatus.textContent = error.message || 'Pairing settings unavailable';
 				fields.saveFixedPairingCode.disabled = true;
 				fields.disableFixedPairingCode.disabled = true;
+			}
+		}
+
+		async function pairRemotePage() {
+			if (!isLocalStatusPage() && location.protocol !== 'https:') {
+				fields.remotePairingMessage.textContent = 'Remote status-page pairing requires HTTPS. Open this page through its secure address.';
+				return;
+			}
+			const pairingCode = String(fields.remotePairingCodeInput.value || '');
+			if (!/^[0-9]{6}$/.test(pairingCode)) {
+				fields.remotePairingMessage.textContent = 'Enter exactly six digits from the Relay tray app.';
+				return;
+			}
+			fields.pairRemotePage.disabled = true;
+			fields.remotePairingMessage.textContent = 'Pairing this browser…';
+			try {
+				const response = await fetch('/v1/pair', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ origin: location.origin, pairing_code: pairingCode, client: 'status-page' }),
+					cache: 'no-store',
+				});
+				const payload = await response.json().catch(() => ({}));
+				if (!response.ok || payload.success !== true || typeof payload.token !== 'string' || !payload.token) {
+					throw new Error(payload.message || (response.status === 403 ? 'Pairing was denied. Check the current tray code and try again.' : 'This browser could not be paired.'));
+				}
+				try {
+					localStorage.setItem(remotePairingStorageKey, payload.token);
+					remotePairingToken = payload.token;
+					fields.remotePairingMessage.textContent = 'This browser is paired. The token is saved in this browser.';
+				} catch (storageError) {
+					remotePairingToken = payload.token;
+					fields.remotePairingMessage.textContent = 'Paired for this tab, but browser storage is unavailable. Keep this page open to run tests or unpair.';
+				}
+				fields.remotePairingCodeInput.value = '';
+				renderRemotePairingState(fields.remotePairingMessage.textContent);
+				reconnectJobEventsNow();
+			} catch (error) {
+				fields.remotePairingMessage.textContent = error && error.message ? error.message : 'This browser could not be paired.';
+				fields.pairRemotePage.disabled = false;
+			}
+		}
+
+		async function unpairRemotePage() {
+			if (!remotePairingToken) return;
+			if (!isLocalStatusPage() && location.protocol !== 'https:') {
+				fields.remotePairingMessage.textContent = 'Remote unpairing requires HTTPS. Open this page through its secure address.';
+				return;
+			}
+			fields.unpairRemotePage.disabled = true;
+			fields.remotePairingMessage.textContent = 'Unpairing this browser…';
+			try {
+				const response = await fetch('/v1/unpair', {
+					method: 'POST',
+					headers: relayPairingHeaders(),
+					cache: 'no-store',
+				});
+				const payload = await response.json().catch(() => ({}));
+				if (response.status === 403) {
+					clearRemotePairingToken('The saved pairing token was rejected and has been cleared. Pair this browser again with the current tray code.');
+					return;
+				}
+				if (!response.ok || payload.success !== true) {
+					throw new Error(payload.message || 'This browser could not be unpaired.');
+				}
+				try {
+					localStorage.removeItem(remotePairingStorageKey);
+					remotePairingToken = null;
+					renderRemotePairingState('This browser has been unpaired.');
+				} catch (storageError) {
+					remotePairingToken = null;
+					renderRemotePairingState('Unpaired on the Relay, but browser storage could not be cleared. Clear this site’s browser storage before pairing again.');
+				}
+			} catch (error) {
+				fields.remotePairingMessage.textContent = error && error.message ? error.message : 'This browser could not be unpaired.';
+				fields.unpairRemotePage.disabled = false;
 			}
 		}
 
@@ -3827,7 +3964,7 @@
 			if (!panel) return;
 			const sequence = ++claudeUsageSequence;
 			try {
-				const response = await fetch(claudeUsageUrl + (force ? '?refresh=1' : ''), { cache: 'no-store' });
+				const response = await fetch(claudeUsageUrl + (force ? '?refresh=1' : ''), { headers: relayPairingHeaders(), cache: 'no-store' });
 				const payload = await response.json();
 				if (sequence !== claudeUsageSequence) return;
 				if (!response.ok || payload.success === false) throw new Error(payload.message || 'Claude usage unavailable');
@@ -5144,7 +5281,7 @@
 			let capabilitiesResult;
 			try {
 				const [statusResult, capabilities] = await Promise.all([
-					fetchJsonWithTimeout(statusUrl, { cache: 'no-store' }, statusFetchTimeoutMs, 'Status request'),
+					fetchJsonWithTimeout(statusUrl, { headers: relayPairingHeaders(), cache: 'no-store' }, statusFetchTimeoutMs, 'Status request'),
 					fetchJsonWithTimeout(capabilitiesUrl, { cache: 'no-store' }, statusFetchTimeoutMs, 'Capabilities request').catch(() => null),
 				]);
 				response = statusResult.response;
@@ -5220,6 +5357,15 @@
 			}, delay);
 		}
 
+		function reconnectJobEventsNow() {
+			if (jobEventsRetryTimer) {
+				clearTimeout(jobEventsRetryTimer);
+				jobEventsRetryTimer = null;
+			}
+			jobEventsRetryDelay = jobEventsRetryMinMs;
+			if (!jobEvents) connectJobEvents();
+		}
+
 		// Called by the 1 s ticker. A stream that is open but has delivered nothing (no event, no heartbeat) for longer than
 		// jobEventsStallMs is stalled (the Relay stopped servicing it without closing it, so no error ever fires): drop it, poll,
 		// and retry the stream with the usual backoff. The polls then decide Connected-less states (delayed / unreachable).
@@ -5251,7 +5397,8 @@
 			}
 			let source = null;
 			try {
-				source = new window.EventSource(jobEventsUrl);
+				const eventsUrl = isLocalStatusPage() ? jobEventsUrl : '/v1/status/stream';
+				source = new window.EventSource(eventsUrl);
 			} catch (error) {
 				connectionState.sseLive = false;
 				startFallbackPolling();
@@ -5435,6 +5582,26 @@
 			saveFixedPairingCode();
 		});
 		fields.disableFixedPairingCode.addEventListener('click', disableFixedPairingCode);
+		fields.remotePairingForm.addEventListener('submit', (event) => {
+			event.preventDefault();
+			pairRemotePage();
+		});
+		fields.unpairRemotePage.addEventListener('click', unpairRemotePage);
+		remotePairingToken = readRemotePairingToken();
+		const localStatusPage = isLocalStatusPage();
+		if (!localStatusPage && location.protocol !== 'https:' && remotePairingToken) {
+			clearRemotePairingToken('Remote status-page access requires HTTPS. The saved token was cleared from this browser.');
+		}
+		fields.localPairingSettings.hidden = !localStatusPage;
+		fields.remotePairingCard.hidden = localStatusPage;
+		renderRemotePairingState();
+		if (!localStatusPage && !remotePairingToken) {
+			fields.remotePairingMessage.textContent = location.protocol !== 'https:'
+				? 'Remote status-page pairing requires HTTPS. Open this page through its secure address.'
+				: remotePairingStorageUnavailable
+				? 'Browser storage is unavailable. Pairing can work for this tab, but the token cannot be saved for future visits.'
+				: 'Pair with the current six-digit code from the Relay tray app to enable remote provider tests.';
+		}
 		fields.relaySettingsForm.addEventListener('submit', (event) => { event.preventDefault(); saveRelaySettings(); });
 		fields.saveRelaySettings.addEventListener('click', saveRelaySettings);
 		if (fields.relayRuntimeSettings) {
