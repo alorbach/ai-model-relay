@@ -1,0 +1,46 @@
+docs/gateway-integration.md
+  s_302299dca5a0bf::t_0ee9d6c19c7738 23,91
+scripts/capture-screenshots.js
+  s_302299dca5a0bf::t_f3b59228f773fb 69-70,77,79,81-86,88-90
+  s_302299dca5a0bf::t_fe22bc5dc43362 1-45,47-68,71-76,78,80,87,91-269,272-276,297-308,314-317,319-323,325-333,339-344,346-393,395-408,412-441
+  s_302299dca5a0bf::t_b18a8f62ea2c2f 277-296,324,345,409-411
+  s_302299dca5a0bf::t_d896a11f6c59bc 46,309-310,312-313,394
+  s_302299dca5a0bf::t_573b0aee5d64bc 270
+  s_302299dca5a0bf::t_5d5437b2ea46bd 311
+  s_302299dca5a0bf::t_5d2f2ba138e705 338
+  s_302299dca5a0bf::t_2fd8c80dd7ec9a 271,318
+  s_302299dca5a0bf::t_b7302bfc90b174 334-337
+docs/operations.md
+  s_302299dca5a0bf::t_1fd1b25c9c85e8 212-215
+  s_302299dca5a0bf::t_6ed0c40a030d87 23-39
+  s_302299dca5a0bf::t_ce63842662f9cf 21,54,58,202,209,246,276,300,304
+  s_302299dca5a0bf::t_5ce0bb6899ef4f 22
+docs/architecture.md
+  s_302299dca5a0bf::t_a3bb504b7ddbce 29,43,57,71,73,75,95
+  s_302299dca5a0bf::t_ce63842662f9cf 41
+docs/plans/README.md
+  s_302299dca5a0bf::t_0ee9d6c19c7738 73
+package.json
+  s_302299dca5a0bf::t_1fd1b25c9c85e8 9
+README.md
+  s_302299dca5a0bf::t_8119a45adc6984 44,46-48,61-69
+  s_302299dca5a0bf::t_29471fd04b1bb4 52
+  s_302299dca5a0bf::t_0ee9d6c19c7738 26
+  s_302299dca5a0bf::t_24ce21052357b9 70
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "2bb08ebabd6995d4250aae5f58a6aa5c43e12ec0",
+  "prompts": {},
+  "sessions": {
+    "s_302299dca5a0bf": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "70612418-085e-405d-9206-0244d9396144",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
