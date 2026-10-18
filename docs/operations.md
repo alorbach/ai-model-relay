@@ -157,9 +157,12 @@ The release workflow:
 5. syntax-checks JavaScript files;
 6. runs tests;
 7. builds the Windows installer and portable ZIP;
-8. generates a release description with download names, validation context, and an embedded changelog from GitHub's generated change entries;
-9. removes older installer and ZIP assets from an existing release for the same tag;
-10. publishes a GitHub Release with that description and only the current build's installer and portable ZIP assets.
+8. writes a user-facing changelog from the commit subjects since the previous tag with GitHub Copilot CLI, when the `COPILOT_GITHUB_TOKEN` secret is set;
+9. generates a release description with download names, validation context, and the Copilot changelog, or GitHub's generated change entries when the token is missing or the Copilot step fails;
+10. removes older installer and ZIP assets from an existing release for the same tag;
+11. publishes a GitHub Release with that description and only the current build's installer and portable ZIP assets.
+
+To enable the Copilot changelog, create a fine-grained personal access token with the **Copilot Requests** permission (the account needs an active Copilot plan; each release uses its Copilot requests) and store it as the repository secret `COPILOT_GITHUB_TOKEN`. The Copilot step runs in an empty directory with no tools approved, so it only sees the commit subjects.
 
 ## Diagnostics
 

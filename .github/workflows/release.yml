@@ -7,7 +7,6 @@ on:
 
 permissions:
   contents: write
-  models: read
 
 jobs:
   release:
@@ -96,38 +95,86 @@ jobs:
       - name: Build Windows installer and portable ZIP
         run: npm run dist:win
 
+      # GitHub Models (actions/ai-inference) was retired on 2026-07-30, so the
+      # changelog is written by GitHub Copilot CLI. It needs a fine-grained PAT
+      # with the "Copilot Requests" permission in the COPILOT_GITHUB_TOKEN
+      # secret; without it the release falls back to GitHub's generated notes.
+      - name: Check Copilot token
+        id: copilot_token
+        shell: pwsh
+        env:
+          HAS_COPILOT_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN != '' }}
+        run: |
+          "available=$env:HAS_COPILOT_TOKEN" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          if ($env:HAS_COPILOT_TOKEN -ne 'true') {
+            Write-Host "::notice title=AI changelog skipped::COPILOT_GITHUB_TOKEN secret is not set; using GitHub auto-generated release notes."
+          }
+
       - name: Generate AI changelog
         id: ai_changelog
-        if: steps.commit_log.outputs.commit_count != '0'
+        if: steps.commit_log.outputs.commit_count != '0' && steps.copilot_token.outputs.available == 'true'
         continue-on-error: true
-        uses: actions/ai-inference@v1
-        with:
-          prompt-file: dist/commit-log.txt
-          system-prompt: |
-            You are a precise release-notes writer for AI Model Relay, a Windows tray
-            companion that exposes a secure localhost relay for local and API-backed
-            AI model drivers (formerly named Codex Local Bridge).
+        timeout-minutes: 10
+        shell: pwsh
+        env:
+          COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
 
-            You will receive a list of git commit subjects, one per line, each formatted
-            as "- subject (short-hash)". Turn that list into a concise, user-facing
-            changelog in Markdown.
+          npm install -g @github/copilot
+          if ($LASTEXITCODE -ne 0) { throw "Copilot CLI install failed with exit code $LASTEXITCODE." }
+          # Run the loader through node.exe: the npm .cmd shim cannot pass a multi-line prompt argument.
+          $loader = Join-Path (npm root -g) '@github/copilot/npm-loader.js'
 
-            Rules:
-            - Group entries under "### Added", "### Changed", "### Fixed", and
-              "### Removed" headings, but only include a heading if it has at least
-              one entry.
-            - Summarize related or duplicate commits into a single bullet instead of
-              listing every commit separately.
-            - Skip routine chores that are not user-relevant, such as version bumps,
-              formatting-only changes, or CI-only tweaks, unless nothing else is
-              available.
-            - Do not include commit hashes or author names in the output.
-            - Do not invent features or fixes that are not implied by the commit
-              subjects.
-            - Keep bullets short, factual, and written for an end user, not a
-              developer.
-            - Respond with Markdown only, no surrounding commentary.
-          model: openai/gpt-4o
+          $instructions = @'
+          You are a precise release-notes writer for AI Model Relay, a Windows tray
+          companion that exposes a secure localhost relay for local and API-backed
+          AI model drivers (formerly named Codex Local Bridge).
+
+          You will receive a list of git commit subjects, one per line, each formatted
+          as "- subject (short-hash)". Turn that list into a concise, user-facing
+          changelog in Markdown. Do not use any tools; answer from the list alone.
+
+          Rules:
+          - Group entries under "### Added", "### Changed", "### Fixed", and
+            "### Removed" headings, but only include a heading if it has at least
+            one entry.
+          - Summarize related or duplicate commits into a single bullet instead of
+            listing every commit separately.
+          - Skip routine chores that are not user-relevant, such as version bumps,
+            formatting-only changes, or CI-only tweaks, unless nothing else is
+            available.
+          - Do not include commit hashes or author names in the output.
+          - Do not invent features or fixes that are not implied by the commit
+            subjects.
+          - Keep bullets short, factual, and written for an end user, not a
+            developer.
+          - Respond with Markdown only, no surrounding commentary.
+          '@
+          $commits = Get-Content -Raw -Path dist/commit-log.txt
+          $prompt = "$instructions`nCommit subjects:`n$commits"
+
+          # Run from an empty directory so the agent sees no repository files or instructions.
+          $work = Join-Path $env:RUNNER_TEMP 'copilot-changelog'
+          New-Item -ItemType Directory -Force -Path $work | Out-Null
+          Push-Location $work
+          try {
+            $output = & node $loader -p $prompt -s --no-ask-user --no-color --stream off --no-auto-update --no-custom-instructions --disable-builtin-mcps --secret-env-vars COPILOT_GITHUB_TOKEN
+            $exitCode = $LASTEXITCODE
+          } finally {
+            Pop-Location
+          }
+          if ($exitCode -ne 0) { throw "Copilot CLI exited with code $exitCode." }
+
+          $response = (@($output) -join "`n").Trim()
+          if (-not $response) { throw 'Copilot CLI returned an empty changelog.' }
+          Set-Content -Path dist/ai-changelog.md -Value $response -Encoding utf8
+
+          $delimiter = "AI_CHANGELOG_$([guid]::NewGuid().ToString('N'))"
+          "response<<$delimiter" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          $response | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          $delimiter | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
       - name: Generate release description
         uses: actions/github-script@v7
@@ -139,6 +186,7 @@ jobs:
           PREVIOUS_TAG: ${{ steps.prev_tag.outputs.previous_tag }}
           AI_CHANGELOG: ${{ steps.ai_changelog.outputs.response }}
           AI_CHANGELOG_OUTCOME: ${{ steps.ai_changelog.outcome }}
+          COPILOT_TOKEN_AVAILABLE: ${{ steps.copilot_token.outputs.available }}
         with:
           script: |
             const fs = require('fs');
@@ -157,7 +205,7 @@ jobs:
             let changelogSource;
             if (aiSucceeded) {
               changelog = aiChangelog;
-              changelogSource = 'AI-generated summary';
+              changelogSource = 'AI-generated summary by GitHub Copilot';
             } else {
               const notes = await github.rest.repos.generateReleaseNotes({
                 owner: context.repo.owner,
@@ -168,7 +216,12 @@ jobs:
               });
               const generatedBody = String(notes.data.body || '').trim();
               changelog = generatedBody || 'No changelog entries were generated for this tag.';
-              changelogSource = 'GitHub auto-generated notes (AI changelog step was skipped or failed)';
+              const fallbackReason = process.env.COPILOT_TOKEN_AVAILABLE !== 'true'
+                ? 'COPILOT_GITHUB_TOKEN is not configured'
+                : process.env.AI_CHANGELOG_OUTCOME === 'skipped'
+                  ? 'no commits since the previous tag'
+                  : 'the AI changelog step failed';
+              changelogSource = `GitHub auto-generated notes; ${fallbackReason}`;
             }
 
             const body = [
