@@ -27,7 +27,7 @@ const { appendLog, safeError, safeProcessSend } = require('./diagnostics');
 const STATUS_PAGE_COOKIE_NAME = 'ai_model_relay_status_page';
 const STATUS_PAGE_COOKIE_PATH = '/v1/status';
 const BRIDGE_ERROR_ORIGIN_NOT_PAIRED = 'origin_not_paired';
-const FORWARDING_HEADERS = ['x-forwarded-for', 'x-forwarded-host', 'x-forwarded-proto', 'x-forwarded-port', 'forwarded', 'x-real-ip', 'cf-connecting-ip', 'true-client-ip', 'via', 'x-forwarded-server', 'x-original-host', 'x-host', 'x-forwarded-ssl'];
+const FORWARDING_HEADERS = ['x-forwarded-for', 'x-forwarded-host', 'x-forwarded-proto', 'x-forwarded-port', 'forwarded', 'x-real-ip', 'cf-connecting-ip', 'true-client-ip', 'via', 'x-forwarded-server', 'x-original-host', 'x-host', 'x-forwarded-ssl', 'x-client-ip', 'fastly-client-ip', 'x-cluster-client-ip', 'x-azure-clientip', 'x-original-forwarded-for'];
 let pairingCode = security.createPairingCode();
 let persistentPairingCode = false;
 let pairingCodePersistenceAvailable = false;
@@ -876,7 +876,7 @@ function isLoopbackHttpOrigin(req, origin) {
 		return false;
 	}
 	if (parsed.protocol !== 'http:') return false;
-	const localHosts = new Set(['127.0.0.1', 'localhost', '[::1]', '::1']);
+	const localHosts = new Set(['127.0.0.1', 'localhost', '[::1]']);
 	return localHosts.has(parsed.hostname.toLowerCase()) && localHosts.has(requestHost.hostname.toLowerCase());
 }
 
@@ -1009,7 +1009,7 @@ async function route(req, res, context) {
 		if (rejectQueryToken(req, res, url, 'usage')) return;
 		const trusted = isLocalStatusViewer(req, bridgeSecurity) || isSecurePairedStatusViewer(req, bridgeSecurity);
 		if (!trusted) {
-			sendErrorJson(req, res, 403, { success: false, message: 'Claude API usage requires a local or paired status-page viewer.' });
+			sendErrorJson(req, res, 403, { success: false, code: BRIDGE_ERROR_ORIGIN_NOT_PAIRED, message: 'Claude API usage requires a local or paired status-page viewer.' });
 			return;
 		}
 		const allowedOrigin = corsOrigin(req, bridgeSecurity);

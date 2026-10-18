@@ -414,6 +414,19 @@ function createMockSecurity() {
 			assert.strictEqual((await requestJson(port, 'POST', '/v1/relay/settings', {}, headers)).statusCode, 403, label);
 			assert.strictEqual((await requestJson(port, 'GET', '/v1/relay/providers/anthropic/usage', null, headers)).statusCode, 403, label);
 		}
+		// Header-less loopback requests are never the local viewer, and the usage 403 carries the stable code.
+		const bareStatus = await requestJson(port, 'GET', '/v1/status', null, { Origin: null, 'X-Alorbach-Bridge-Token': '' });
+		assert.deepStrictEqual(bareStatus.body.jobs.active.concat(bareStatus.body.jobs.queued, bareStatus.body.jobs.recent), []);
+		assert.ok(!Object.prototype.hasOwnProperty.call(bareStatus.body.bridge, 'paired_origins'));
+		const bareUsage = await requestJson(port, 'GET', '/v1/relay/providers/anthropic/usage', null, { Origin: null, 'X-Alorbach-Bridge-Token': '' });
+		assert.strictEqual(bareUsage.statusCode, 403);
+		assert.strictEqual(bareUsage.body.code, 'origin_not_paired');
+		for (const header of ['X-Client-IP', 'Fastly-Client-IP', 'X-Cluster-Client-IP', 'X-Azure-ClientIP', 'X-Original-Forwarded-For']) {
+			assert.strictEqual((await requestJson(port, 'GET', '/v1/relay/pairing-code', null, { ...localPage, [header]: '203.0.113.9' })).statusCode, 403, header);
+		}
+		// An IPv6 loopback page origin with a matching Host counts as local.
+		const ipv6Page = { Origin: `http://[::1]:${port}`, Host: `[::1]:${port}`, 'X-Alorbach-Bridge-Token': '' };
+		assert.strictEqual((await requestJson(port, 'GET', '/v1/relay/pairing-code', null, ipv6Page)).statusCode, 200);
 		// Without forwarding headers the same local page request is still trusted.
 		const directStatus = await requestJson(port, 'GET', '/v1/status', null, localPage);
 		assert.ok(Array.isArray(directStatus.body.bridge.paired_origins));
