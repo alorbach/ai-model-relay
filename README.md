@@ -23,7 +23,7 @@ Windows tray companion for Alorbach AI Subscription Gateway. It exposes a secure
 - Executes signed Gateway audio transcription jobs through private local ASR runtimes with per-word timestamps, or through explicitly selected xAI Speech-to-Text.
 - Optionally runs a separate local music-analysis pipeline for acoustic album metrics; it does not infer lyrics or send audio to a cloud provider.
 - Routes provider-neutral relay jobs through backend drivers for Codex CLI, Antigravity CLI, local ASR, Grok/xAI, configurable CLI processes, API-key chat providers, Claude API (Anthropic), and OpenAI video.
-- Resolves chat and media-analysis `max_tokens` (defaults 8192 / 4096; values below 512 floor up; optional Settings overrides). Codex uses a prompt hint; xAI and API-key chat send `max_tokens` and `max_completion_tokens`.
+- Resolves chat and media-analysis `max_tokens` (defaults 8192 / 4096; values below 512 floor up; optional overrides in the Providers page's Routing card). Codex uses a prompt hint; xAI and API-key chat send `max_tokens` and `max_completion_tokens`.
 - Runs Grok/Cursor/Antigravity Gateway chat from a temp prompt file so large transcripts are not placed on the Windows command line. Cursor chat uses `--mode=ask`.
 - Reports local bridge multimodal capabilities, including structured Codex event support and optional video/media features.
 - Optionally executes signed OpenAI Videos API jobs when explicitly configured with an API key and enable flag. OpenAI lists Sora 2 and the Videos API for removal on 24 Sep 2026.
@@ -41,13 +41,15 @@ Windows tray companion for Alorbach AI Subscription Gateway. It exposes a secure
 
 Double-click the tray icon or use `Open status page` to open the local status page:
 
-![Codex Local Bridge status page with local paths redacted](docs/images/status-page.png)
+![AI Model Relay status page, Overview, light theme](docs/images/status-page.png)
 
-The screenshot above shows the earlier single-page layout. The page now has a fixed left sidebar (a menu button on narrow windows) and a light and dark theme: it follows the system setting by default, and the header toggle (System / Light / Dark) is remembered in the browser. A sticky **Save changes / Discard** bar appears at the bottom of a settings page only while it has unsaved edits, and the sidebar shows a dot on pages with unsaved changes.
+*Overview in the light theme. The screenshots are anonymized; regenerate them with `npm run screenshots` (see [docs/operations.md](docs/operations.md#status-page-screenshots)).*
+
+The page has a fixed left sidebar (a menu button on narrow windows) and a light and dark theme: it follows the system setting by default, and the header toggle (System / Light / Dark) is remembered in the browser. A sticky **Save changes / Discard** bar appears at the bottom of a settings page only while it has unsaved edits, and the sidebar shows a dot on pages with unsaved changes.
 
 | Sidebar entry | What it shows |
 | --- | --- |
-| **Overview** | Relay status (reachable, version, port, paired sites), job counts, a provider summary and one status tile per provider, Claude API usage, and Codex / Local ASR runtime details behind disclosures. |
+| **Overview** | Relay status (reachable, version, port, paired sites), job counts, a provider summary and one status tile per provider, the Claude API usage panel (credits, month-to-date spend, rate limits; the Claude API provider card shows a compact copy), and Codex / Local ASR runtime details behind disclosures. |
 | **Live** | Running, queued, and recent jobs with status pills, provider, model, type, and elapsed time. Filter by status or job type, search, and select a job to read its session input and output (wrap and auto-scroll toggles, copy buttons), error details, and artifact previews. |
 | **Providers** | One expandable card per provider (Codex CLI, Claude API, Grok / xAI API, Grok CLI, Cursor Agent, Antigravity, OpenAI Videos, API-key chat, CLI Process, and the local engines): status, executable path, API keys (saved keys show their last characters with **Replace** / **Clear**), models, an inline chat test, and links to the matching media tests. A **Routing** card holds the default model per job type and the token defaults. **Refresh detection** re-probes every provider. |
 | **Tests** | Chat, Image, Video, Video analysis, and Audio tests in a segmented control. **Run all chat tests** shows live progress (`Running 2 of 5 ...`) and colored pass / fail counts; replies and previews are large and copyable. Every test is a real request and can cost money. |
@@ -55,6 +57,16 @@ The screenshot above shows the earlier single-page layout. The page now has a fi
 | **Local ASR**, **Local Image**, **CUDA Upscale**, **Music Analysis** | Settings and explicit setup of the local engines. |
 | **Pairing** | Save or disable a fixed six-digit pairing code. |
 | **Debug** | Health checks with a summary, recent failed jobs with expandable details, detected features, backend drivers, paired sites, Codex details, and the raw status JSON (collapsed by default, with filter and copy). |
+
+| Providers (dark) | Tests (light) |
+| --- | --- |
+| ![Providers page in the dark theme with the Codex CLI card expanded](docs/images/providers-dark.png) | ![Tests page, Chat segment, in the light theme](docs/images/tests-light.png) |
+| One expandable card per provider; here the Codex CLI card with its path, models, and inline chat test. | The Chat tests, with **Run all chat tests** at the top. |
+
+| Live (dark) | Narrow window (dark) |
+| --- | --- |
+| ![Live page in the dark theme with the job inspector open](docs/images/live-dark.png) | ![Overview in a 390 px wide window with the sidebar collapsed into a menu button](docs/images/status-page-mobile.png) |
+| The job list and the job inspector (the jobs shown are illustrative demo entries). | Under 900 px the sidebar becomes a menu. |
 
 Pages can be linked by hash: `#overview`, `#live`, `#live/<request id>`, `#providers`, `#providers/<provider id>`, `#tests`, `#tests/<chat|image|video|analysis|audio>`, `#tests/<type>/<provider id>` (selects the test type and highlights that provider's test cards), `#runtime`, `#asr`, `#image`, `#upscale`, `#music`, `#pairing`, and `#debug`. The older `#settings/<section>` links still work. The header pill shows whether the status page has a healthy live event stream (**Connected**), is polling (**Polling fallback**), keeps the last good state while a request fails (**Status delayed**), or cannot reach the Relay (**Relay unreachable**, after 3 failed polls or 30 s, or at once if nothing was loaded yet); a stream that goes silent for about 35 s is treated as stalled and replaced by polling, and the page reconnects on its own after a Relay restart; the Relay is reported as reachable as soon as it answers, even while the Codex check is still running.
 

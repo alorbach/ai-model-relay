@@ -18,7 +18,25 @@ The status page (`/status`) has a fixed left sidebar: **Overview**, **Live**, **
 - Sidebar badges: **Live** shows the running plus queued job count, **Debug** shows the number of recent failed jobs, and a dot on **Providers**, **Runtime**, **Local ASR**, **Local Image**, **CUDA Upscale**, or **Music Analysis** means that page has unsaved changes. Navigating away never discards edits; the forms stay in place.
 - Every page is a hash route you can bookmark: `#overview`, `#live`, `#live/<request id>` (selects that job), `#providers` and `#providers/<provider id>` (opens and highlights that provider's card), `#tests`, `#tests/<chat|image|video|analysis|audio>`, `#tests/<type>/<provider id>` (selects the test type and highlights that provider's test cards; if the provider has no ready test of that type, a note says so), `#runtime`, `#asr`, `#image`, `#upscale`, `#music`, `#pairing`, and `#debug`. Older `#settings/<section>` links still open the matching page.
 - The header pill shows how the page gets updates: **Connected** (the live event stream is healthy), **Polling fallback** (stream unavailable, status polled every 5 s while the stream is retried automatically after 2, 4, 8, 16, then every 30 seconds), **Status delayed** (a status request failed; the last good state stays on screen and the time of the last update is shown), or **Relay unreachable** (after 3 failed polls in a row or 30 s of failures, or immediately if nothing was loaded yet, for example while the Relay restarts). The Relay sends a heartbeat every 15 s; if the stream stays open but delivers nothing for about 35 s it is considered stalled, closed, and the page falls back to polling (and retries the stream) so the states above follow the polls. The Overview **Relay** pill says **Reachable** as soon as the Relay answers, even while the Codex check is still running; the Codex pill shows **Checking…** until that check finishes.
-- Settings pages share one save model: a sticky **Save changes / Discard** bar appears at the bottom only while the page differs from the last loaded settings. A value that was already stored out of range and is left untouched shows a non-blocking warning ("Stored value is outside the supported range and will be clamped by the Relay.") and does not block saving; a newly edited invalid value blocks Save and is explained next to the field.
+- The settings pages (Providers, Runtime, Local ASR, Local Image, CUDA Upscale, Music Analysis) share one save model: a sticky **Save changes / Discard** bar appears at the bottom only while the page differs from the last loaded settings. A value that was already stored out of range and is left untouched shows a non-blocking warning ("Stored value is outside the supported range and will be clamped by the Relay.") and does not block saving; a newly edited invalid value blocks Save and is explained next to the field.
+
+### Status page screenshots
+
+Example status page (Overview, light theme; the screenshots are anonymized, so user name, home path, host name, and e-mail addresses are replaced):
+
+![AI Model Relay status page, Overview, light theme](images/status-page.png)
+
+More views live next to it in `docs/images/`: `overview-light.png`, `providers-dark.png` (Codex CLI card expanded), `tests-light.png` (Chat tests), `live-dark.png` (job inspector), and `status-page-mobile.png` (390 px wide window). `status-page.png` is a copy of `overview-light.png`. The jobs shown in the Live and Overview screenshots are illustrative demo entries, not real requests.
+
+To regenerate them, run the capture script with Electron from a checkout that has `node_modules` installed:
+
+```powershell
+npm run screenshots
+# or, with an explicit Electron binary:
+node_modules\.bin\electron scripts/capture-screenshots.js --out docs/images
+```
+
+The script starts a temporary Relay on a free port (from 8920) with a fresh, empty state directory under the system temp folder, so your real pairings, API keys, and settings are never used or shown (API-key style environment variables are also removed from that process). It renders each page in a hidden window, anonymizes the text, attributes, and input values in the page, fails if the user name, home path, host name, or an e-mail address is still present, writes the PNGs, and deletes the temporary directory. Provider detection reflects the machine it runs on (installed CLIs and versions), so check the images before committing them. Options: `--out <dir>`, `--port <number>`, `--only <name,name>`, `--no-demo-jobs`, and `--keep-temp`.
 
 ## Providers and Model Routing
 
@@ -33,11 +51,11 @@ The **Providers** page shows one expandable card for every supported local/API d
 
 The six selectors route only `/v1/relay/jobs/*`: chat, images, videos, transcription, media analysis, and music analysis. Explicit `payload.model`, `payload.provider`, or `payload.backend` always overrides the saved default. Legacy `/v1/chat`, `/v1/images`, `/v1/transcribe`, `/v1/videos`, and `/v1/media/analyze` remain unchanged for provider routing.
 
-The status page settings are the primary operator control. Use **Providers** (cards with CLI paths, API keys, models, extra CLI options, plus the **Routing** card for default models and token defaults), **Runtime** (concurrency and timeouts), **CUDA Upscale**, **Music Analysis**, **Local Image**, and **Local ASR** in the sidebar. A non-empty Settings value wins; leave a field blank to keep the matching environment variable or code default. API keys are stored in the local state file, returned only as `configured` plus a 4-character suffix, and can be cleared so environment variables apply again: a saved key shows "Saved key ends with ..." with **Replace** and **Clear** buttons, and the key itself is never sent back to the page. The listen port (`ALORBACH_CODEX_BRIDGE_PORT`) and state directory remain process-start environment settings and are shown read-only on the Runtime page.
+The status page settings are the primary operator control. Use **Providers** (cards with CLI paths, API keys, models, extra CLI options, plus the **Routing** card for default models and token defaults), **Runtime** (concurrency and timeouts), **CUDA Upscale**, **Music Analysis**, **Local Image**, and **Local ASR** in the sidebar. A non-empty saved value wins; leave a field blank to keep the matching environment variable or code default. API keys are stored in the local state file, returned only as `configured` plus a 4-character suffix, and can be cleared so environment variables apply again: a saved key shows "Saved key ends with ..." with **Replace** and **Clear** buttons, and the key itself is never sent back to the page. The listen port (`ALORBACH_CODEX_BRIDGE_PORT`) and state directory remain process-start environment settings and are shown read-only on the Runtime page.
 
 **Tests** (sidebar) is a segmented control with **Chat**, **Image**, **Video**, **Video analysis**, and **Audio** (arrow keys, Home and End move between them; each shows how many tests it holds). It starts on **Chat**, which lists every ready chat model across CLI drivers (Codex, Grok, Cursor Agent, Antigravity, CLI Process) and API drivers (Claude API, Grok / xAI API, API-key chat). Each card sends one real, single-turn request (test prompt, optional system prompt, optional image (PNG, JPEG, or WebP; GIF is accepted only for API providers, CLI providers receive the image as a local file reference so check that the reply actually describes it, and CLI Process takes no images), and a small `max_tokens`, default 256) through `POST /v1/relay/test` with `job_type: "chat"` and shows the reply, resolved model, elapsed time, token usage, and finish reason, or the error with its code and HTTP status. The test also appears in the Live view. Chat tests are real requests: provider usage or API charges may apply, and a model that is not ready fails with a configuration error instead of falling back to another provider. **Run all chat tests** sits in a summary bar at the top of the Chat tab: it runs the visible cards one at a time (never in parallel), shows live progress (`Running 2 of 5 ...`) and finishes with colored passed / failed / without-reply counts, and can be cancelled: Cancel takes effect immediately, a test that is already running keeps running and can be followed in Live, and the remaining tests are not started. Use it to verify a freshly entered API key or a newly installed CLI without a WordPress Gateway job.
 
-Under **Model routing**, optional **Chat token default** (code default 8192) and **Media analysis token default** (code default 4096) override those floors when set to an integer from 512 to 128000. Leave them blank to keep the code defaults. Client `max_tokens` values of 512 or higher still win for that job. These token fields apply to legacy chat/analysis routes as well as relay jobs.
+In the **Routing** card on **Providers**, optional **Chat token default** (code default 8192) and **Media analysis token default** (code default 4096) override those floors when set to an integer from 512 to 128000. Leave them blank to keep the code defaults. Client `max_tokens` values of 512 or higher still win for that job. These token fields apply to legacy chat/analysis routes as well as relay jobs.
 
 The relay never silently falls back. If an explicit or saved model/provider is unknown, unavailable, unauthenticated, disabled, or incompatible with the job type, the request fails with a configuration error naming that choice. An unavailable saved selection remains visible but disabled in the Routing card so it can be corrected.
 
@@ -154,10 +172,6 @@ Failed bridge requests include a `debug_help` object in the JSON response. It po
 
 Full-fidelity temporary model debug logs are written under `%TEMP%\alorbach-codex-local-bridge-debug`. The bridge deletes that directory on startup. Each invocation gets its own folder with `prompt.txt`, `output.txt`, `stdout.txt`, `stderr.txt`, and `metadata.json`. These files are intentionally not redacted, so treat them as private local diagnostics.
 
-Example status page with local filesystem paths redacted:
-
-![AI Model Relay status page with local paths redacted](images/status-page.png)
-
 Useful direct checks:
 
 ```powershell
@@ -185,20 +199,20 @@ Default behavior:
 - The Qwen ASR virtual environment is `%USERPROFILE%\.alorbach-codex-bridge\qwen-asr-venv` unless `ALORBACH_QWEN_ASR_VENV` is set.
 - Package installation happens only from the status-page **Install model** action; transcription jobs do not pip-install packages.
 - Model downloads during jobs stay disabled by default; use cached model snapshots or set a local model path unless downloads are explicitly enabled in `/status`. Setup still downloads models when you click Install model.
-- Requests that omit `payload.model` use the `Default model` from Local ASR Settings when set; otherwise `local-asr` auto-selects the best ready transcription model. A caller-supplied `payload.model` always overrides the default.
+- Requests that omit `payload.model` use the `Default model` from the **Local ASR** page when set; otherwise `local-asr` auto-selects the best ready transcription model. A caller-supplied `payload.model` always overrides the default.
 - Qwen Install uninstalls any existing CPU PyTorch wheel, installs CUDA `torch`/`torchvision` from `ALORBACH_QWEN_TORCH_INDEX_URL` only, pins the wheel with `cuda-torch-constraint.txt`, then installs `qwen-asr` and `huggingface_hub`. A second CUDA probe rejects CPU wheels that slip in via dependencies. Jobs never repair a broken torch install.
 - Whisper CUDA is selected only when the enabled model prefers it, enough free VRAM is detected, and CUDA runtime packages are usable. A CUDA load failure falls back to CPU/int8 when possible.
 - Qwen3 ASR requires CUDA, but can optionally use mixed GPU/CPU loading through Transformers `device_map="auto"` when a selected Qwen model does not fit fully in VRAM. The bridge still prefers a fully GPU-ready transcription model during automatic selection; use the 0.6B model for normal low-VRAM work and explicit/default 1.7B selection when CPU offload is acceptable.
 - Qwen timestamp output still requires `Qwen/Qwen3-ForcedAligner-0.6B` to be cached or explicitly downloadable, but the ForcedAligner is not exposed as a normal transcription model because it requires reference text.
 - Qwen timestamped transcription is pre-chunked locally before ASR and alignment. The default chunk size is 30 seconds to avoid long ASR omissions inside Qwen's larger timestamp chunks. The bridge also reports and caps implausibly stretched single-word timestamps.
 
-Useful environment overrides (used when the matching Local ASR Settings field is blank):
+Useful environment overrides (used when the matching field on the **Local ASR** page is blank):
 
 ```powershell
-$env:ALORBACH_ASR_PYTHON = 'C:\Users\AL\AppData\Local\Programs\Python\Python310\python.exe'
-$env:ALORBACH_ASR_VENV = 'C:\Users\AL\.alorbach-codex-bridge\asr-venv'
-$env:ALORBACH_QWEN_ASR_PYTHON = 'C:\Users\AL\AppData\Local\Programs\Python\Python312\python.exe'
-$env:ALORBACH_QWEN_ASR_VENV = 'C:\Users\AL\.alorbach-codex-bridge\qwen-asr-venv'
+$env:ALORBACH_ASR_PYTHON = 'C:\Users\<you>\AppData\Local\Programs\Python\Python310\python.exe'
+$env:ALORBACH_ASR_VENV = 'C:\Users\<you>\.alorbach-codex-bridge\asr-venv'
+$env:ALORBACH_QWEN_ASR_PYTHON = 'C:\Users\<you>\AppData\Local\Programs\Python\Python312\python.exe'
+$env:ALORBACH_QWEN_ASR_VENV = 'C:\Users\<you>\.alorbach-codex-bridge\qwen-asr-venv'
 $env:ALORBACH_QWEN_TORCH_INDEX_URL = 'https://download.pytorch.org/whl/cu128'
 $env:ALORBACH_QWEN_ALLOW_CPU_OFFLOAD = '1'
 $env:ALORBACH_QWEN_CHUNK_SECONDS = '30'
@@ -229,7 +243,7 @@ Grok CLI media requires `%USERPROFILE%\.grok\skills\imagine\SKILL.md` or `%USERP
 
 xAI Imagine HTTP image and video jobs (`model-relay:xai:imagine-image`, `model-relay:xai:imagine-video`) need an xAI API key on the Grok / xAI API card under **Providers** or `XAI_API_KEY` / `AI_MODEL_RELAY_XAI_API_KEY` when that field is blank. Native image fields remain the existing aspect ratios (including `21:9` and `5:2`) and native resolution `1k`/`2k`. Image `quality` is `low`, `medium`, or explicit `auto`; omitting `quality` leaves the provider default. Image jobs accept up to 5 reference images and `n` from 1 to 10. The image API returns JPEG only: the relay accepts `image/jpeg`, normalizes an omitted `output_format` to `image/jpeg`, and rejects `png`, `webp`, and other formats. `response_format` stays `b64_json` and is not a file format. Video fields remain resolution `480p`/`720p`/`1080p`, clip length 1–15 seconds, and `generate_audio`. These upload the prompt and any reference images to xAI. When that key is set and no video default has been saved, Settings defaults video routing to Imagine video.
 
-Claude API (Anthropic) chat (`model-relay:anthropic:*`) needs an API key on the Claude API card under **Providers** or `ANTHROPIC_API_KEY` / `AI_MODEL_RELAY_ANTHROPIC_API_KEY` when that field is blank. The optional Admin API key (`ANTHROPIC_ADMIN_KEY` / `AI_MODEL_RELAY_ANTHROPIC_ADMIN_KEY`) only enables month-to-date spend on the Claude API usage card; the credit figure is an estimate: remaining credits = the saved balance minus Cost API spend from the start of the UTC day the balance was saved (daily granularity, about 5 minutes of lag, excludes Priority Tier). Use "Recount spend from today" on the Claude API card to re-baseline an unchanged balance. Refusal fallbacks for Opus 5.5, Opus 5, Sonnet 5.5, and Fable 5.1 are sent only when calling api.anthropic.com directly (not through a custom base URL) and can be disabled with `AI_MODEL_RELAY_ANTHROPIC_FALLBACKS=0`.
+Claude API (Anthropic) chat (`model-relay:anthropic:*`) needs an API key on the Claude API card under **Providers** or `ANTHROPIC_API_KEY` / `AI_MODEL_RELAY_ANTHROPIC_API_KEY` when that field is blank. The optional Admin API key (`ANTHROPIC_ADMIN_KEY` / `AI_MODEL_RELAY_ANTHROPIC_ADMIN_KEY`) only enables month-to-date spend on the Claude API usage card; the credit figure is an estimate: remaining credits = the saved balance minus Cost API spend from the start of the UTC day the balance was saved (daily granularity, about 5 minutes of lag, excludes Priority Tier). The usage panel is shown in full on the **Overview** page and as a compact summary inside the Claude API card on **Providers**. Use "Recount spend from today" on the Claude API card to re-baseline an unchanged balance. Refusal fallbacks for Opus 5.5, Opus 5, Sonnet 5.5, and Fable 5.1 are sent only when calling api.anthropic.com directly (not through a custom base URL) and can be disabled with `AI_MODEL_RELAY_ANTHROPIC_FALLBACKS=0`.
 
 ### Image resolution expectations on status-page tests
 
@@ -259,7 +273,7 @@ The browser likely created a Gateway job and failed before calling `/fail`. The 
 
 ### Local ASR shows not checked
 
-This is expected on initial `/status` load. Press `Refresh runtime` in Local ASR Settings to run the full runtime probe. Provider detection and the normal page load remain cached so bridge and job diagnostics render immediately.
+This is expected on initial `/status` load. Press **Refresh runtime** on the **Local ASR** page to run the full runtime probe. Provider detection and the normal page load remain cached so bridge and job diagnostics render immediately.
 
 ### Local Whisper says Python or faster-whisper is missing
 
@@ -283,11 +297,11 @@ The Hugging Face cache snapshot is incomplete. Qwen ASR snapshots must include p
 
 ### Local Qwen ASR says Torch not compiled with CUDA enabled or shows a CPU torch wheel
 
-Refresh Local ASR runtime in `/status` and check `Qwen torch CUDA`. Use **Install model** on a Qwen ASR entry; setup uninstalls CPU PyTorch wheels, installs CUDA builds from `ALORBACH_QWEN_TORCH_INDEX_URL` (default cu128 index only), pins torch before `qwen-asr`, and fails if a `+cpu` wheel remains. Transcription jobs do not repair torch at job time.
+Press **Refresh runtime** on the **Local ASR** page and check `Qwen torch CUDA`. Use **Install model** on a Qwen ASR entry; setup uninstalls CPU PyTorch wheels, installs CUDA builds from `ALORBACH_QWEN_TORCH_INDEX_URL` (default cu128 index only), pins torch before `qwen-asr`, and fails if a `+cpu` wheel remains. Transcription jobs do not repair torch at job time.
 
 ### CUDA runtime is missing or unusable
 
-Use `Refresh runtime` to see the exact CUDA reason. Whisper **Install model** installs `nvidia-cublas-cu12` and `nvidia-cudnn-cu12` into the ASR venv. Jobs do not install CUDA runtime packages; if CUDA still fails during transcription, the job retries on CPU/int8 when a CPU model is available.
+Use **Refresh runtime** on the **Local ASR** page to see the exact CUDA reason. Whisper **Install model** installs `nvidia-cublas-cu12` and `nvidia-cudnn-cu12` into the ASR venv. Jobs do not install CUDA runtime packages; if CUDA still fails during transcription, the job retries on CPU/int8 when a CPU model is available.
 
 ## Naming and Compatibility
 

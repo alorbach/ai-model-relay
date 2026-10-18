@@ -20,7 +20,7 @@ The local tray bridge owns:
 - optional Grok CLI (isolated Gateway chat; Imagine media exposed only after local skill detection) and Cursor Agent `--mode=ask` chat;
 - optional Antigravity CLI chat, images, and media analysis;
 - optional xAI API chat, Imagine image/video (`model-relay:xai:imagine-image`, `model-relay:xai:imagine-video`), and Speech-to-Text when `XAI_API_KEY` is configured;
-- resolved chat/media `max_tokens` defaults and Settings overrides;
+- resolved chat/media `max_tokens` defaults and the status page's token-default overrides;
 - normalized chat and image response shapes.
 
 The WordPress Gateway owns:
@@ -88,7 +88,7 @@ Chat request:
 }
 ```
 
-`max_tokens` is optional on the signed payload. The bridge treats omitted values and integers below 512 (including leftover `256` examples) as the chat default **8192**, unless the tray Settings **Chat token default** is set. Integers `>= 512` are honored. Do not rely on `256` as a product cap. Codex uses the resolved number only as a prompt hint; xAI and API-key chat send it as `max_tokens` and `max_completion_tokens`.
+`max_tokens` is optional on the signed payload. The bridge treats omitted values and integers below 512 (including leftover `256` examples) as the chat default **8192**, unless the **Chat token default** in the status page's Routing card (Providers) is set. Integers `>= 512` are honored. Do not rely on `256` as a product cap. Codex uses the resolved number only as a prompt hint; xAI and API-key chat send it as `max_tokens` and `max_completion_tokens`.
 
 Image request:
 

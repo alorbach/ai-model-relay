@@ -6,6 +6,7 @@
   "main": "src/main.js",
   "scripts": {
     "icons": "node scripts/generate-icons.js",
+    "screenshots": "electron scripts/capture-screenshots.js",
     "start": "electron .",
     "serve": "node src/server.js",
     "example:http": "node examples/http-app/server.js",

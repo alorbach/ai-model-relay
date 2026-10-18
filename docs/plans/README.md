@@ -70,7 +70,7 @@ Later waves assume earlier waves are merged. Plans inside a wave are sequential 
 | Plan | Title | Goal |
 |------|-------|------|
 | [11](11-cursor-agent-images.md) | Cursor Agent images | Gateway image jobs via Cursor `GenerateImage` |
-| [12](12-chat-provider-tests.md) | Chat provider tests | Settings → Tests runs real chat requests against every ready chat provider |
+| [12](12-chat-provider-tests.md) | Chat provider tests | The Tests page (Chat) runs real chat requests against every ready chat provider |
 | [13](13-status-page-redesign.md) | Status page redesign | Split the page into files; light/dark sidebar layout, provider cards, readable Tests / Live / Debug |
 
 ## Constraints that apply to every plan
