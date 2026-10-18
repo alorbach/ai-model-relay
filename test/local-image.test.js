@@ -575,7 +575,7 @@ const {
 	// --- runner script exists and is in asarUnpack ---
 	const runnerScriptPath = path.join(__dirname, '..', 'src', 'image-qwen-runner.py');
 	assert.ok(fs.existsSync(runnerScriptPath), 'image-qwen-runner.py must exist in src/');
-	const runnerContent = fs.readFileSync(runnerScriptPath, 'utf8');
+	const runnerContent = fs.readFileSync(runnerScriptPath, 'utf8').replace(/\r\n/g, '\n');
 	assert.ok(runnerContent.includes('run_probe'), 'Runner must define run_probe function');
 	assert.ok(runnerContent.includes('run_job'), 'Runner must define run_job function');
 	assert.ok(runnerContent.includes('from diffusers import QwenImage21Pipeline'), 'Runtime probe must import the legacy generation pipeline');
