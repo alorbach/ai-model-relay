@@ -1,0 +1,19 @@
+test/local-image.test.js
+  s_618f546502b331::t_47b12d20cf4c56 578
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "7e415dd009163049fd1df341aaec4414786b5e68",
+  "prompts": {},
+  "sessions": {
+    "s_618f546502b331": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9bc7be1b-d306-4392-b0ea-b293748b90c4",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
