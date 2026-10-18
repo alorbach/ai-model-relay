@@ -1,0 +1,25 @@
+.github/workflows/release.yml
+  s_618f546502b331::t_c4b3e7a862b036 98-112,115,117-177
+  s_618f546502b331::t_50e1ca4ef2eb03 219-224
+  s_618f546502b331::t_8a840db43dfe39 208
+  s_618f546502b331::t_003d9fd8cdd05b 189
+docs/operations.md
+  s_618f546502b331::t_aab16af49f00e1 162-165
+  s_618f546502b331::t_31aaae523800a9 160-161
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "3ed2090be2e25b33de51b8578f653212aec8d7fd",
+  "prompts": {},
+  "sessions": {
+    "s_618f546502b331": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9bc7be1b-d306-4392-b0ea-b293748b90c4",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
