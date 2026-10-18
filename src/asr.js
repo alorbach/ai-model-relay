@@ -30,7 +30,7 @@ const DEFAULT_PYTHON312 = path.join(os.homedir(), 'AppData', 'Local', 'Programs'
 const DEFAULT_VENV_PATH = path.join(security.stateDir, 'asr-venv');
 const DEFAULT_QWEN_VENV_PATH = path.join(security.stateDir, 'qwen-asr-venv');
 const DEFAULT_QWEN_TORCH_INDEX_URL = process.env.ALORBACH_QWEN_TORCH_INDEX_URL || DEFAULT_TORCH_INDEX;
-const JOB_RUNTIME_MESSAGE = 'Open Local ASR on the status page and use Install model. Transcription jobs do not pip-install packages or download models unless Allow ASR model downloads is enabled.';
+const JOB_RUNTIME_MESSAGE = 'Open Local ASR on the status page and use Install model to set up the runtime. Transcription jobs never pip-install packages; they download models only when Allow ASR model downloads is enabled.';
 const MAX_AUDIO_BASE64_LENGTH = 67108864;
 let probeCache = null;
 

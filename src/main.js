@@ -346,6 +346,8 @@ function buildMenu() {
 		launchOnLogin: app.getLoginItemSettings().openAtLogin,
 	}, {
 		copyText: (text) => clipboard.writeText(text),
+		copyPairingCode: () => clipboard.writeText(currentPairingCode),
+		copyBridgeUrl: () => clipboard.writeText(bridgeUrl()),
 		copyDiagnostics: () => copyDiagnostics(status, pairedOrigins),
 		refreshCodexStatus: () => refreshCodexStatus(),
 		openStatusPage: () => openStatusPage(),

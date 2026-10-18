@@ -2,7 +2,7 @@
 
 // Pure builder for the tray context menu template. src/main.js turns the result into an Electron Menu;
 // scripts/capture-screenshots.js renders the same template as the tray-menu documentation screenshot,
-// so the screenshot cannot drift from the real menu. Nothing here touches Electron, the file system,
+// so a regenerated screenshot always matches the real menu. Nothing here touches Electron, the file system,
 // or process state: everything it needs comes in through `model` and `actions`.
 
 const { PRODUCT_NAME, LEGACY_PRODUCT_NAME } = require('./brand');
@@ -70,14 +70,38 @@ function buildPairedSitesMenu(pairedOrigins, actions) {
 /*
  * model:   { displayVersion, bridgeState, bridgeUrl, codexStatus, jobState, pairingCode,
  *            pairingCodePersistent, pairedOrigins, launchOnLogin }
- * actions: { copyText, copyDiagnostics, refreshCodexStatus, openStatusPage, openStatusJson,
- *            openDataFolder, setLaunchOnLogin, openCodexLoginHelp, unpairSite, restartBridge, quit }
- *          Every action is optional (missing ones are no-ops), which is what lets a screenshot build the template.
+ * actions: one function per name in TRAY_ACTION_NAMES. copyPairingCode and copyBridgeUrl read the live
+ *          value when the item is clicked (the menu can be open while the code or URL changes); the labels use `model`.
+ *          A missing action throws, so a typo in the caller cannot ship a dead menu item. A screenshot
+ *          passes noopTrayActions().
  */
+const TRAY_ACTION_NAMES = [
+	'copyText',
+	'copyPairingCode',
+	'copyBridgeUrl',
+	'copyDiagnostics',
+	'refreshCodexStatus',
+	'openStatusPage',
+	'openStatusJson',
+	'openDataFolder',
+	'setLaunchOnLogin',
+	'openCodexLoginHelp',
+	'unpairSite',
+	'restartBridge',
+	'quit',
+];
+
+function noopTrayActions() {
+	return Object.fromEntries(TRAY_ACTION_NAMES.map((name) => [name, () => {}]));
+}
+
 function buildTrayMenuTemplate(model, actions) {
 	const m = model || {};
-	const noop = () => {};
-	const act = new Proxy(actions || {}, { get: (target, key) => (typeof target[key] === 'function' ? target[key] : noop) });
+	const act = actions || {};
+	const missing = TRAY_ACTION_NAMES.filter((name) => typeof act[name] !== 'function');
+	if (missing.length) {
+		throw new Error('Tray menu actions missing: ' + missing.join(', '));
+	}
 	const status = m.codexStatus || {};
 	const pairedOrigins = Array.isArray(m.pairedOrigins) ? m.pairedOrigins : [];
 	const details = status.details || {};
@@ -97,11 +121,11 @@ function buildTrayMenuTemplate(model, actions) {
 		{
 			label: 'Copy pairing code',
 			enabled: !!pairingCode,
-			click: () => act.copyText(pairingCode),
+			click: () => act.copyPairingCode(),
 		},
 		{
 			label: 'Copy bridge URL',
-			click: () => act.copyText(m.bridgeUrl),
+			click: () => act.copyBridgeUrl(),
 		},
 		{
 			label: 'Copy diagnostics',
@@ -165,6 +189,8 @@ module.exports = {
 	buildJobMenuItems,
 	buildTrayMenuTemplate,
 	formatElapsed,
+	noopTrayActions,
 	shortPath,
 	shortText,
+	TRAY_ACTION_NAMES,
 };

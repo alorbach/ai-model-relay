@@ -3,7 +3,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const { buildTrayMenuTemplate, buildJobMenuItems, formatElapsed, shortPath, shortText } = require('../src/tray-menu');
+const { buildTrayMenuTemplate, buildJobMenuItems, formatElapsed, noopTrayActions, shortPath, shortText, TRAY_ACTION_NAMES } = require('../src/tray-menu');
 
 function flatten(template) {
 	return template.map((item) => (item.type === 'separator' ? '---' : item.label));
@@ -22,7 +22,7 @@ const model = {
 };
 
 // The order and labels of the main menu. scripts/capture-screenshots.js renders this same template as docs/images/tray-menu.png.
-assert.deepStrictEqual(flatten(buildTrayMenuTemplate(model, {})), [
+assert.deepStrictEqual(flatten(buildTrayMenuTemplate(model, noopTrayActions())), [
 	'AI Model Relay 1.0.12 (26)',
 	'formerly Codex Local Bridge',
 	'Bridge: Running',
@@ -51,7 +51,7 @@ assert.deepStrictEqual(flatten(buildTrayMenuTemplate(model, {})), [
 	'Quit',
 ]);
 
-const template = buildTrayMenuTemplate(model, {});
+const template = buildTrayMenuTemplate(model, noopTrayActions());
 const byLabel = (label) => template.find((item) => item.label === label);
 assert.strictEqual(byLabel('Launch on login').type, 'checkbox');
 assert.strictEqual(byLabel('Launch on login').checked, true);
@@ -62,7 +62,7 @@ assert.deepStrictEqual(flatten(byLabel('Codex details').submenu), ['Binary: C:\\
 assert.deepStrictEqual(flatten(byLabel('Paired WordPress sites (2)').submenu), ['https://example.com', 'Unpair this site', '---', 'https://shop.example.org', 'Unpair this site']);
 
 // Not-ready states: stopped bridge, failed Codex check, fixed code that is not known yet, no paired sites.
-const degraded = buildTrayMenuTemplate({ ...model, bridgeState: 'Stopped', codexStatus: { success: false }, pairingCode: '', pairingCodePersistent: true, pairedOrigins: [], launchOnLogin: false }, {});
+const degraded = buildTrayMenuTemplate({ ...model, bridgeState: 'Stopped', codexStatus: { success: false }, pairingCode: '', pairingCodePersistent: true, pairedOrigins: [], launchOnLogin: false }, noopTrayActions());
 const degradedByLabel = (label) => degraded.find((item) => item.label === label);
 assert.strictEqual(degradedByLabel('Bridge: Stopped').enabled, false);
 assert.strictEqual(degradedByLabel('Codex: Needs attention').enabled, false);
@@ -92,10 +92,12 @@ assert.deepStrictEqual(jobs.map((item) => item.label), [
 assert.ok(jobs.every((item) => item.enabled === false));
 assert.strictEqual(buildJobMenuItems(undefined)[0].label, 'Jobs: Running 0 / Queued 0');
 
-// Clicks are routed to the supplied actions; missing actions are harmless no-ops.
+// Clicks are routed to the supplied actions.
 const calls = [];
 const actions = {
 	copyText: (text) => calls.push(['copyText', text]),
+	copyPairingCode: () => calls.push(['copyPairingCode']),
+	copyBridgeUrl: () => calls.push(['copyBridgeUrl']),
 	copyDiagnostics: () => calls.push(['copyDiagnostics']),
 	refreshCodexStatus: () => calls.push(['refreshCodexStatus']),
 	openStatusPage: () => calls.push(['openStatusPage']),
@@ -124,8 +126,8 @@ wiredByLabel('Paired WordPress sites (2)').submenu[1].click();
 wiredByLabel('Restart bridge').click();
 wiredByLabel('Quit').click();
 assert.deepStrictEqual(calls, [
-	['copyText', '000000'],
-	['copyText', 'http://127.0.0.1:8765'],
+	['copyPairingCode'],
+	['copyBridgeUrl'],
 	['copyDiagnostics'],
 	['refreshCodexStatus'],
 	['openStatusPage'],
@@ -141,6 +143,29 @@ assert.deepStrictEqual(calls, [
 ]);
 assert.doesNotThrow(() => { for (const item of template) if (typeof item.click === 'function') item.click({ checked: true }); });
 
+// Every action is required: a missing or misspelled one must fail loudly instead of shipping a dead menu item.
+assert.deepStrictEqual(Object.keys(noopTrayActions()), TRAY_ACTION_NAMES);
+for (const name of TRAY_ACTION_NAMES) {
+	const incomplete = { ...actions };
+	delete incomplete[name];
+	assert.throws(() => buildTrayMenuTemplate(model, incomplete), new RegExp('Tray menu actions missing: ' + name), 'missing ' + name);
+	assert.throws(() => buildTrayMenuTemplate(model, { ...incomplete, [name + 'Typo']: () => {} }), /Tray menu actions missing/);
+}
+assert.throws(() => buildTrayMenuTemplate(model), /Tray menu actions missing/);
+
+// Copy pairing code / Copy bridge URL read the live value when clicked, not the value captured when the menu was built.
+const live = { code: '111111', url: 'http://127.0.0.1:1111' };
+const copied = [];
+const liveTemplate = buildTrayMenuTemplate(
+	{ ...model, pairingCode: live.code, bridgeUrl: live.url },
+	{ ...noopTrayActions(), copyPairingCode: () => copied.push(live.code), copyBridgeUrl: () => copied.push(live.url) },
+);
+live.code = '222222';
+live.url = 'http://127.0.0.1:2222';
+liveTemplate.find((item) => item.label === 'Copy pairing code').click();
+liveTemplate.find((item) => item.label === 'Copy bridge URL').click();
+assert.deepStrictEqual(copied, ['222222', 'http://127.0.0.1:2222']);
+
 // Helpers kept from main.js.
 assert.strictEqual(formatElapsed(0), '0s');
 assert.strictEqual(formatElapsed(125000), '2m 5s');
@@ -151,5 +176,14 @@ assert.strictEqual(shortPath('a'.repeat(60)).length, 52);
 const mainSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'main.js'), 'utf8');
 assert.ok(mainSource.includes("require('./tray-menu')") && mainSource.includes('buildTrayMenuTemplate('), 'main.js must use the shared tray menu template');
 assert.ok(!mainSource.includes("'Copy pairing code'") && !mainSource.includes("'Open relay data folder'"), 'main.js must not duplicate tray menu labels');
+
+// The action object literal in main.js must provide exactly the required actions (nothing missing, nothing misspelled or stray).
+const actionsStart = mainSource.indexOf('buildTrayMenuTemplate({');
+const actionsLiteral = mainSource.slice(mainSource.indexOf('}, {', actionsStart) + 4, mainSource.indexOf('}));', actionsStart));
+const mainActionKeys = [...actionsLiteral.matchAll(/^		(\w+)\s*[:(]/gm)].map((match) => match[1]);
+assert.deepStrictEqual([...mainActionKeys].sort(), [...TRAY_ACTION_NAMES].sort(), 'main.js tray actions must match TRAY_ACTION_NAMES');
+// And they must read the live pairing code / bridge URL at click time.
+assert.ok(/copyPairingCode:\s*\(\)\s*=>\s*clipboard\.writeText\(currentPairingCode\)/.test(mainSource), 'copyPairingCode must read currentPairingCode when clicked');
+assert.ok(/copyBridgeUrl:\s*\(\)\s*=>\s*clipboard\.writeText\(bridgeUrl\(\)\)/.test(mainSource), 'copyBridgeUrl must read bridgeUrl() when clicked');
 
 console.log('tray menu tests passed');

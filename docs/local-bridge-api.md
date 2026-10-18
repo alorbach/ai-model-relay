@@ -51,7 +51,7 @@ Images and videos do not use this policy. The Relay does not copy `stream` into 
 
 ## `GET /status`
 
-Shows a local HTML status page for the same runtime data exposed by `GET /v1/status`. It renders immediately from cached diagnostics, then uses the local event stream for provider updates, active jobs, queued jobs, recent activity, and heartbeat state. The Settings tab loads its Local ASR, local music-analysis, relay-routing, CLI path, and chat/media token-default settings only when first opened. It also provides a real image, video, transcription, or music-analysis test action for each ready, compatible provider model. Audio tests visibly warn when the selected xAI model uploads the file to the cloud; local music-analysis tests stay on the machine. The Live tab shows the selected provider/API, workflow/skill, bounded redacted stdin, bounded stdout/stderr/session output, and recent image thumbnails that open in an in-page overlay. The tray app opens this page when the tray icon is double-clicked.
+Shows a local HTML status page for the same runtime data exposed by `GET /v1/status`. It renders immediately from cached diagnostics, then uses the local event stream for provider updates, active jobs, queued jobs, recent activity, and heartbeat state. The settings-backed pages (Providers, Tests, Runtime, Local ASR, Local Image, CUDA Upscale, Music Analysis, Pairing) load their data only when first opened. The Tests page provides a real image, video, transcription, or music-analysis test action for each ready, compatible provider model. Audio tests visibly warn when the selected xAI model uploads the file to the cloud; local music-analysis tests stay on the machine. The Live page shows the selected provider/API, workflow/skill, bounded redacted stdin, bounded stdout/stderr/session output, and recent image thumbnails that open in an in-page overlay. The tray app opens this page when the tray icon is double-clicked.
 
 ## `GET /v1/status`
 
@@ -279,7 +279,7 @@ Empty `token_defaults` values mean the code defaults (8192 / 4096). A stored int
 
 ## `POST /v1/relay/settings`
 
-Saves the provided relay-only defaults in the existing local state file. Send a `settings` object with any of `defaults`, `cli_paths`, `token_defaults`, and `codex_image_tool`. Omitted routing operations retain their built-in defaults. The Settings page keeps an unavailable saved selection visible so it can be corrected; saving it does not make an unavailable provider runnable. Blank `token_defaults.chat` or `token_defaults['media.analyze']` clears that override. `codex_image_tool` accepts `image_gen` or `generations`. Omitted, blank, or invalid means `image_gen`. An explicit stored `generations` stays `generations` until changed.
+Saves the provided relay-only defaults in the existing local state file. Send a `settings` object with any of `defaults`, `cli_paths`, `token_defaults`, and `codex_image_tool`. Omitted routing operations retain their built-in defaults. The Providers page keeps an unavailable saved selection visible so it can be corrected; saving it does not make an unavailable provider runnable. Blank `token_defaults.chat` or `token_defaults['media.analyze']` clears that override. `codex_image_tool` accepts `image_gen` or `generations`. Omitted, blank, or invalid means `image_gen`. An explicit stored `generations` stays `generations` until changed.
 
 ```json
 {
@@ -454,7 +454,7 @@ Response:
 }
 ```
 
-Store the token in browser storage scoped to the origin. Treat it as a bearer secret. Pairing success rotates the code by default; when the local user enabled a fixed code in Settings → Pairing, the code remains active. Pairing failures share a persistent IP-wide rate limit.
+Store the token in browser storage scoped to the origin. Treat it as a bearer secret. Pairing success rotates the code by default; when the local user enabled a fixed code on the Pairing page of the local status page, the code remains active. Pairing failures share a persistent IP-wide rate limit.
 
 ## `POST /v1/unpair`
 

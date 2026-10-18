@@ -26,8 +26,8 @@
  *
  * The tray-menu shot is different: native tray menus cannot be captured headlessly, so it renders an HTML
  * replica of the Windows 11 dark context menu. The menu items come from the real template builder
- * (src/tray-menu.js, the same function src/main.js uses) filled with demo values, so the image cannot
- * drift from the actual menu. It needs no Relay data and shows no real code, path, or site.
+ * (src/tray-menu.js, the same function src/main.js uses) filled with demo values, so a regenerated image
+ * matches the actual menu (rerun it after tray label changes). It needs no Relay data and shows no real code, path, or site.
  *
  * Provider detection reflects the machine the script runs on (installed CLIs and versions); only
  * the paths are anonymized. Always look at the resulting images before committing them.
@@ -396,8 +396,8 @@ function renderTrayMenuHtml(template, scale) {
 }
 
 async function captureTrayMenu(shot) {
-	const { buildTrayMenuTemplate } = require(path.join(REPO_ROOT, 'src', 'tray-menu.js'));
-	const template = buildTrayMenuTemplate(trayDemoModel());
+	const { buildTrayMenuTemplate, noopTrayActions } = require(path.join(REPO_ROOT, 'src', 'tray-menu.js'));
+	const template = buildTrayMenuTemplate(trayDemoModel(), noopTrayActions());
 	const scale = shot.scale || 2;
 	// CSS zoom (not device scale) because hidden windows only capture at the display scale; the text is re-rasterized, so it stays crisp.
 	const html = renderTrayMenuHtml(template, scale);

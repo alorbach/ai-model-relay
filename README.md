@@ -90,7 +90,7 @@ codex login
 
 1. Open the latest release at <https://github.com/alorbach/ai-model-relay/releases>.
 2. Download either the Windows installer `.exe` or portable `.zip`.
-3. Start `Codex Local Bridge`.
+3. Start `AI Model Relay`.
 4. Open the tray menu and confirm `Codex: Ready`.
 5. In WordPress, enable `AI Gateway -> Settings -> Providers / Import -> User-owned local Codex`.
 6. Keep the bridge URL as `http://127.0.0.1:8765` unless a custom port is required.
