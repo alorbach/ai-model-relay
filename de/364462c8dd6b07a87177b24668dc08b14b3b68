@@ -1,0 +1,33 @@
+docs/architecture.md
+  s_85e0deb882399a::t_6357790eab414a 27
+docs/local-bridge-api.md
+  s_85e0deb882399a::t_76d8677cbfd61e 60
+src/server.js
+  s_618f546502b331::t_3aa22d679694c3 30,879,1012
+test/server-jobs.test.js
+  s_618f546502b331::t_f3708c9132c8c6 417-429
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "de364462c8dd6b07a87177b24668dc08b14b3b68",
+  "prompts": {},
+  "sessions": {
+    "s_618f546502b331": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9bc7be1b-d306-4392-b0ea-b293748b90c4",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_85e0deb882399a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14e5c-e7d8-7061-887d-44301839fbe8",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
