@@ -115,11 +115,13 @@ function requestEvents(port, pathname, headers, eventNames) {
 }
 
 function createMockSecurity() {
+	const revoked = new Set();
 	return {
+		revoked,
 		MAX_BODY_BYTES: 12 * 1024 * 1024,
 		createPairingCode: () => '123456',
 		createToken: () => 'test-token',
-		getPairing: () => ({ token: 'test-token', paired_at: 'now' }),
+		getPairing: (origin) => (revoked.has(origin) ? null : { token: 'test-token', paired_at: 'now' }),
 		getPairings: () => ({ 'http://127.0.0.1:8787': { token: 'test-token', paired_at: 'now' } }),
 		isLocalAddress: () => true,
 		normalizeOrigin: (origin) => {
@@ -129,9 +131,9 @@ function createMockSecurity() {
 				return '';
 			}
 		},
-		removePairing: () => {},
+		removePairing: (origin) => { revoked.add(origin); },
 		savePairing: () => {},
-		validateBridgeToken: (origin, token) => !!origin && token === 'test-token',
+		validateBridgeToken: (origin, token) => !!origin && !revoked.has(origin) && token === 'test-token',
 	};
 }
 
@@ -184,11 +186,12 @@ function createMockSecurity() {
 		refresh: async () => {},
 		sync: () => {},
 	};
+	const mockSecurity = createMockSecurity();
 	server = createServer({
 		backgroundRefresh: false,
 		codex,
 		statusCache,
-		security: createMockSecurity(),
+		security: mockSecurity,
 		maxConcurrent: 2,
 		onJobState: (snapshot) => stateUpdates.push(JSON.parse(JSON.stringify(snapshot))),
 	});
@@ -395,6 +398,27 @@ function createMockSecurity() {
 		assert.strictEqual((await requestJson(port, 'GET', '/v1/status/jobs/999/artifacts/0', null, httpSite)).statusCode, 404);
 		assert.strictEqual((await requestJson(port, 'GET', '/v1/relay/jobs/none/artifact', null, httpSite)).statusCode, 404);
 		assert.strictEqual((await requestJson(port, 'GET', '/v1/relay/jobs/none/artifact?bridge_token=test-token', null, { ...httpSite, 'X-Alorbach-Bridge-Token': '' })).statusCode, 400);
+		// A pairing removed outside /v1/unpair (for example from the tray) closes that origin's open stream on the next event.
+		const revokedOrigin = 'http://127.0.0.1:7777';
+		let revokedStreamClosed = null;
+		await new Promise((resolve, reject) => {
+			let opened = false;
+			revokedStreamClosed = new Promise((closeResolve) => {
+				const req = http.get({ hostname: '127.0.0.1', port, path: '/v1/status/stream', headers: { Origin: revokedOrigin, 'X-Alorbach-Bridge-Token': 'test-token' } }, (res) => {
+					res.on('data', () => {
+						if (opened) return;
+						opened = true;
+						resolve();
+					});
+					res.on('end', () => closeResolve(true));
+					res.on('close', () => closeResolve(true));
+				});
+				req.on('error', (error) => { if (!opened) reject(error); });
+			});
+		});
+		await new Promise((resolve) => setTimeout(resolve, 1200));
+		mockSecurity.removePairing(revokedOrigin);
+
 		const ownStatus = await requestJson(port, 'GET', '/v1/status');
 		assert.strictEqual(ownStatus.body.jobs.active.length, 2);
 
@@ -470,6 +494,12 @@ function createMockSecurity() {
 		assert.strictEqual(failedStatus.body.jobs.recent[0].error_message, 'Codex CLI chat request failed.');
 		assert.ok(failedStatus.body.jobs.recent[0].session_output.includes('STDERR:\nmock failure'));
 		assert.ok(!JSON.stringify(failedStatus.body.jobs).includes('secret prompt'));
+		const trigger = requestJson(port, 'POST', '/v1/chat', body('trigger'));
+		await waitFor(() => pending.length === 5);
+		const revokedResult = await Promise.race([revokedStreamClosed, new Promise((resolve) => setTimeout(() => resolve(false), 3000))]);
+		assert.strictEqual(revokedResult, true, 'a revoked pairing closes the open stream');
+		pending[4].resolve({ success: true, response: { id: 'trigger' } });
+		await trigger;
 	} finally {
 		if (typeof server.closeAllConnections === 'function') server.closeAllConnections();
 		await new Promise((resolve) => server.close(resolve));

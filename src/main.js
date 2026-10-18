@@ -360,6 +360,11 @@ function buildMenu() {
 		openCodexLoginHelp: () => shell.openExternal('https://help.openai.com/'),
 		unpairSite: (origin) => {
 			security.removePairing(origin);
+			try {
+				if (serverProcess && serverProcess.connected) serverProcess.send({ type: 'unpair', origin });
+			} catch (error) {
+				appendLog('main', 'Bridge server could not be told about the unpaired site.', { error: safeError(error) });
+			}
 			refreshTray();
 		},
 		restartBridge: () => restartBridge(),

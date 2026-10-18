@@ -39,6 +39,10 @@ const pairingCodeInitialization = typeof process.send === 'function'
 
 function handleParentMessage(message) {
 	if (!message || typeof message !== 'object') return;
+	if (message.type === 'unpair') {
+		for (const events of statusEventsInstances) events.closeOrigin(String(message.origin || ''));
+		return;
+	}
 	if (message.type === 'initialize-pairing-code') {
 		const configuredCode = String(message.pairingCode || '');
 		persistentPairingCode = /^\d{6}$/.test(configuredCode);
@@ -138,9 +142,13 @@ function sseHeaders(origin = '') {
 	return headers;
 }
 
+const statusEventsInstances = new Set();
+const PAIRING_RECHECK_MS = 1000;
+
 function createStatusEvents(options = {}) {
 	const clients = new Set();
 	const jobsFor = options.jobsFor;
+	const isPaired = options.isPaired;
 	const maxBufferedBytes = Math.max(16 * 1024, Number(options.maxBufferedBytes || 2 * 1024 * 1024) || 2 * 1024 * 1024);
 	function bufferedBytes(res) {
 		return Number(res && res.writableLength || 0);
@@ -159,12 +167,14 @@ function createStatusEvents(options = {}) {
 			appendLog('server', 'Status event stream closed.', { reason });
 		}
 	}
-	return {
+	const events = {
 		add(res, options = {}) {
 			const client = {
 				res,
 				origin: String(options.origin || ''),
 				jobsOrigin: String(options.jobsOrigin || ''),
+				requirePaired: options.requirePaired === true,
+				pairingCheckedAt: Date.now(),
 				events: new Set(options.events || ['jobs']),
 				heartbeatTimer: null,
 				closed: false,
@@ -208,6 +218,18 @@ function createStatusEvents(options = {}) {
 			}
 		},
 		send(client, event, payload) {
+			/* The pairing can be revoked outside the HTTP routes (for example from the
+			 * tray), so a paired stream re-checks the store and closes once it is gone. */
+			if (client.requirePaired && typeof isPaired === 'function' && Date.now() - client.pairingCheckedAt >= PAIRING_RECHECK_MS) {
+				client.pairingCheckedAt = Date.now();
+				let paired = true;
+				try { paired = !!isPaired(client.origin); } catch (error) { paired = true; }
+				if (!paired) {
+					remove(client, 'pairing revoked');
+					try { client.res.end(); } catch (error) {}
+					return;
+				}
+			}
 			if (!client.events.has(event) && event !== 'heartbeat') {
 				return;
 			}
@@ -251,6 +273,8 @@ function createStatusEvents(options = {}) {
 			}
 		},
 	};
+	statusEventsInstances.add(events);
+	return events;
 }
 
 function createJobManager(options = {}) {
@@ -1117,6 +1141,7 @@ async function route(req, res, context) {
 		context.statusEvents.add(res, {
 			origin: pairedOrigin,
 			jobsOrigin,
+			requirePaired: !!jobsOrigin,
 			events: ['status', 'capabilities', 'jobs'],
 			initialEvents: [
 				['status', statusPayload(context, { includePairedOrigins: false, includeDiagnostics: true, jobsOrigin })],
@@ -1678,7 +1703,7 @@ function applyRelayCliPaths(context) {
 }
 
 function createServer(options = {}) {
-	const statusEvents = createStatusEvents({ jobsFor: (origin) => context.jobManager.snapshot(origin) });
+	const statusEvents = createStatusEvents({ jobsFor: (origin) => context.jobManager.snapshot(origin), isPaired: (origin) => !!context.security.getPairing(origin) });
 	const onJobState = (snapshot) => {
 		if (typeof options.onJobState === 'function') {
 			options.onJobState(snapshot);
