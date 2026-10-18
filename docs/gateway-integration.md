@@ -199,14 +199,16 @@ Keep provider choice in the server-created, signed Gateway payload. Do not let b
 
 ## Model IDs
 
-The Gateway exposes:
+The legacy Gateway contract exposes:
 
 ```text
 codex-local:auto
 codex-local:image
 ```
 
-The bridge can report more local text model IDs through `/v1/models` if Codex has a `models_cache.json`, but production WordPress UI should only expose models the site deliberately supports.
+Relay routes accept provider-neutral IDs in the form `model-relay:<backend>:<model>`, for example `model-relay:codex:auto`, `model-relay:anthropic:claude-sonnet-5-5`, `model-relay:xai:grok-4.6`, `model-relay:xai:imagine-image`, `model-relay:antigravity-cli:image`, `model-relay:cursor-cli:auto`, `model-relay:api-key-chat:<model>`, `model-relay:local-image:<model>`, or `model-relay:local-asr:qwen3-asr-0.6b`. Omitting the model uses the relay default from the user's **Routing** card. `GET /v1/relay/models` lists what the user's Relay offers.
+
+Production WordPress UI should only expose models the site deliberately supports.
 
 ## Security Notes
 

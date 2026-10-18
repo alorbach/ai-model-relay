@@ -1,13 +1,12 @@
 # Documentation
 
-This folder is the project documentation for AI Model Relay, formerly Codex Local Bridge.
+AI Model Relay is one local REST API in front of many AI providers: subscription CLIs (Codex, Grok, Cursor Agent, Antigravity), API-key providers (Claude, xAI, any OpenAI-compatible endpoint), and local engines (ASR, image, upscale, music analysis). The project [README](../README.md) explains why and gives a quick start.
 
-- [Architecture](architecture.md) explains the tray app, local HTTP server, provider registry, cached diagnostics, state files, and Gateway handoff.
-- [Local Bridge API](local-bridge-api.md) documents the raw localhost HTTP interface, relay routing defaults, chat/media `max_tokens` policy, `token_defaults`, background provider refresh, and live job artifacts.
-- [Gateway Integration](gateway-integration.md) documents the production browser-mediated flow used by Alorbach AI Subscription Gateway.
-- [Operations](operations.md) is the user and operator guide for the status page (sidebar pages, provider cards, tests, local engines, pairing, debug), model routing, token defaults, diagnostics, screenshots, builds, releases, and common failure cases.
-- [Implementation plans](plans/README.md) is the plan-by-plan backlog for token limits, CLI prompt files, chat isolation, existing-tool hardening, provider tests, and the status page redesign. Work one numbered plan at a time.
-
-![AI Model Relay tray menu](images/tray-menu.png)
+- [Architecture](architecture.md): tray app, local HTTP server, backend drivers, routing, cached diagnostics, state files, and the Gateway handoff.
+- [Local Bridge API](local-bridge-api.md): every route, payload, and response, including routing defaults, the chat and media `max_tokens` policy, and live job artifacts.
+- [Gateway Integration](gateway-integration.md): the production browser-mediated flow with the Alorbach AI Subscription Gateway.
+- [Configuration](configuration.md): environment variables for every provider and local engine.
+- [Operations](operations.md): status page, providers and routing, local engines, diagnostics, screenshots, builds, releases, and common failures.
+- [Implementation plans](plans/README.md): the numbered plan backlog. Work one plan at a time.
 
 The small standalone developer example lives in [../examples/http-app](../examples/http-app/README.md).

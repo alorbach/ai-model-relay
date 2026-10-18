@@ -1,6 +1,6 @@
 # Architecture
 
-AI Model Relay, formerly Codex Local Bridge, is a Windows tray companion for Alorbach AI Subscription Gateway. It lets a browser page on a paired WordPress origin execute AI jobs through local or API-backed backend drivers while the WordPress Gateway keeps ownership of plans, quotas, job signatures, audit records, and optional service fees.
+AI Model Relay, formerly Codex Local Bridge, is a Windows tray app that puts one local REST API in front of many AI providers. A browser page on a paired origin (in production the Alorbach AI Subscription Gateway) sends jobs in one envelope format; the Relay routes each job to a backend driver (subscription CLI, API-key provider, or local engine) and returns a normalized result. The Gateway keeps ownership of plans, quotas, job signatures, audit records, and optional service fees.
 
 ## Components
 
@@ -32,7 +32,11 @@ Execution requests are scheduled through an in-memory queue. The default limit i
 
 Entry point: `src/backend-registry.js`
 
-Backend drivers expose a common contract: `id`, `label`, `kind`, `capabilities()`, `models()`, `checkStatus()`, and execution methods for supported job types. The built-in drivers include Codex CLI, Grok CLI, Cursor Agent, Local ASR, OpenAI Videos, Grok/xAI API, and the optional generic CLI-process and API-key chat drivers.
+Backend drivers expose a common contract: `id`, `label`, `kind`, `capabilities()`, `models()`, `checkStatus()`, and execution methods for supported job types. The built-in drivers are:
+
+- subscription CLIs: Codex CLI (`codex-cli`), Grok CLI (`grok-cli`), Cursor Agent (`cursor-cli`), Antigravity CLI (`antigravity-cli`), and the generic CLI Process (`cli-process`);
+- API-key providers: Claude API (`anthropic-api`), Grok / xAI API (`xai-api`), API Key Chat for any OpenAI-compatible endpoint (`api-key-chat`), and OpenAI Videos (`openai-videos`);
+- local engines: Local ASR (`local-asr`), Local Image (`local-image`), Local CUDA Upscale (`local-upscale`), and Local Music Analysis (`music-analysis`).
 
 Codex CLI supports chat, images, and media analysis. Grok CLI supports isolated Gateway chat after its normal readiness check; image/video models are exposed only when the local `%USERPROFILE%\.grok\skills\imagine\SKILL.md` or `%USERPROFILE%\.grok\bundled\skills\imagine\SKILL.md` metadata declares the corresponding Imagine tools. Grok media runs in a per-request temporary workspace with separate `input` and `output` directories, allowlists the single Imagine tool for that request, and returns only output artifacts. Video remains experimental until a successful local request confirms it. Cursor Agent Gateway chat uses `--mode=ask` in a temp workspace (read-only; not a write/shell coding agent). The xAI API driver covers chat (`grok-4.6` by default), Imagine image (`grok-imagine-image-2.0`: native `resolution` `1k`/`2k`, `image/jpeg` only) and Imagine video with native duration parameters, and Speech-to-Text. OpenAI Videos remains a separately configured Sora 2 path until the Videos API shutdown on 24 Sep 2026. A driver is never selected as a silent fallback when the requested/default driver is unavailable or lacks a capability.
 

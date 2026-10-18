@@ -1,373 +1,181 @@
 # AI Model Relay
 
-Formerly **Codex Local Bridge**. All `/v1` API routes, `codex-local:auto`/`codex-local:image` model IDs, the default bridge URL, and the state-folder path are unchanged. Local ASR model IDs have moved from `codex-local:audio:*` to `local-asr:*`, with the old audio prefix accepted as a compatibility alias. See [Naming and Compatibility](docs/operations.md#naming-and-compatibility) in the operations guide for the full change list.
+**One local REST API for every AI model you can use: your subscription CLIs, your API keys, and models running on your own GPU.**
 
-Windows tray companion for Alorbach AI Subscription Gateway. It exposes a secure localhost relay that routes browser-mediated jobs to backend drivers such as Codex CLI, local ASR, Grok/xAI API, configurable CLI tools, API-key chat providers, and optional OpenAI video generation while WordPress still owns plans, quotas, audit records, and optional Gateway fees.
+AI Model Relay is a small Windows tray app that runs an HTTP server on `127.0.0.1`. Web apps send chat, image, video, transcription, and media-analysis jobs to that one stable API. The Relay translates each job for the provider you picked (Codex CLI, Claude API, Grok, Cursor Agent, Antigravity, any OpenAI-compatible endpoint, or a local model) and returns the result in one normalized shape.
 
-## Status
-
-- Platform: Windows desktop tray app.
-- Runtime: Electron plus a local Node HTTP bridge.
-- Bridge URL: `http://127.0.0.1:8765` by default.
-- License: `GPL-2.0-or-later`.
-- Release model: pushed `v*` tags build a Windows installer and portable ZIP.
-
-## What It Does
-
-- Runs as a tray app in the logged-in Windows user's session.
-- Starts a local HTTP bridge bound to `127.0.0.1`.
-- Pairs trusted browser origins using a rotating tray code by default; the local status page can save a fixed code for persistent pairing.
-- Stores a per-origin bearer token in the user's bridge state directory.
-- Executes signed Gateway chat jobs through local `codex exec`.
-- Executes signed Gateway image jobs and returns normalized base64 image data.
-- Executes signed Gateway audio transcription jobs through private local ASR runtimes with per-word timestamps, or through explicitly selected xAI Speech-to-Text.
-- Optionally runs a separate local music-analysis pipeline for acoustic album metrics; it does not infer lyrics or send audio to a cloud provider.
-- Routes provider-neutral relay jobs through backend drivers for Codex CLI, Antigravity CLI, local ASR, Grok/xAI, configurable CLI processes, API-key chat providers, Claude API (Anthropic), and OpenAI video.
-- Resolves chat and media-analysis `max_tokens` (defaults 8192 / 4096; values below 512 floor up; optional overrides in the Providers page's Routing card). Codex uses a prompt hint; xAI and API-key chat send `max_tokens` and `max_completion_tokens`.
-- Runs Grok/Cursor/Antigravity Gateway chat from a temp prompt file so large transcripts are not placed on the Windows command line. Cursor chat uses `--mode=ask`.
-- Reports local bridge multimodal capabilities, including structured Codex event support and optional video/media features.
-- Optionally executes signed OpenAI Videos API jobs when explicitly configured with an API key and enable flag. OpenAI lists Sora 2 and the Videos API for removal on 24 Sep 2026.
-- When `XAI_API_KEY` is set, routes signed chat, Imagine image, Imagine video, and Speech-to-Text jobs through the xAI API (`grok-4.6` by default). Imagine video becomes the unsaved default video route.
-- Optionally analyzes bounded media frames, HTTPS media URLs, or small video data URLs through local Codex vision prompts or Antigravity CLI.
-- Runs local Codex jobs with bounded parallelism and queues overflow requests.
-- Shows bridge status, Codex login status, paired sites, diagnostics, restart, and unpair actions in the tray menu.
-- Opens a minimal local status page on tray icon double-click.
-
-## Tray Menu
-
-![AI Model Relay tray menu](docs/images/tray-menu.png)
-
-## Status Page
-
-Double-click the tray icon or use `Open status page` to open the local status page:
+Change the provider on the status page, not in your application code.
 
 ![AI Model Relay status page, Overview, light theme](docs/images/status-page.png)
 
-*Overview in the light theme. The screenshots are anonymized; regenerate them with `npm run screenshots` (see [docs/operations.md](docs/operations.md#status-page-screenshots)).*
+## Why you need it
 
-The page has a fixed left sidebar (a menu button on narrow windows) and a light and dark theme: it follows the system setting by default, and the header toggle (System / Light / Dark) is remembered in the browser. A sticky **Save changes / Discard** bar appears at the bottom of a settings page only while it has unsaved edits, and the sidebar shows a dot on pages with unsaved changes.
+Every AI provider works differently. One has a REST API with its own request format, the next is only a command-line tool with its own login, the third runs locally in Python and needs a GPU. A web application that wants to offer several of them has to integrate, authenticate, and maintain each one, and has to change again whenever a provider changes its interface or a better model appears.
 
-| Sidebar entry | What it shows |
+AI Model Relay is the layer in between:
+
+- **One contract for all providers.** Your app always sends the same job envelope to the same routes (`/v1/relay/jobs/chat`, `/images`, `/videos`, `/transcribe`, `/media/analyze`, ...) and always gets the same response shape back. Adding or switching a provider needs no code change in the app.
+- **Use the subscriptions you already pay for.** ChatGPT (through Codex CLI), Grok, Cursor, and Google Antigravity subscriptions come with command-line tools but no API that a web page can call. The Relay runs those CLIs on your machine, so a browser app can use them.
+- **Bring your own API keys.** Claude API (Anthropic), Grok / xAI API, and any OpenAI-compatible `/chat/completions` endpoint can be added with a key on the status page.
+- **Run models locally.** Speech recognition (Whisper, Qwen3 ASR), image generation (Qwen-Image, FLUX.2, NVIDIA Sana, Ideogram), CUDA upscaling, and music analysis run on your own hardware; that data never leaves the computer.
+- **Pick the default per job type.** The **Routing** card sets which model handles chat, images, videos, transcription, and analysis. A request can still name a provider or model explicitly.
+- **Predictable behavior.** The Relay never silently falls back to another provider. If the chosen one is not installed, not signed in, or cannot do the job, the request fails with a clear error naming it.
+- **Secure by default.** The server listens only on `127.0.0.1`, browser origins must be paired with a code from the tray, and API keys are stored locally and never sent back to the page.
+
+The main consumer is the [Alorbach AI Subscription Gateway](https://github.com/alorbach/alorbach-ai-subscription-gateway/) WordPress plugin, which keeps plans, quotas, and audit records on the server while the actual model runs through the Relay on the user's computer. Any other browser app on a paired origin can use the same API; see the [standalone HTTP example](examples/http-app/README.md).
+
+## How it works
+
+```mermaid
+flowchart LR
+    App["Web app in the browser<br/>(WordPress Gateway, BuchWerk, your app)"]
+    Relay["AI Model Relay<br/>127.0.0.1:8765"]
+    CLI["Subscription CLIs<br/>Codex · Grok · Cursor · Antigravity · any CLI"]
+    API["API-key providers<br/>Claude · xAI · OpenAI-compatible · OpenAI Videos"]
+    Local["Local engines<br/>ASR · Image · Upscale · Music"]
+
+    App -- "one job format<br/>(paired origin + token)" --> Relay
+    Relay --> CLI
+    Relay --> API
+    Relay --> Local
+    Relay -- "normalized result" --> App
+```
+
+1. The web app pairs once with the Relay using the six-digit code from the tray menu and keeps a per-origin token.
+2. For each job it sends a signed envelope (`job_token`, `request_hash`, `request_id`, `payload`) to the Relay. With the WordPress Gateway these values are created on the server.
+3. The Relay picks the backend driver (explicit model or provider in the payload, otherwise the saved default), runs the job, and returns the normalized result.
+4. The app hands the result back to its own server, which validates and records it.
+
+## Supported providers
+
+| Provider | How it connects | Chat | Images | Video | Media analysis | Transcription |
+| --- | --- | :---: | :---: | :---: | :---: | :---: |
+| **Codex CLI** | Local CLI, ChatGPT sign-in (`codex login`) | ✓ (with images) | ✓ | | ✓ | |
+| **Grok CLI** | Local CLI, Grok sign-in | ✓ | ✓ ¹ | experimental ¹ | | |
+| **Cursor Agent** | Local CLI (`cursor-agent`), read-only ask mode | ✓ | | | | |
+| **Antigravity CLI** | Local CLI (`agy`), Google sign-in | ✓ | ✓ | | ✓ | |
+| **CLI Process** | Any command-line tool, prompt on stdin | ✓ | | | | |
+| **Claude API (Anthropic)** | API key | ✓ (with images) | | | | |
+| **Grok / xAI API** | API key | ✓ | ✓ Imagine | ✓ Imagine | | ✓ Speech-to-Text |
+| **API Key Chat** | Any OpenAI-compatible `/chat/completions` endpoint | ✓ | | | | |
+| **OpenAI Videos** | API key, opt-in ² | | | ✓ | | |
+| **Local ASR** | Local Python: faster-whisper, Qwen3 ASR with word timestamps | | | | | ✓ |
+| **Local Image** | Local GPU: Qwen-Image, FLUX.2-dev, NVIDIA Sana, Ideogram 4.0 GGUF | | ✓ | | | |
+| **Local CUDA Upscale** | Local GPU: SwinIR, Real-ESRGAN, HAT-S, DRCT, APISR (native ×2 / ×4) | | upscale | | | |
+| **Local Music Analysis** | Local Python: tempo, key, loudness, sections | | | | music | |
+
+¹ Only when the local Grok Imagine skill declares the matching tools.
+² OpenAI scheduled Sora 2 and the Videos API for removal on 24 Sep 2026. The driver stays for compatibility; prefer xAI Imagine video.
+
+The Relay only uses what is installed and configured. CLIs are found on `PATH` or at a path you set on the status page; local engines are installed only when you press their **Install** / **Setup** button.
+
+## Quick start
+
+1. Download the installer `.exe` or the portable `.zip` from the [latest release](https://github.com/alorbach/ai-model-relay/releases) and start **AI Model Relay**. It appears in the Windows tray.
+2. Sign in to the CLIs you want to use, under the same Windows account, for example:
+
+   ```powershell
+   codex login
+   ```
+
+3. Double-click the tray icon to open the status page. Under **Providers**, press **Refresh detection**, enter any API keys you want to use, and check that the cards turn ready.
+4. In the **Routing** card, choose the default model for each job type and press **Save changes**.
+5. Optional: run a real request from **Tests** to confirm a provider works (tests are real requests and may cost money).
+6. In your web app, keep the Relay URL `http://127.0.0.1:8765` and enter the pairing code from the tray menu when asked. To keep one code across restarts, save a fixed code on the **Pairing** page.
+
+For the WordPress Gateway: enable **AI Gateway → Settings → Providers / Import → User-owned local Codex** and pick a relay model or the relay default. See [Gateway Integration](docs/gateway-integration.md).
+
+## A request in one example
+
+After pairing, a chat job looks the same for every provider; only the model ID changes:
+
+```js
+const response = await fetch('http://127.0.0.1:8765/v1/relay/jobs/chat', {
+	method: 'POST',
+	headers: {
+		'Content-Type': 'application/json',
+		'X-Alorbach-Bridge-Token': bridgeToken,
+		'X-Alorbach-Request-Id': requestId,
+	},
+	body: JSON.stringify({
+		job_token, request_hash, request_id: requestId, // from your server
+		payload: {
+			model: 'model-relay:anthropic:claude-sonnet-5-5', // or model-relay:codex:auto, model-relay:xai:grok-4.6, ...
+			messages: [{ role: 'user', content: 'Summarize this text ...' }],
+		},
+	}),
+});
+const result = await response.json();
+console.log(result.response.choices[0].message.content); // same shape for every provider
+```
+
+Leave out `model` to use the default from the Routing card. `GET /v1/relay/models` lists the available model IDs and their job types. The full reference is in [Local Bridge API](docs/local-bridge-api.md).
+
+## Status page and tray
+
+The tray menu shows the Relay state, the pairing code, paired sites, and running jobs, and copies diagnostics without secrets.
+
+![AI Model Relay tray menu](docs/images/tray-menu.png)
+
+The status page (double-click the tray icon) is where everything is configured:
+
+| Page | Purpose |
 | --- | --- |
-| **Overview** | Relay status (reachable, version, port, paired sites), job counts, a provider summary and one status tile per provider, the Claude API usage panel (credits, month-to-date spend, rate limits; the Claude API provider card shows a compact copy), and Codex / Local ASR runtime details behind disclosures. |
-| **Live** | Running, queued, and recent jobs with status pills, provider, model, type, and elapsed time. Filter by status or job type, search, and select a job to read its session input and output (wrap and auto-scroll toggles, copy buttons), error details, and artifact previews. |
-| **Providers** | One expandable card per provider (Codex CLI, Claude API, Grok / xAI API, Grok CLI, Cursor Agent, Antigravity, OpenAI Videos, API-key chat, CLI Process, and the local engines): status, executable path, API keys (saved keys show their last characters with **Replace** / **Clear**), models, an inline chat test, and links to the matching media tests. A **Routing** card holds the default model per job type and the token defaults. **Refresh detection** re-probes every provider. |
-| **Tests** | Chat, Image, Video, Video analysis, and Audio tests in a segmented control. **Run all chat tests** shows live progress (`Running 2 of 5 ...`) and colored pass / fail counts; replies and previews are large and copyable. Every test is a real request and can cost money. |
-| **Runtime** | Timeouts and the maximum number of parallel jobs. |
-| **Local ASR**, **Local Image**, **CUDA Upscale**, **Music Analysis** | Settings and explicit setup of the local engines. |
-| **Pairing** | Save or disable a fixed six-digit pairing code. |
-| **Debug** | Health checks with a summary, recent failed jobs with expandable details, detected features, backend drivers, paired sites, Codex details, and the raw status JSON (collapsed by default, with filter and copy). |
+| **Overview** | Relay state, job counts, one tile per provider, Claude API usage. |
+| **Live** | Running, queued, and recent jobs with their input, output, errors, and generated images. |
+| **Providers** | One card per provider: status, executable path, API keys, models, an inline chat test. The **Routing** card sets the default model per job type and the token defaults. |
+| **Tests** | Real chat, image, video, analysis, and audio requests against each ready provider. |
+| **Runtime** | Timeouts and the number of parallel jobs. |
+| **Local ASR**, **Local Image**, **CUDA Upscale**, **Music Analysis** | Explicit setup and settings of the local engines. |
+| **Pairing**, **Debug** | Fixed pairing code; health checks, recent failures, raw status. |
 
-| Providers (dark) | Tests (light) |
+| Providers (dark) | Live (dark) |
 | --- | --- |
-| ![Providers page in the dark theme with the Codex CLI card expanded](docs/images/providers-dark.png) | ![Tests page, Chat segment, in the light theme](docs/images/tests-light.png) |
-| One expandable card per provider; here the Codex CLI card with its path, models, and inline chat test. | The Chat tests, with **Run all chat tests** at the top. |
+| ![Providers page in the dark theme with the Codex CLI card expanded](docs/images/providers-dark.png) | ![Live page in the dark theme with the job inspector open](docs/images/live-dark.png) |
 
-| Live (dark) | Narrow window (dark) |
-| --- | --- |
-| ![Live page in the dark theme with the job inspector open](docs/images/live-dark.png) | ![Overview in a 390 px wide window with the sidebar collapsed into a menu button](docs/images/status-page-mobile.png) |
-| The job list and the job inspector (the jobs shown are illustrative demo entries). | Under 900 px the sidebar becomes a menu. |
-
-Pages can be linked by hash: `#overview`, `#live`, `#live/<request id>`, `#providers`, `#providers/<provider id>`, `#tests`, `#tests/<chat|image|video|analysis|audio>`, `#tests/<type>/<provider id>` (selects the test type and highlights that provider's test cards), `#runtime`, `#asr`, `#image`, `#upscale`, `#music`, `#pairing`, and `#debug`. The older `#settings/<section>` links still work. The header pill shows whether the status page has a healthy live event stream (**Connected**), is polling (**Polling fallback**), keeps the last good state while a request fails (**Status delayed**), or cannot reach the Relay (**Relay unreachable**, after 3 failed polls or 30 s, or at once if nothing was loaded yet); a stream that goes silent for about 35 s is treated as stalled and replaced by polling, and the page reconnects on its own after a Relay restart; the Relay is reported as reachable as soon as it answers, even while the Codex check is still running.
+More on every page, local engine setup, and troubleshooting: [Operations](docs/operations.md).
 
 ## Requirements
 
 - Windows 10 or later.
-- Codex CLI installed and logged in for the same Windows account that runs the tray app.
-- Node.js 20+ for development builds.
-- Alorbach AI Subscription Gateway with User-owned Local Codex enabled for production WordPress usage.
-- Optional Local ASR transcription/alignment: Python 3.10 for faster-whisper, Python 3.12 for Qwen3 ASR and Qwen3 ForcedAligner, ffmpeg/ffprobe on PATH, and cached Hugging Face models or explicit permission to download models.
-- Optional local music analysis: Python 3.10+, ffmpeg/ffprobe on PATH, and a dedicated virtual environment with `numpy`, `scipy`, `soundfile`, `librosa`, and `pyloudnorm`. The status page's explicit setup action creates and installs this environment; it is never downloaded automatically.
-- Optional local CUDA upscale: NVIDIA CUDA, plus dynamic status-page cards for SwinIR ×2, Real-ESRGAN ×2plus, DRCT ×2/×4, HAT-S ×2/×4, and APISR ×2. Setup clones the pinned official checkout and verifies the exact weight before a job can run; jobs never download a model, send pixels to a cloud provider, or fall back to CPU.
+- At least one provider: a signed-in CLI (Codex, Grok, Cursor Agent, Antigravity), an API key, or a local engine.
+- Optional local engines need Python (3.10 / 3.12), ffmpeg, and for GPU models an NVIDIA CUDA GPU. Their setup is started explicitly from the status page; jobs never install packages or download models on their own.
+- Node.js 20+ only for development.
 
-Before pairing, log in to Codex in the same Windows account:
+## Security
 
-```powershell
-codex login
-```
-
-## Install From Release
-
-1. Open the latest release at <https://github.com/alorbach/ai-model-relay/releases>.
-2. Download either the Windows installer `.exe` or portable `.zip`.
-3. Start `AI Model Relay`.
-4. Open the tray menu and confirm `Codex: Ready`.
-5. In WordPress, enable `AI Gateway -> Settings -> Providers / Import -> User-owned local Codex`.
-6. Keep the bridge URL as `http://127.0.0.1:8765` unless a custom port is required.
-7. Choose a Local Codex model such as `codex-local:auto` or `codex-local:image`.
-8. Enter the pairing code shown in the tray app when WordPress prompts for it. To keep the same code across restarts and successful pairings, open the local status page → Pairing and save a fixed six-digit code.
-
-For local audio transcription, open the bridge status page after installation and choose **Local ASR** in the sidebar. Use each model's **Install model** button to create the private Python environment, install packages, and download that Hugging Face snapshot onto this computer. That action is explicit; transcription jobs do not pip-install packages. Jobs stay offline unless you also enable **Allow ASR model downloads**. Qwen setup matches Local CUDA Upscale: it uninstalls any CPU PyTorch wheel, installs CUDA PyTorch from the official cu128 index only, pins it before `qwen-asr`, and verifies the downloaded snapshot. Whisper setup installs `faster-whisper`, `huggingface_hub`, and Whisper CUDA runtime packages during Install. Default venvs: `%USERPROFILE%\.alorbach-codex-bridge\asr-venv` (faster-whisper) and `%USERPROFILE%\.alorbach-codex-bridge\qwen-asr-venv` (Qwen3 ASR/ForcedAligner).
-
-For local album metrics, use the separate **Music Analysis** page of the status page. Its setup button creates `%USERPROFILE%\.alorbach-codex-bridge\music-analysis-venv` and installs the local analysis packages only after you ask it to. It returns tempo/beat grid, key estimate, loudness, spectral descriptors, and neutral numbered sections; it does not perform stem separation, chord recognition, melody/MIDI extraction, or automatic transcription.
-
-### BuchWerk local KDP upscale
-
-This optional workflow accepts only a signed binary image from a paired BuchWerk browser. It creates a new candidate asset after the browser has reviewed a KDP crop; it never modifies the original asset.
-
-1. Open the Relay status page and choose **CUDA Upscale** in the sidebar.
-2. Choose a model card. SwinIR ×2, Real-ESRGAN ×2plus, HAT-S ×2/×4, and DRCT ×4 have pinned official checkouts and weights. DRCT ×2 pins its runtime but stays unavailable until an operator supplies a separately verified checkpoint because no official ×2 release is published. APISR ×2 needs an explicit GPL-3.0/academic-only acknowledgement.
-3. Setup clones the official GitHub checkout, downloads the pinned model weight where available, installs CUDA PyTorch into the BasicSR `upscale-venv` or isolated APISR runtime, and verifies the weight SHA-256. Jobs never download a model or fall back to CPU. If install fails, the CUDA Upscale page shows pip/Python stdout and stderr below the model cards.
-4. Wait until the model state shows `installed`. The first install can take a long time.
-5. In BuchWerk choose **KDP first + local CUDA ×2**, review the crop, explicitly approve it, and start one local job. The Relay permits only one CUDA upscale job per GPU and reports free VRAM before it starts.
-
-The Relay retains the requested model's native output only: ×2 requires `scale: 2` / `retain_native_x2`, ×4 requires `scale: 4` / `retain_native_x4`, with exact crop-derived dimensions. It never silently downsamples or synthesizes ×2 from ×4; provenance reports `downsampler: none`. Native ×4 PNG output is capped at 256 MiB. BuchWerk continues to use its existing ×2 flow until it consumes the public model contract.
+- Listens only on `127.0.0.1`; connections from other hosts are rejected.
+- Browser origins must be paired with the tray code before any model or job route works; tokens are stored per origin.
+- API keys are stored in the local state file. The settings API only reports whether a key is set and its last characters.
+- Diagnostics never contain tokens or keys. Temporary full debug logs under `%TEMP%` are deleted on every start.
+- Billing, quotas, and duplicate protection stay on the app's server (for example the WordPress Gateway), not in the Relay.
 
 ## Documentation
 
-- [Architecture](docs/architecture.md)
-- [Local Bridge API](docs/local-bridge-api.md) (includes chat `max_tokens` policy and `/v1/relay/settings` `token_defaults`)
-- [Gateway Integration](docs/gateway-integration.md)
-- [Operations](docs/operations.md)
+- [Architecture](docs/architecture.md): components, backend drivers, routing, security state.
+- [Local Bridge API](docs/local-bridge-api.md): every route, payload, and response.
+- [Gateway Integration](docs/gateway-integration.md): the production flow with the WordPress Gateway.
+- [Configuration](docs/configuration.md): environment variables for every provider and engine.
+- [Operations](docs/operations.md): status page, local engines, diagnostics, builds, releases, common failures.
 - [Implementation plans](docs/plans/README.md)
 - [Standalone HTTP example](examples/http-app/README.md)
 
-The Gateway-side reference implementation is in the [Alorbach AI Subscription Gateway](https://github.com/alorbach/alorbach-ai-subscription-gateway/) WordPress plugin:
-
-```text
-https://github.com/alorbach/alorbach-ai-subscription-gateway/blob/main/wordpress-plugin/includes/class-local-codex-bridge.php
-https://github.com/alorbach/alorbach-ai-subscription-gateway/blob/main/wordpress-plugin/assets/js/demo-pages.js
-```
-
-## Local Development
-
-Install dependencies:
+## Development
 
 ```powershell
 npm ci
-```
-
-Run the tray app:
-
-```powershell
-npm start
-```
-
-Run the local bridge without Electron:
-
-```powershell
-npm run serve
-```
-
-Run the standalone developer HTTP example:
-
-```powershell
-npm run example:http
-```
-
-Then open:
-
-```text
-http://127.0.0.1:8787
-```
-
-Run checks:
-
-```powershell
+npm start              # tray app
+npm run serve          # HTTP server without Electron
+npm run example:http   # example app on http://127.0.0.1:8787
 npm test
-npm run smoke
+npm run dist:win       # installer and portable ZIP in dist/
 ```
 
-## Bridge API Summary
+Pushing a `v*` tag builds and publishes a GitHub Release. Details: [Operations → Release](docs/operations.md#release).
 
-Default base URL:
+## Former name
 
-```text
-http://127.0.0.1:8765
-```
-
-Routes:
-
-- `GET /status`: minimal visual bridge status page.
-- `GET /v1/status`: local bridge and Codex readiness.
-- `GET /v1/relay/status`: provider-neutral alias for status.
-- `GET /v1/status/events`: local job-state event stream used by the status page.
-- `GET /v1/status/stream`: paired live status stream for browser/API clients.
-- `GET /v1/capabilities`: bridge, Codex, video, and media-analysis capability metadata.
-- `GET /v1/relay/capabilities`: provider-neutral capabilities, including backend driver metadata.
-- `GET /v1/asr/settings`, `POST /v1/asr/settings`, `POST /v1/asr/setup`: Local ASR settings and explicit status-page install for a Whisper or Qwen model. Add `?refresh=1` on GET to run a full Python/GPU/ffmpeg probe. Setup downloads even when job-time model downloads are disabled.
-- `GET /v1/music-analysis/settings`: local music-analysis settings and cached runtime metadata. Add `?refresh=1` to run its Python/ffmpeg probe.
-- `POST /v1/music-analysis/settings`, `/v1/music-analysis/setup`: save local music settings or deliberately create/install its private Python environment.
-- `GET /v1/upscale/settings`, `POST /v1/upscale/settings`, `POST /v1/upscale/setup`: dynamic, explicit installation for local CUDA upscale model profiles. `POST /v1/upscale/setup` accepts `model` and requires `accept_restricted: true` for APISR. Jobs never download weights.
-- `GET/POST /v1/relay/pairing-code`: read local pairing settings or save/disable a fixed code from the desktop status page. The code is never returned by the API.
-- `POST /v1/pair`: exchange the active tray pairing code for an origin token.
-- `POST /v1/unpair`: remove the pairing for the request origin.
-- `GET /v1/models`: list paired local model IDs.
-- `GET /v1/relay/models`: list provider-neutral `model-relay:*` model IDs in addition to legacy IDs.
-- `POST /v1/chat`: run a signed chat job.
-- `POST /v1/images`: run a signed image job.
-- `POST /v1/transcribe`: run a signed local ASR transcription job.
-- `POST /v1/videos`: optionally run a signed OpenAI Videos API job.
-- `POST /v1/media/analyze`: analyze bounded media frames, an HTTPS media URL, or a bounded MP4/MOV/WebM/AVI data URL.
-- `POST /v1/music/analyze`: analyze a local audio payload with the separate local music-analysis pipeline.
-- `POST /v1/relay/jobs/chat`, `/images`, `/transcribe`, `/videos`, `/media/analyze`, and `/music/analyze`: provider-neutral job aliases using the same signed envelope and response shapes.
-- `POST /v1/relay/jobs/upscale`: paired signed binary PNG/JPEG/WebP input for a local CUDA native ×2 or ×4 job. The request metadata remains bounded JSON in `X-Alorbach-Upscale-Payload`; image bytes are never base64 JSON. Every local model in `GET /v1/relay/models` and the `local-upscale` backend in `GET /v1/relay/capabilities` publishes `upscale_capabilities` version 1 without local paths, checksums, or checkout revisions.
-- `GET /v1/relay/jobs/:requestId/artifact`: paired temporary binary PNG result for BuchWerk's protected multipart completion.
-- `POST /v1/relay/jobs/upscale/cancel`: paired cancellation for an active or queued local CUDA job.
-
-Paired routes require:
-
-```http
-Origin: <paired-browser-origin>
-X-Alorbach-Bridge-Token: <pairing-token>
-X-Alorbach-Request-Id: <request-id>
-```
-
-Execution routes require a JSON envelope containing:
-
-```json
-{
-  "job_token": "...",
-  "request_hash": "...",
-  "request_id": "...",
-  "payload": {}
-}
-```
-
-In production, these values come from WordPress Gateway. The relay checks that they are present, executes the selected backend driver, and returns the result to the browser. WordPress validates the one-time token and request hash when the browser completes the job.
-
-Legacy requests can keep using `codex-local:auto` and `codex-local:image`. New provider-neutral requests may use IDs such as `model-relay:codex:auto`, `model-relay:antigravity-cli:auto`, `model-relay:antigravity-cli:image`, `model-relay:antigravity-cli:media`, `model-relay:xai:grok-4.6`, `model-relay:xai:imagine-image`, `model-relay:xai:imagine-video`, `model-relay:xai:stt`, `model-relay:local-asr:qwen3-asr-0.6b`, and `model-relay:music-analysis:core`, or set `payload.provider` / `payload.backend`. Local ASR models now use `local-asr:*` IDs (e.g. `local-asr:whisper-large-v3`, `local-asr:qwen3-asr-0.6b`). `model-relay:xai:stt`, `model-relay:xai:imagine-image`, and `model-relay:xai:imagine-video` send the supplied media to xAI; Local ASR and music analysis stay local.
-
-`GET /v1/status` also includes current local job activity:
-
-```json
-{
-  "jobs": {
-    "running_count": 1,
-    "queued_count": 0,
-    "max_concurrent": 2,
-    "active": [
-      {
-        "request_id": "request-123",
-        "short_request_id": "request-123",
-        "type": "chat",
-        "model": "codex-local:auto",
-        "status": "running",
-        "elapsed_ms": 1200
-      }
-    ]
-  }
-}
-```
-
-The `/status` page updates from the `/v1/status/events` stream (with automatic reconnect and a polling fallback) and shows active, queued, and recent job activity in its **Live** view, with bounded live Codex session output for running jobs. Failed bridge requests include a `debug_help` object with the request id when available, links to `/status` and `/v1/status`, and safe troubleshooting checks. Recent failed jobs keep bounded Codex session output such as stderr/stdout/last response text when available.
-
-Each local model invocation also writes full temporary debug files under `%TEMP%\alorbach-codex-local-bridge-debug`. The bridge deletes that directory on startup. Each invocation folder contains `prompt.txt`, `output.txt`, `stdout.txt`, `stderr.txt`, and `metadata.json`; these files are intentionally full-fidelity and can include prompt text, transcripts, lyrics, and local temp paths.
-
-Paired browser/API clients can subscribe to `GET /v1/status/stream` with their normal `Origin` and `X-Alorbach-Bridge-Token` headers. Browsers set `Origin` automatically; non-browser clients must send the paired origin explicitly. The stream emits `status`, `capabilities`, `jobs`, and `heartbeat` server-sent events. Use `fetch()` streaming for browser clients because native `EventSource` cannot send the required bearer header:
-
-```js
-const response = await fetch('http://127.0.0.1:8765/v1/status/stream', {
-	headers: {
-		'X-Alorbach-Bridge-Token': bridgeToken,
-	},
-});
-
-for await (const chunk of response.body.pipeThrough(new TextDecoderStream())) {
-	console.log(chunk);
-}
-```
-
-## Security Model
-
-- The bridge binds only to `127.0.0.1`.
-- Non-localhost socket clients are rejected.
-- Browser origins must be paired before model and execution routes are accepted.
-- Pairing tokens are per origin and stored in `%USERPROFILE%\.alorbach-codex-bridge\state.json`.
-- The tray diagnostics omit bearer token values.
-- Temporary local-model debug logs are full-fidelity and are deleted on bridge startup.
-- Requests have a 12 MiB JSON body limit.
-- Codex runs in ephemeral temp directories for bridge jobs.
-- Production accounting and duplicate protection stay in WordPress Gateway, not in the local tray app.
-
-## Runtime Configuration
-
-- `ALORBACH_CODEX_BRIDGE_PORT`: relay port. Default: `8765`.
-- `AI_MODEL_RELAY_STATE_DIR` or `ALORBACH_MODEL_RELAY_STATE_DIR`: explicit relay state directory. If unset, the app uses `%USERPROFILE%\.ai-model-relay` only when it already exists; otherwise it keeps the legacy `%USERPROFILE%\.alorbach-codex-bridge` directory for compatibility.
-- `ALORBACH_CODEX_BINARY`: explicit path to `codex.exe` or another Codex executable.
-- `CODEX_HOME`: Codex profile directory. Default: `%USERPROFILE%\.codex`.
-- `ALORBACH_CODEX_MAX_CONCURRENT_JOBS`: maximum parallel local Codex jobs. Default: `2`.
-- `ALORBACH_CODEX_CHAT_TIMEOUT_MS`: chat timeout. Default: `600000`.
-- `ALORBACH_CODEX_IMAGE_TIMEOUT_MS`: image timeout. Default: `1800000`.
-- `ALORBACH_ASR_PYTHON`: explicit Python executable for Local Whisper setup.
-- `ALORBACH_ASR_VENV`: Local Whisper virtual environment path. Default: `%USERPROFILE%\.alorbach-codex-bridge\asr-venv`.
-- `ALORBACH_QWEN_ASR_PYTHON`: explicit Python executable for Local Qwen ASR setup.
-- `ALORBACH_QWEN_ASR_VENV`: Local Qwen ASR virtual environment path. Default: `%USERPROFILE%\.alorbach-codex-bridge\qwen-asr-venv`.
-- `ALORBACH_QWEN_TORCH_INDEX_URL`: PyTorch CUDA wheel index used during Qwen ASR Install (cu128 only, no CPU fallback). Default: `https://download.pytorch.org/whl/cu128`.
-- `ALORBACH_QWEN_ALLOW_CPU_OFFLOAD`: set to `0` to disable mixed GPU/CPU Qwen loading for models that do not fit fully in VRAM.
-- `ALORBACH_QWEN_CHUNK_SECONDS`: local pre-chunk size for Qwen ASR timestamped transcription. Default: `30`.
-- `ALORBACH_QWEN_MAX_WORD_DURATION_SECONDS`: cap for implausibly stretched Qwen word timestamps. Default: `12`.
-- `ALORBACH_ASR_DEFAULT_MODEL`: optional default Local ASR model slug when a transcription request does not provide `payload.model`, for example `qwen3-asr-0.6b`.
-- `ALORBACH_ASR_CPU_THREADS`: CPU threads for faster-whisper. Default: `4`.
-- `ALORBACH_ASR_TRANSCRIBE_TIMEOUT_MS`: transcription timeout. Default: `1800000`.
-- `ALORBACH_ASR_PROBE_TTL_MS`: cached Local ASR runtime probe lifetime. Default: `30000`.
-- `ALORBACH_ASR_CUDA_PATHS`: additional CUDA DLL search paths, separated with the Windows path delimiter.
-- `ALORBACH_MUSIC_ANALYSIS_PYTHON`: explicit base Python executable for local music-analysis setup.
-- `ALORBACH_MUSIC_ANALYSIS_VENV`: local music-analysis virtual environment. Default: `%USERPROFILE%\.alorbach-codex-bridge\music-analysis-venv`.
-- `ALORBACH_MUSIC_ANALYSIS_SAMPLE_RATE`: decode sample rate for local music analysis. Default: `22050`.
-- `ALORBACH_MUSIC_ANALYSIS_MAX_SECTIONS`: maximum neutral section boundaries. Default: `12`; range: `2`-`24`.
-- `ALORBACH_MUSIC_ANALYSIS_TIMEOUT_MS`: local music-analysis timeout. Default: `1800000`.
-- `ALORBACH_MUSIC_ANALYSIS_PROBE_TTL_MS`: cached local music runtime probe lifetime. Default: `30000`.
-- `ALORBACH_CODEX_ENABLE_VIDEO`: set to `1` to enable the optional OpenAI Videos API route. OpenAI lists Sora 2 for shutdown on 24 Sep 2026; prefer xAI Imagine video when an xAI key is configured.
-- `ALORBACH_OPENAI_API_KEY` or `OPENAI_API_KEY`: API key for optional video generation.
-- `ALORBACH_VIDEO_POLL_TIMEOUT_MS`: optional video polling timeout. Default: `600000`.
-- `ALORBACH_VIDEO_POLL_INTERVAL_MS`: optional video polling interval. Default: `3000`.
-- `XAI_API_KEY` or `AI_MODEL_RELAY_XAI_API_KEY`: enables the Grok/xAI API chat backend, Imagine image/video (`model-relay:xai:imagine-image`, `model-relay:xai:imagine-video`), and the explicit cloud transcription model `model-relay:xai:stt`. When this key is set and no video default has been saved, video routing defaults to `model-relay:xai:imagine-video`.
-- `XAI_BASE_URL` or `AI_MODEL_RELAY_XAI_BASE_URL`: optional xAI-compatible base URL. Default: `https://api.x.ai/v1`.
-- `AI_MODEL_RELAY_XAI_MODELS`: comma-separated Grok chat model IDs exposed as `model-relay:xai:*`. Default: `grok-4.6,grok-4.5,grok-4.3,latest`.
-- `ANTHROPIC_API_KEY` or `AI_MODEL_RELAY_ANTHROPIC_API_KEY`: enables the Claude API (Anthropic) chat backend (`model-relay:anthropic:*`).
-- `ANTHROPIC_ADMIN_KEY` or `AI_MODEL_RELAY_ANTHROPIC_ADMIN_KEY`: optional Admin API key used only for month-to-date spend on the local Claude API usage card. The credit estimate is the saved dashboard balance minus Cost API spend from the start of the UTC day it was saved (daily granularity, about 5 minutes of lag, excludes Priority Tier).
-- `ANTHROPIC_BASE_URL`: optional Anthropic base URL. Default: `https://api.anthropic.com`.
-- `AI_MODEL_RELAY_ANTHROPIC_MODELS`: comma-separated Claude model IDs exposed as `model-relay:anthropic:*`. Default: `claude-opus-5-5,claude-sonnet-5-5,claude-haiku-5-5`.
-- `AI_MODEL_RELAY_ANTHROPIC_CHAT_TIMEOUT_MS`: Claude API chat timeout. Default: `600000`.
-- `AI_MODEL_RELAY_ANTHROPIC_FALLBACKS`: set to `0` to stop sending refusal fallbacks (`fallbacks: "default"`, only sent when calling api.anthropic.com directly) for Opus 5.5, Opus 5, Sonnet 5.5, and Fable 5.1.
-- `AI_MODEL_RELAY_CLI_COMMAND`: enables the generic CLI process chat backend.
-- `AI_MODEL_RELAY_CLI_ARGS`: optional arguments for the CLI process backend. The prompt is sent on stdin.
-- `AI_MODEL_RELAY_CLI_TIMEOUT_MS`: CLI process timeout. Default: `600000`.
-- `AI_MODEL_RELAY_ANTIGRAVITY_BINARY`: explicit path to the authenticated `agy` executable. If unset, the bridge looks for `agy` on PATH; it never installs or logs in to Antigravity.
-- The status page's **Providers** cards (and their **Routing** card) can persist an executable path for Codex CLI, Grok CLI, Antigravity CLI, Cursor Agent, or the generic CLI Process. **Save changes** (the sticky bar that appears while there are unsaved edits) automatically re-probes the CLI providers when any path changed; **Refresh detection** always forces a probe; if executable paths were edited it saves just those paths first, while typed API keys, routing, and other pending edits stay unsaved until **Save changes**. Neither changes Windows PATH nor requires a bridge restart. Blank fields retain the environment-variable/PATH lookup.
-- Antigravity CLI 1.1.4 exposes non-interactive `-p`/`--print`, but not JSON-output flags. The relay accepts that supported print mode and normalizes its text result locally; newer CLI builds that advertise `-o` or `--output-format` use JSON output automatically.
-- `AI_MODEL_RELAY_ANTIGRAVITY_STATE_DIR`: Antigravity CLI artifact state root. Default: `%USERPROFILE%\.gemini\antigravity-cli`.
-- `AI_MODEL_RELAY_ANTIGRAVITY_CHAT_TIMEOUT_MS`, `AI_MODEL_RELAY_ANTIGRAVITY_IMAGE_TIMEOUT_MS`, `AI_MODEL_RELAY_ANTIGRAVITY_MEDIA_TIMEOUT_MS`: Antigravity CLI timeouts. Defaults: `600000`, `1800000`, and `600000` ms.
-- `AI_MODEL_RELAY_CHAT_API_KEY`, `AI_MODEL_RELAY_CHAT_BASE_URL`, and `AI_MODEL_RELAY_CHAT_MODEL`: optional OpenAI-compatible API-key chat backend profile for Cursor-style or other provider keys.
-- `AI_MODEL_RELAY_UPSCALE_PYTHON`: base Python used by the **CUDA Upscale** page to create `upscale-venv`. Default auto-detects Python 3.10 or 3.12.
-- `AI_MODEL_RELAY_UPSCALE_TORCH_INDEX_URL`: CUDA wheel index for `torch`/`torchvision`. Default: `https://download.pytorch.org/whl/cu128`. Setup uses only this index so pip cannot pick a CPU wheel from PyPI.
-- `AI_MODEL_RELAY_SWINIR_ROOT`, `AI_MODEL_RELAY_SWINIR_MODEL_PATH`, `AI_MODEL_RELAY_SWINIR_WEIGHT_SHA256`: official SwinIR checkout, local ×2 weight path, and pinned lowercase SHA-256.
-- `AI_MODEL_RELAY_REALESRGAN_ROOT`, `AI_MODEL_RELAY_REALESRGAN_MODEL_PATH`, `AI_MODEL_RELAY_REALESRGAN_WEIGHT_SHA256`: official Real-ESRGAN checkout, local ×2plus weight path, and pinned lowercase SHA-256.
-- `AI_MODEL_RELAY_UPSCALE_<INSTALL_KEY>_ROOT`, `AI_MODEL_RELAY_UPSCALE_<INSTALL_KEY>_MODEL_PATH`, `AI_MODEL_RELAY_UPSCALE_<INSTALL_KEY>_WEIGHT_SHA256`: optional explicit model-record overrides for DRCT/HAT-S/APISR (for example `AI_MODEL_RELAY_UPSCALE_HAT_S_X4_MODEL_PATH`). DRCT ×2 deliberately requires an operator-verified path plus SHA-256.
-- `AI_MODEL_RELAY_APISR_VENV`: isolated APISR runtime. APISR is experimental, GPL-3.0-only, and academic-only; it is not a commercial-default recommendation.
-- `AI_MODEL_RELAY_UPSCALE_TILE`: CUDA tile edge for the local ×2 run. Default: `512`.
-- `AI_MODEL_RELAY_UPSCALE_PRECISION`: `fp16` (default) or `fp32`; this remains CUDA-only.
-- `AI_MODEL_RELAY_UPSCALE_TIMEOUT_MS`: bounded local upscale timeout. Default: `1800000` (30 minutes).
-
-If Windows resolves `codex` to a problematic `.cmd` shim, set `ALORBACH_CODEX_BINARY` to the real executable path before starting the bridge.
-
-## Build Windows Artifacts
-
-```powershell
-npm ci
-npm run dist:win
-```
-
-Build output is written to `dist/` and includes build-numbered artifacts:
-
-```text
-AI-Model-Relay-1.0.1-build.42-win-x64.exe
-AI-Model-Relay-1.0.1-build.42-win-x64.zip
-```
-
-Local builds increment `.build/build-number`. GitHub Actions builds use `GITHUB_RUN_NUMBER`.
-
-## Release
-
-Push a version tag to build and publish release assets:
-
-```powershell
-git tag v1.0.1
-git push origin v1.0.1
-```
-
-The release workflow runs icon generation, JavaScript syntax checks, tests, and Windows packaging before uploading the installer and portable ZIP to a GitHub Release. It also generates the release description automatically with download names, validation context, and an embedded changelog from GitHub's generated change entries for the tag. If the workflow is rerun for the same tag, older installer and ZIP assets for that tag are removed so only the latest build remains attached.
+The project started as **Codex Local Bridge**. Existing `/v1` routes, the `codex-local:*` model IDs, the default URL, and the state folder still work. See [Naming and Compatibility](docs/operations.md#naming-and-compatibility).
 
 ## License
 

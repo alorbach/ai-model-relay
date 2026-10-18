@@ -48,10 +48,16 @@ The **Providers** page shows one expandable card for every supported local/API d
 - **Grok CLI**: isolated Gateway chat (`--prompt-file` / `--prompt-json`, no shell/subagents/web search) plus Grok Imagine image generation and experimental image-reference video generation only when `%USERPROFILE%\.grok\skills\imagine\SKILL.md` or `%USERPROFILE%\.grok\bundled\skills\imagine\SKILL.md` declares the matching local tools. Imagine allowlists one tool per request.
 - **Cursor Agent**: Gateway chat through `cursor-agent --print --output-format json --mode=ask --trust` in a temp workspace. The transcript is in `prompt.txt`, not on argv.
 - **Antigravity CLI**: chat, images (`IMAGE_PATH:` import with state-root fallback), and media analysis through authenticated `agy`.
-- **Local ASR**: local transcription; its detailed runtime/model editor remains below routing.
-- **OpenAI Videos**, **Grok/xAI API**, and **API Key Chat**: separately configured API drivers. xAI Imagine image/video use the same `XAI_API_KEY` as chat and STT. Chat HTTP bodies include resolved `max_tokens` / `max_completion_tokens`. OpenAI Sora 2 remains available until the Videos API shutdown on 24 Sep 2026.
+- **CLI Process**: any command-line tool as a chat backend; the prompt is sent on stdin.
+- **Claude API (Anthropic)**: chat with optional images through an API key (`model-relay:anthropic:*`). The **Overview** page shows the usage panel (credits estimate, month-to-date spend, rate limits).
+- **Grok / xAI API**: chat, Imagine image, Imagine video, and Speech-to-Text with one `XAI_API_KEY`.
+- **API Key Chat**: any OpenAI-compatible `/chat/completions` endpoint, configured with base URL, key, and model.
+- **OpenAI Videos**: opt-in Sora 2 video driver. OpenAI scheduled Sora 2 and the Videos API for removal on 24 Sep 2026; prefer xAI Imagine video.
+- **Local ASR**, **Local Image**, **Local CUDA Upscale**, **Local Music Analysis**: engines on this computer, each with its own sidebar page for setup and settings.
 
-The six selectors route only `/v1/relay/jobs/*`: chat, images, videos, transcription, media analysis, and music analysis. Explicit `payload.model`, `payload.provider`, or `payload.backend` always overrides the saved default. Legacy `/v1/chat`, `/v1/images`, `/v1/transcribe`, `/v1/videos`, and `/v1/media/analyze` remain unchanged for provider routing.
+HTTP chat bodies (xAI, API Key Chat) include the resolved `max_tokens` / `max_completion_tokens`. Every environment variable is listed in [Configuration](configuration.md).
+
+The selectors in the **Routing** card route only `/v1/relay/jobs/*`: chat, images, videos, transcription, media analysis, and music analysis. Explicit `payload.model`, `payload.provider`, or `payload.backend` always overrides the saved default. Legacy `/v1/chat`, `/v1/images`, `/v1/transcribe`, `/v1/videos`, and `/v1/media/analyze` remain unchanged for provider routing.
 
 The status page settings are the primary operator control. Use **Providers** (cards with CLI paths, API keys, models, extra CLI options, plus the **Routing** card for default models and token defaults), **Runtime** (concurrency and timeouts), **CUDA Upscale**, **Music Analysis**, **Local Image**, and **Local ASR** in the sidebar. A non-empty saved value wins; leave a field blank to keep the matching environment variable or code default. API keys are stored in the local state file, returned only as `configured` plus a 4-character suffix, and can be cleared so environment variables apply again: a saved key shows "Saved key ends with ..." with **Replace** and **Clear** buttons, and the key itself is never sent back to the page. The listen port (`ALORBACH_CODEX_BRIDGE_PORT`) and state directory remain process-start environment settings and are shown read-only on the Runtime page.
 
@@ -228,6 +234,22 @@ npm start
 ```
 
 If Local ASR setup is slow, check the job output in `/status`. The large downloads are usually Python wheels such as `ctranslate2`, `onnxruntime`, `av`, Qwen/vLLM dependencies, CUDA runtime packages, or the selected ASR model when model downloads are enabled.
+
+## Local Music Analysis
+
+The **Music Analysis** page sets up a separate local pipeline for acoustic album metrics. Its setup button creates `<state dir>\music-analysis-venv` and installs `numpy`, `scipy`, `soundfile`, `librosa`, and `pyloudnorm` only when you ask for it (Python 3.10+ and ffmpeg/ffprobe on `PATH` are required). It returns tempo and beat grid, key estimate, loudness, spectral descriptors, and neutral numbered sections. It does not separate stems, recognize chords, extract melody or MIDI, infer lyrics, or send audio to a cloud provider.
+
+## Local Image
+
+The **Local Image** page installs and configures local GPU image models (Qwen-Image 2.1 and 2512, FLUX.2-dev NF4, NVIDIA Sana 1.6B, Ideogram 4.0 GGUF) into `<state dir>\qwen-image-venv`. Models are downloaded only by the explicit install action; image jobs (`model-relay:local-image:*`) never download anything and never send pixels to a cloud provider.
+
+## Local CUDA Upscale
+
+The **CUDA Upscale** page shows one card per model: SwinIR ×2, Real-ESRGAN ×2plus, HAT-S ×2/×4, DRCT ×2/×4, and APISR ×2. Setup clones the pinned official checkout, downloads the pinned weight where one is published, installs CUDA PyTorch into the BasicSR `upscale-venv` or the isolated APISR runtime, and verifies the weight SHA-256. If setup fails, pip and Python output is shown below the model cards. DRCT ×2 stays unavailable until an operator supplies a separately verified checkpoint, because no official ×2 release exists. APISR needs an explicit GPL-3.0 / academic-only acknowledgement.
+
+Jobs never download a model, never send pixels to a cloud provider, and never fall back to CPU. Only one upscale job runs per GPU, and free VRAM is reported before it starts. The Relay returns the model's native output only: ×2 requires `scale: 2` / `retain_native_x2`, ×4 requires `scale: 4` / `retain_native_x4`, with exact crop-derived dimensions. It never downsamples or synthesizes ×2 from ×4 (provenance reports `downsampler: none`). Native ×4 PNG output is capped at 256 MiB.
+
+BuchWerk uses this for its local KDP upscale: the paired BuchWerk page sends a signed binary image to `POST /v1/relay/jobs/upscale` after the user reviewed and approved a KDP crop (**KDP first + local CUDA ×2**). The result is a new candidate asset; the original is never modified.
 
 ## Common Failures
 
