@@ -3,7 +3,7 @@
 /*
  * CUDA-only print-upscale driver. Jobs never download a model or fall back to
  * CPU. The status-page Setup action is the explicit operator install: it
- * clones the official checkout, fetches the ×2 weight, and records the
+ * clones the official checkout, fetches the selected weight, and records the
  * SHA-256 for later job-time verification.
  */
 const crypto = require('crypto');
@@ -38,6 +38,7 @@ const PNG_OUTPUT = ['image/png'];
 const MODELS = {
 	'model-relay:local-upscale:swinir-classical-x2': { id: 'model-relay:local-upscale:swinir-classical-x2', engine: 'swinir', install_key: 'swinir', label: 'SwinIR classical ×2', native_scale: 2, output_policy: 'retain_native_x2', model_class: 'classical', runtime_group: 'basicsr-cuda', preferred_tile: 512, precision: ['fp16', 'fp32'], license: { spdx: 'Apache-2.0', commercial_use: true } },
 	'model-relay:local-upscale:realesrgan-x2plus': { id: 'model-relay:local-upscale:realesrgan-x2plus', engine: 'realesrgan', install_key: 'realesrgan', label: 'Real-ESRGAN ×2plus (restoration)', native_scale: 2, output_policy: 'retain_native_x2', model_class: 'real_world', runtime_group: 'basicsr-cuda', preferred_tile: 512, precision: ['fp16', 'fp32'], license: { spdx: 'BSD-3-Clause', commercial_use: true } },
+	'model-relay:local-upscale:realesrgan-x4plus': { id: 'model-relay:local-upscale:realesrgan-x4plus', engine: 'realesrgan', install_key: 'realesrgan_x4', label: 'Real-ESRGAN ×4plus (restoration)', native_scale: 4, output_policy: 'retain_native_x4', model_class: 'real_world', runtime_group: 'basicsr-cuda', preferred_tile: 256, precision: ['fp16', 'fp32'], license: { spdx: 'BSD-3-Clause', commercial_use: true }, max_output_bytes: MAX_4X_OUTPUT_BYTES, default_for_scale: true },
 	'model-relay:local-upscale:drct-classical-x2': { id: 'model-relay:local-upscale:drct-classical-x2', engine: 'drct', install_key: 'drct_x2', label: 'DRCT classical ×2', native_scale: 2, output_policy: 'retain_native_x2', model_class: 'classical', runtime_group: 'basicsr-cuda', preferred_tile: 384, precision: ['fp16', 'fp32'], license: { spdx: 'MIT', commercial_use: true }, operator_weight_required: true },
 	'model-relay:local-upscale:drct-classical-x4': { id: 'model-relay:local-upscale:drct-classical-x4', engine: 'drct', install_key: 'drct_x4', label: 'DRCT classical ×4', native_scale: 4, output_policy: 'retain_native_x4', model_class: 'classical', runtime_group: 'basicsr-cuda', preferred_tile: 256, precision: ['fp16', 'fp32'], license: { spdx: 'MIT', commercial_use: true }, max_output_bytes: MAX_4X_OUTPUT_BYTES },
 	'model-relay:local-upscale:hat-s-classical-x2': { id: 'model-relay:local-upscale:hat-s-classical-x2', engine: 'hat-s', install_key: 'hat_s_x2', label: 'HAT-S classical ×2', native_scale: 2, output_policy: 'retain_native_x2', model_class: 'classical', runtime_group: 'basicsr-cuda', preferred_tile: 384, precision: ['fp16', 'fp32'], license: { spdx: 'Apache-2.0', commercial_use: true } },
@@ -77,6 +78,17 @@ const INSTALL = {
 		weight_url: 'https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.1/RealESRGAN_x2plus.pth',
 		weight_bytes: 67061725,
 		weight_sha256: '49fafd45f8fd7aa8d31ab2a22d14d91b536c34494a5cfe31eb5d89c2fa266abb',
+		packages: ['numpy', 'basicsr', 'facexlib', 'gfpgan', 'opencv-python-headless', 'pillow', 'tqdm'],
+	},
+	realesrgan_x4: {
+		engine: 'realesrgan',
+		repo: 'https://github.com/xinntao/Real-ESRGAN.git',
+		commit: 'a4abfb2979a7bbff3f69f58f58ae324608821e27',
+		script: 'inference_realesrgan.py',
+		weight_name: 'RealESRGAN_x4plus.pth',
+		weight_url: 'https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth',
+		weight_bytes: 67040989,
+		weight_sha256: '4fa0d38905f75ac06eb49a7951b426670021be3018265fd191d2125df9d682f1',
 		packages: ['numpy', 'basicsr', 'facexlib', 'gfpgan', 'opencv-python-headless', 'pillow', 'tqdm'],
 	},
 	drct_x2: {
@@ -172,7 +184,10 @@ function saveSettings(nextSettings) {
 function resolveModelFiles(model, env = process.env) {
 	const saved = env === process.env ? settings() : {};
 	const engine = typeof model === 'string' ? model : model.engine;
-	const legacy = engine === 'swinir' ? 'swinir' : (engine === 'realesrgan' ? 'realesrgan' : '');
+	// Only the original profiles inherit pre-profile settings and environment
+	// overrides. In particular, an x2 checkpoint must never configure x4.
+	const installKey = typeof model === 'string' ? model : model.install_key;
+	const legacy = installKey === 'swinir' ? 'swinir' : (installKey === 'realesrgan' ? 'realesrgan' : '');
 	const prefix = legacy === 'swinir' ? 'AI_MODEL_RELAY_SWINIR' : (legacy === 'realesrgan' ? 'AI_MODEL_RELAY_REALESRGAN' : '');
 	const record = model && typeof model === 'object' ? (saved.model_records && saved.model_records[model.id] || {}) : {};
 	const envKey = model && typeof model === 'object' ? String(model.install_key || '').toUpperCase() : '';
@@ -187,7 +202,7 @@ function modelConfig(id, env = process.env, manifests = INSTALL) {
 	const model = MODELS[id];
 	if (!model) return null;
 	const files = resolveModelFiles(model, env);
-	const manifest = manifests[model.install_key] || manifests[model.engine] || {};
+	const manifest = manifests[model.install_key] || {};
 	const actualChecksum = files.model_path && fs.existsSync(files.model_path) ? sha256File(files.model_path) : '';
 	const expectedChecksum = cleanPath(manifest.weight_sha256 || (model.operator_weight_required ? files.expected_checksum : '')).toLowerCase();
 	const expectedBytes = Number(manifest.weight_bytes || 0);
@@ -250,6 +265,7 @@ function publicUpscaleCapabilities(model, state) {
 	return {
 		contract_version: UPSCALE_CAPABILITIES_VERSION,
 		native_scale: model.native_scale,
+		default_for_scale: !!model.default_for_scale,
 		output_policy: model.output_policy,
 		input_formats: IMAGE_MIME_TYPES,
 		output_formats: PNG_OUTPUT,
@@ -432,7 +448,7 @@ async function setup(options = {}) {
 	const modelId = String(options.model || '').trim() || Object.keys(MODELS).find((id) => MODELS[id].install_key === legacyModel || MODELS[id].engine === legacyModel) || 'model-relay:local-upscale:swinir-classical-x2';
 	const profile = MODELS[modelId];
 	if (!profile) return { success: false, category: 'validation', code: 'local_upscale_model_invalid', message: 'Choose a supported local CUDA upscale model on the CUDA Upscale page of the status page.' };
-	const spec = manifests[profile.install_key] || manifests[profile.engine];
+	const spec = manifests[profile.install_key];
 	if (!spec) return { success: false, category: 'validation', code: 'local_upscale_manifest_missing', message: `The ${profile.label} installation manifest is unavailable.` };
 	if (profile.installation_acknowledgement_required && options.accept_restricted !== true) return { success: false, category: 'validation', code: 'local_upscale_restriction_acknowledgement_required', message: 'APISR is experimental, GPL-3.0-only, and academic-only. Confirm that restriction before installation.' };
 	const logChunks = [];
@@ -478,9 +494,10 @@ async function setup(options = {}) {
 		const packages = await run(venvPython, ['-m', 'pip', 'install', '--disable-pip-version-check', '--progress-bar', 'off', '--constraint', torchConstraintFile, ...spec.packages], { timeout: SETUP_TIMEOUT_MS, onOutput: emit });
 		if (packages.error || packages.status !== 0) return setupFailure('local_upscale_packages_failed', `Could not install ${spec.engine} Python packages.`, packages, { python: venvPython, python_version: pythonVersion, constraint: torchConstraintFile });
 	}
-	const legacyKey = profile.engine === 'swinir' ? 'swinir' : (profile.engine === 'realesrgan' ? 'realesrgan' : '');
+	const legacyKey = profile.install_key === 'swinir' ? 'swinir' : (profile.install_key === 'realesrgan' ? 'realesrgan' : '');
+	const envPrefix = `AI_MODEL_RELAY_UPSCALE_${profile.install_key.toUpperCase()}`;
 	const savedRecord = config.model_records && config.model_records[profile.id] || {};
-	const root = (legacyKey && config[`${legacyKey}_root`]) || savedRecord.root || path.join(security.stateDir, 'upscale', profile.install_key);
+	const root = (legacyKey && config[`${legacyKey}_root`]) || cleanPath(process.env[`${envPrefix}_ROOT`]) || savedRecord.root || path.join(security.stateDir, 'upscale', profile.install_key);
 	const pinned = await ensurePinnedCheckout(run, git, root, spec, emit);
 	if (pinned) return pinned;
 	// Real-ESRGAN's checkout generates realesrgan/version.py during package
@@ -496,7 +513,7 @@ async function setup(options = {}) {
 		const saved = persist({ ...config, model_records: { ...(config.model_records || {}), [profile.id]: { root, model_path: cleanPath(savedRecord.model_path), weight_sha256: cleanPath(savedRecord.weight_sha256).toLowerCase() } } });
 		return { success: false, category: 'configuration', code: 'local_upscale_operator_weight_required', message: 'DRCT ×2 runtime and checkout are pinned, but no official ×2 checkpoint is published. Provide an operator-verified local weight and SHA-256 through the model-record environment variables before jobs can run.', settings: saved, details: { python: venvPython, log: collectedLog() } };
 	}
-	const modelPath = (legacyKey && config[`${legacyKey}_model_path`]) || savedRecord.model_path || path.join(security.stateDir, 'upscale', 'weights', spec.weight_name);
+	const modelPath = (legacyKey && config[`${legacyKey}_model_path`]) || cleanPath(process.env[`${envPrefix}_MODEL_PATH`]) || savedRecord.model_path || path.join(security.stateDir, 'upscale', 'weights', spec.weight_name);
 	const expected = String(spec.weight_sha256 || '').toLowerCase();
 	const expectedBytes = Number(spec.weight_bytes || 0);
 	const existingChecksum = fs.existsSync(modelPath) ? sha256File(modelPath) : '';
@@ -509,7 +526,7 @@ async function setup(options = {}) {
 	const checksum = sha256File(modelPath);
 	const bytes = fs.existsSync(modelPath) ? fs.statSync(modelPath).size : 0;
 	if (!/^[a-f0-9]{64}$/.test(checksum)) return setupFailure('local_upscale_weight_invalid', 'The downloaded model weight could not be checksummed.');
-	if (!expected || checksum !== expected || (expectedBytes && bytes !== expectedBytes)) return setupFailure('local_upscale_checksum_mismatch', 'The downloaded ×2 weight did not match the pinned SHA-256 and byte size.');
+	if (!expected || checksum !== expected || (expectedBytes && bytes !== expectedBytes)) return setupFailure('local_upscale_checksum_mismatch', 'The downloaded model weight did not match the pinned SHA-256 and byte size.');
 	const saved = persist({ ...config,
 		...(legacyKey ? { [`${legacyKey}_root`]: root, [`${legacyKey}_model_path`]: modelPath, [`${legacyKey}_weight_sha256`]: checksum } : {}),
 		model_records: { ...(config.model_records || {}), [profile.id]: { root, model_path: modelPath, weight_sha256: checksum } },

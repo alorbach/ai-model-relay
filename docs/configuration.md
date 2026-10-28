@@ -86,14 +86,18 @@ API keys saved on the status page are stored in the local state file. The settin
 | --- | --- | --- |
 | `AI_MODEL_RELAY_UPSCALE_PYTHON` | Base Python for `upscale-venv`. | Python 3.10 or 3.12 auto-detect |
 | `AI_MODEL_RELAY_UPSCALE_TORCH_INDEX_URL` | CUDA wheel index for `torch` / `torchvision` (only this index is used). | `https://download.pytorch.org/whl/cu128` |
-| `AI_MODEL_RELAY_SWINIR_ROOT`, `..._MODEL_PATH`, `..._WEIGHT_SHA256` | SwinIR checkout, ×2 weight, pinned SHA-256. | pinned official release |
-| `AI_MODEL_RELAY_REALESRGAN_ROOT`, `..._MODEL_PATH`, `..._WEIGHT_SHA256` | Real-ESRGAN checkout, ×2plus weight, pinned SHA-256. | pinned official release |
-| `AI_MODEL_RELAY_UPSCALE_<INSTALL_KEY>_ROOT`, `..._MODEL_PATH`, `..._WEIGHT_SHA256` | Overrides for DRCT, HAT-S, APISR, for example `AI_MODEL_RELAY_UPSCALE_HAT_S_X4_MODEL_PATH`. DRCT ×2 requires an operator-verified path and SHA-256. | pinned where available |
+| `AI_MODEL_RELAY_SWINIR_ROOT`, `..._MODEL_PATH` | SwinIR checkout and ×2 weight paths. | pinned official release |
+| `AI_MODEL_RELAY_REALESRGAN_ROOT`, `..._MODEL_PATH` | Real-ESRGAN ×2plus checkout and weight paths. | pinned official release |
+| `AI_MODEL_RELAY_UPSCALE_REALESRGAN_X4_ROOT`, `..._MODEL_PATH` | Separate Real-ESRGAN ×4plus checkout and weight paths; ×2 overrides do not apply to ×4. | checkout: `<state dir>\upscale\realesrgan_x4`; pinned official weight |
+| `AI_MODEL_RELAY_UPSCALE_<INSTALL_KEY>_ROOT`, `..._MODEL_PATH` | Checkout and weight path overrides for models such as DRCT, HAT-S, and APISR, for example `AI_MODEL_RELAY_UPSCALE_HAT_S_X4_MODEL_PATH`. | pinned where available |
+| `AI_MODEL_RELAY_UPSCALE_DRCT_X2_WEIGHT_SHA256` | SHA-256 of the operator-verified DRCT ×2 weight specified by `AI_MODEL_RELAY_UPSCALE_DRCT_X2_MODEL_PATH`. | required for DRCT ×2 |
 | `AI_MODEL_RELAY_UPSCALE_VENV` | BasicSR runtime for SwinIR, Real-ESRGAN, HAT-S, DRCT. | `<state dir>\upscale-venv` |
 | `AI_MODEL_RELAY_APISR_VENV` | Isolated APISR runtime. APISR is GPL-3.0-only and academic-only. | `<state dir>\upscale-apisr-venv` |
 | `AI_MODEL_RELAY_UPSCALE_TILE` | CUDA tile edge. | `512` |
 | `AI_MODEL_RELAY_UPSCALE_PRECISION` | `fp16` or `fp32` (CUDA only). | `fp16` |
 | `AI_MODEL_RELAY_UPSCALE_TIMEOUT_MS` | Upscale job timeout. | `1800000` |
+
+For models with an official pinned weight, including SwinIR and both Real-ESRGAN variants, the manifest's SHA-256 and byte size are authoritative even when a custom weight path is configured. A `..._WEIGHT_SHA256` environment value does not replace that pin. DRCT ×2 instead requires an operator-verified weight path and SHA-256 because it has no pinned official ×2 weight.
 
 ## Local Music Analysis
 

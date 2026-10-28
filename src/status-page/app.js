@@ -4150,13 +4150,14 @@
 				'<label class="field"><span>Tile size</span><input id="upscaleTile" type="number" min="0" step="32" inputmode="numeric" value="' + escapeHtml(currentUpscaleSettings.tile === undefined || currentUpscaleSettings.tile === null ? 0 : currentUpscaleSettings.tile) + '" placeholder="0"><small class="muted">0 uses the model recommended tile.</small></label>',
 				'<label class="field"><span>Precision</span><select id="upscalePrecision"><option value="fp16"' + (currentUpscaleSettings.precision === 'fp32' ? '' : ' selected') + '>fp16</option><option value="fp32"' + (currentUpscaleSettings.precision === 'fp32' ? ' selected' : '') + '>fp32</option></select></label>',
 			].join('');
-			fields.upscaleModelStates.textContent = 'Models: ' + (Array.isArray(models) && models.length ? models.map((model) => String(model.label || model.id || 'model') + ' — ' + String(model.state || 'not checked')).join(' · ') : 'not checked');
+			fields.upscaleModelStates.textContent = 'Models: ' + (Array.isArray(models) && models.length ? models.map((model) => String(model.label || model.id || 'model') + ((model.upscale_capabilities || {}).default_for_scale ? ' (recommended for ×' + String(model.upscale_capabilities.native_scale || '?') + ')' : '') + ' — ' + String(model.state || 'not checked')).join(' · ') : 'not checked');
 			fields.upscaleInstallActions.innerHTML = (Array.isArray(models) ? models : []).map((model) => {
 				const caps = model.upscale_capabilities || {};
+				const recommendation = caps.default_for_scale ? ' <small class="muted">Recommended for ×' + escapeHtml(String(caps.native_scale || '?')) + '</small>' : '';
 				const restriction = caps.academic_only ? '<small class="muted">Experimental · GPL-3.0-only · academic-only</small>' : '<small class="muted">' + escapeHtml(String(caps.model_class || 'local')) + ' · native ×' + escapeHtml(String(caps.native_scale || '?')) + '</small>';
 				const acknowledgement = caps.installation_acknowledgement_required ? '<label class="field"><span><input type="checkbox" data-upscale-restricted="' + escapeHtml(String(model.id)) + '"> I acknowledge the APISR academic-only and GPL-3.0 restriction</span></label>' : '';
 				const policy = caps.output_policy ? '<small class="muted">Output: ' + escapeHtml(String(caps.output_policy)) + ' · tile ' + escapeHtml(String(caps.tile && caps.tile.recommended || '?')) + ' · ' + escapeHtml(String((caps.precision || []).join('/')) || 'fp16') + '</small>' : '';
-				return '<div class="field"><strong>' + escapeHtml(String(model.label || model.id)) + '</strong><br>' + restriction + '<br>' + policy + acknowledgement + '<button type="button" data-upscale-install="' + escapeHtml(String(model.id)) + '"' + (model.state === 'installed' ? ' disabled' : '') + '>Install ' + escapeHtml(String(model.label || 'model')) + '</button></div>';
+				return '<div class="field"><strong>' + escapeHtml(String(model.label || model.id)) + '</strong>' + recommendation + '<br>' + restriction + '<br>' + policy + acknowledgement + '<button type="button" data-upscale-install="' + escapeHtml(String(model.id)) + '"' + (model.state === 'installed' ? ' disabled' : '') + '>Install ' + escapeHtml(String(model.label || 'model')) + '</button></div>';
 			}).join('') || '<span class="muted">No local upscale models were reported.</span>';
 		}
 

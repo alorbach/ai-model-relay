@@ -5,6 +5,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { spawnSync } = require('child_process');
 const { CHECKOUT_MARKER, INSTALL, MODELS, createLocalUpscaleDriver, modelConfig, nativeContractValid, runnerPath } = require('../src/local-upscale');
 
 (async () => {
@@ -67,7 +68,32 @@ const { CHECKOUT_MARKER, INSTALL, MODELS, createLocalUpscaleDriver, modelConfig,
 		assert.strictEqual(valid.manifest_valid, true);
 		assert.strictEqual(valid.state, 'installed');
 		assert.strictEqual(invalid.state, 'not_installed');
-		assert.strictEqual(Object.keys(MODELS).length, 7);
+		assert.strictEqual(Object.keys(MODELS).length, 8);
+		const realesrganX4Id = 'model-relay:local-upscale:realesrgan-x4plus';
+		const realesrganX2Id = 'model-relay:local-upscale:realesrgan-x2plus';
+		const realesrganX4 = MODELS[realesrganX4Id];
+		assert.strictEqual(realesrganX4.native_scale, 4);
+		assert.strictEqual(realesrganX4.output_policy, 'retain_native_x4');
+		assert.strictEqual(realesrganX4.max_output_bytes, 256 * 1024 * 1024);
+		assert.strictEqual(INSTALL.realesrgan.weight_name, 'RealESRGAN_x2plus.pth');
+		assert.strictEqual(INSTALL.realesrgan_x4.weight_name, 'RealESRGAN_x4plus.pth');
+		const x2Weight = path.join(directory, 'RealESRGAN_x2plus.pth');
+		const x4Weight = path.join(directory, 'RealESRGAN_x4plus.pth');
+		fs.writeFileSync(x2Weight, 'test-x2-weight');
+		fs.writeFileSync(x4Weight, 'test-x4-weight');
+		const esrganManifest = (key, file) => ({ ...INSTALL[key], weight_sha256: crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex'), weight_bytes: fs.statSync(file).size });
+		const esrganManifests = { realesrgan: esrganManifest('realesrgan', x2Weight), realesrgan_x4: esrganManifest('realesrgan_x4', x4Weight) };
+		const esrganRoot = path.join(directory, 'esrgan');
+		fs.mkdirSync(esrganRoot);
+		fs.writeFileSync(path.join(esrganRoot, CHECKOUT_MARKER), INSTALL.realesrgan.commit);
+		const esrganEnv = { AI_MODEL_RELAY_REALESRGAN_MODEL_PATH: x2Weight, AI_MODEL_RELAY_REALESRGAN_ROOT: esrganRoot };
+		assert.strictEqual(modelConfig(realesrganX2Id, esrganEnv, esrganManifests).state, 'installed');
+		assert.strictEqual(modelConfig(realesrganX4Id, esrganEnv, esrganManifests).state, 'not_installed', 'x4 must never reuse the legacy x2 model path');
+		Object.assign(esrganEnv, { AI_MODEL_RELAY_UPSCALE_REALESRGAN_X4_MODEL_PATH: x4Weight, AI_MODEL_RELAY_UPSCALE_REALESRGAN_X4_ROOT: esrganRoot });
+		assert.strictEqual(modelConfig(realesrganX4Id, esrganEnv, esrganManifests).state, 'installed');
+		assert.strictEqual(modelConfig(realesrganX2Id, esrganEnv, esrganManifests).model_path, x2Weight);
+		assert.strictEqual(modelConfig(realesrganX4Id, { ...esrganEnv, AI_MODEL_RELAY_UPSCALE_REALESRGAN_X4_MODEL_PATH: x2Weight }, esrganManifests).state, 'checksum_mismatch', 'x2 weights cannot satisfy x4 even with the same checkout');
+		assert.strictEqual(modelConfig(realesrganX2Id, { ...esrganEnv, AI_MODEL_RELAY_REALESRGAN_MODEL_PATH: '' }, esrganManifests).state, 'not_installed', 'installing x4 must not make x2 installed');
 		const x4 = MODELS['model-relay:local-upscale:drct-classical-x4'];
 		const apisr = MODELS['model-relay:local-upscale:apisr-anime-x2'];
 		assert.strictEqual(x4.native_scale, 4);
@@ -107,6 +133,10 @@ const { CHECKOUT_MARKER, INSTALL, MODELS, createLocalUpscaleDriver, modelConfig,
 		assert.strictEqual(nativeContractValid(x4, { ...native4x, scale: 2 }), false, 'x4 must reject a declared x2 scale');
 		assert.strictEqual(nativeContractValid(x4, { ...native4x, output_policy: 'retain_native_x2' }), false, 'x4 must reject x2 policy/downsample requests');
 		assert.strictEqual(nativeContractValid(x4, { ...native4x, output_print: { width: 640, height: 360 } }), false, 'x4 must reject non-native output dimensions');
+		assert.strictEqual(nativeContractValid(realesrganX4, native4x), true);
+		assert.strictEqual(nativeContractValid(realesrganX4, { ...native4x, scale: 2 }), false);
+		assert.strictEqual(nativeContractValid(realesrganX4, { ...native4x, output_policy: 'retain_native_x2' }), false);
+		assert.strictEqual(nativeContractValid(realesrganX4, { ...native4x, output_print: { width: 640, height: 360 } }), false);
 
 		const driver = createLocalUpscaleDriver({ env, manifests: testSwinirManifest, runnerPath: __filename });
 		const capability = driver.capabilities();
@@ -121,6 +151,10 @@ const { CHECKOUT_MARKER, INSTALL, MODELS, createLocalUpscaleDriver, modelConfig,
 		assert.strictEqual(publicX4.upscale_capabilities.contract_version, 1);
 		assert.strictEqual(publicX4.upscale_capabilities.native_scale, 4);
 		assert.strictEqual(publicX4.upscale_capabilities.output_policy, 'retain_native_x4');
+		const recommendedX4 = capability.models.filter((model) => model.upscale_capabilities.native_scale === 4 && model.upscale_capabilities.default_for_scale);
+		assert.deepStrictEqual(recommendedX4.map((model) => model.id), [realesrganX4Id]);
+		assert.strictEqual(recommendedX4[0].upscale_capabilities.output_max_bytes, 256 * 1024 * 1024);
+		assert.strictEqual(capability.models.find((model) => model.id === realesrganX2Id).upscale_capabilities.native_scale, 2);
 		assert.ok(!JSON.stringify(publicX4).includes('weight_sha256'));
 		assert.ok(!JSON.stringify(capability).includes(weight));
 		const runner = fs.readFileSync(path.join(__dirname, '..', 'src', 'upscale-runner.py'), 'utf8');
@@ -173,6 +207,30 @@ const { CHECKOUT_MARKER, INSTALL, MODELS, createLocalUpscaleDriver, modelConfig,
 		assert.strictEqual(fs.readFileSync(path.join(checkout, CHECKOUT_MARKER), 'utf8').trim(), INSTALL.swinir.commit);
 		assert.ok(fs.existsSync(path.join(venv, 'cuda-torch-constraint.txt')));
 		assert.ok(packageInstalls.some((args) => args.includes('--constraint') && args.includes('timm') && !args.includes('--no-deps')));
+		const x4Checkout = path.join(directory, 'setup-realesrgan-x4');
+		const x4InstallPath = path.join(directory, 'setup-RealESRGAN_x4plus.pth');
+		let x4Saved;
+		const x4Setup = await require('../src/local-upscale').setup({
+			model: realesrganX4Id,
+			install: esrganManifests,
+			pythonCommand: process.execPath,
+			gitCommand: 'git',
+			settings: { venv_path: venv, realesrgan_root: esrganRoot, realesrgan_model_path: x2Weight, model_records: { [realesrganX4Id]: { root: x4Checkout, model_path: x4InstallPath }, [realesrganX2Id]: { root: esrganRoot, model_path: x2Weight } } },
+			runCommand: mockSetupCommands({ checkout: x4Checkout, commit: INSTALL.realesrgan_x4.commit, script: 'inference_realesrgan.py' }),
+			downloadFile: async (url, dest) => {
+				assert.strictEqual(url, INSTALL.realesrgan_x4.weight_url);
+				assert.strictEqual(dest, x4InstallPath);
+				fs.writeFileSync(dest, fs.readFileSync(x4Weight));
+			},
+			saveSettings: (next) => { x4Saved = next; return next; },
+		});
+		assert.strictEqual(x4Setup.success, true);
+		assert.strictEqual(x4Setup.model.id, realesrganX4Id);
+		assert.strictEqual(x4Saved.realesrgan_model_path, x2Weight, 'x4 install must preserve legacy x2 configuration');
+		assert.strictEqual(x4Saved.model_records[realesrganX2Id].model_path, x2Weight);
+		assert.strictEqual(x4Saved.model_records[realesrganX4Id].model_path, x4InstallPath);
+		assert.strictEqual(fs.readFileSync(x2Weight, 'utf8'), 'test-x2-weight');
+		assert.strictEqual(fs.readFileSync(path.join(x4Checkout, CHECKOUT_MARKER), 'utf8').trim(), INSTALL.realesrgan_x4.commit);
 
 		const failVenv = path.join(directory, 'fail-venv');
 		const failed = await require('../src/local-upscale').setup({
@@ -265,6 +323,23 @@ const { CHECKOUT_MARKER, INSTALL, MODELS, createLocalUpscaleDriver, modelConfig,
 		fs.rmSync(directory, { recursive: true, force: true });
 	}
 
+	// Runner tests use only the Python standard library; no GPU, torch or Pillow is needed.
+	const pythonCommands = process.env.AI_MODEL_RELAY_TEST_PYTHON
+		? [process.env.AI_MODEL_RELAY_TEST_PYTHON]
+		: (process.platform === 'win32' ? ['python', 'py'] : ['python3', 'python']);
+	let runnerTestsExecuted = false;
+	for (const python of pythonCommands) {
+		const result = spawnSync(python, ['-B', path.join(__dirname, 'upscale-runner.test.py')], { encoding: 'utf8', timeout: 30000, windowsHide: true });
+		if (result.error && result.error.code === 'ENOENT') continue;
+		assert.ifError(result.error);
+		assert.strictEqual(result.status, 0, `Python upscale runner tests failed: ${result.stdout}\n${result.stderr}`);
+		runnerTestsExecuted = true;
+		break;
+	}
+	if (!runnerTestsExecuted) {
+		assert.ok(!process.env.CI && !process.env.AI_MODEL_RELAY_TEST_PYTHON, 'Python is required for upscale runner tests in CI; set AI_MODEL_RELAY_TEST_PYTHON to its executable');
+		console.log('SKIP Python upscale runner tests: Python is unavailable (set AI_MODEL_RELAY_TEST_PYTHON).');
+	}
 	console.log('local upscale tests passed');
 })().catch((error) => {
 	console.error(error);

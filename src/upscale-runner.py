@@ -189,7 +189,8 @@ def main():
                 "sys.argv = sys.argv[1:]\n"
                 "runpy.run_path(sys.argv[0], run_name='__main__')\n"
             )
-            command = [sys.executable, "-c", realesrgan_launcher, str(script), "-n", "RealESRGAN_x2plus", "--model_path", str(model["model_path"]), "-i", str(crop_source), "-o", str(result_root), "--outscale", str(native_scale), "--tile", str(int(job.get("tile", 512))), "--gpu-id", str(int(job.get("cuda_device", 0))), "--ext", "png"]
+            model_name = "RealESRGAN_x4plus" if native_scale == 4 else "RealESRGAN_x2plus"
+            command = [sys.executable, "-c", realesrgan_launcher, str(script), "-n", model_name, "--model_path", str(model["model_path"]), "-i", str(crop_source), "-o", str(result_root), "--outscale", str(native_scale), "--tile", str(int(job.get("tile", 512))), "--gpu-id", str(int(job.get("cuda_device", 0))), "--ext", "png"]
             if str(job.get("precision", "fp16")) != "fp16":
                 command.append("--fp32")
         elif model.get("engine") in ("hat-s", "drct", "apisr"):
@@ -198,7 +199,7 @@ def main():
             engine_started_at = datetime.now(timezone.utc).timestamp()
         else:
             fail("model_invalid", "The configured local upscale engine is unsupported.")
-        if not script.is_file():
+        if model.get("engine") not in ("hat-s", "drct", "apisr") and not script.is_file():
             fail("runner_checkout_missing", "Install the configured official model checkout before local upscaling.")
         engine_started_at = datetime.now(timezone.utc).timestamp()
         timeout_seconds = max(1, int(job.get("timeout_seconds", 1800)))

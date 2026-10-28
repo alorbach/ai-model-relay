@@ -710,8 +710,10 @@ function modelsPayload(context) {
 function relayPayloadFor(context, jobType, payload = {}) {
 	const requested = payload && typeof payload === 'object' ? payload : {};
 	const explicit = String(requested.model || '').trim() || String(requested.provider || requested.backend || '').trim();
-	const model = explicit ? String(requested.model || '').trim() : context.relaySettings.settings().defaults[jobType];
-	const resolvedPayload = explicit ? requested : { ...requested, model };
+	const provider = String(requested.provider || requested.backend || '').trim();
+	const defaultUpscale = jobType === 'upscale' && Number(requested.scale) === 4 && !String(requested.model || '').trim() && (!provider || provider === 'local-upscale');
+	const model = defaultUpscale ? 'model-relay:local-upscale:realesrgan-x4plus' : (explicit ? String(requested.model || '').trim() : context.relaySettings.settings().defaults[jobType]);
+	const resolvedPayload = defaultUpscale || !explicit ? { ...requested, model } : requested;
 	const resolved = context.backends.resolve
 		? context.backends.resolve(jobType, resolvedPayload)
 		: (() => {

@@ -482,6 +482,19 @@ function createMockSecurity() {
 		assert.ok(!binaryUpscale.body.toString('utf8').includes('protected-source-png'));
 		assert.strictEqual(calls[calls.length - 1].route, 'relay-upscale');
 		assert.strictEqual(calls[calls.length - 1].payload.source_bytes.toString(), 'protected-source-png');
+		const defaultX4Payload = { ...upscalePayload, scale: 4 };
+		delete defaultX4Payload.model;
+		for (const [suffix, payload, expectedModel] of [
+			['default-x4', defaultX4Payload, 'model-relay:local-upscale:realesrgan-x4plus'],
+			['provider-x4', { ...defaultX4Payload, provider: 'local-upscale' }, 'model-relay:local-upscale:realesrgan-x4plus'],
+			['explicit-x4', { ...defaultX4Payload, model: 'model-relay:local-upscale:drct-classical-x4' }, 'model-relay:local-upscale:drct-classical-x4'],
+			['explicit-x2', { ...defaultX4Payload, model: upscalePayload.model }, upscalePayload.model],
+		]) {
+			const defaultUpscale = await requestBinary(port, 'POST', '/v1/relay/jobs/upscale', Buffer.from('protected-source-png'), { 'X-Alorbach-Request-Id': suffix, 'X-Alorbach-Job-Token': 'job-token', 'X-Alorbach-Request-Hash': 'hash', 'X-Alorbach-Upscale-Payload': Buffer.from(JSON.stringify(payload)).toString('base64url') });
+			assert.strictEqual(defaultUpscale.statusCode, 200, suffix);
+			assert.strictEqual(calls[calls.length - 1].payload.model, expectedModel, suffix);
+			assert.strictEqual(calls[calls.length - 1].payload.scale, 4);
+		}
 		const unpairedRelayArtifact = await requestPlain(port, binaryResult.artifact_url);
 		assert.strictEqual(unpairedRelayArtifact.statusCode, 403);
 		const artifact = await requestBinary(port, 'GET', binaryResult.artifact_url, Buffer.alloc(0));
