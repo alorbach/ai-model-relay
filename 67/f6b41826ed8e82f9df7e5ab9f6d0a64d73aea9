@@ -1,0 +1,49 @@
+src/server.js
+  s_d1eece25128714::t_592f0959832441 713-716
+test/upscale-runner.test.py
+  s_d1eece25128714::t_10b82c2bb5155e 15-16
+  s_d1eece25128714::t_b75e8709638253 1-14,17-124
+docs/configuration.md
+  s_d1eece25128714::t_4036c31ecce931 89-93,100-101
+src/local-upscale.js
+  s_d1eece25128714::t_c1d30421dbbea7 6,41,83-93,187-190,205,268,451,497-498,500,516,529
+test/relay-routes.test.js
+  s_d1eece25128714::t_f2e8173e195a1a 485-497
+docs/local-bridge-api.md
+  s_d1eece25128714::t_2c206b60594fb5 716,720-721
+test/local-upscale.test.js
+  s_d1eece25128714::t_235be860c0f779 8,326-342
+  s_d1eece25128714::t_d9d1a14a7a0020 71-96,136-139,154-157
+  s_d1eece25128714::t_a7b3adad99f450 210-233
+src/status-page/app.js
+  s_d1eece25128714::t_27ae91af1cb0c8 4153,4156,4160
+src/upscale-runner.py
+  s_04da1b503ba417::t_e7b1e9c497d8ec 202
+  s_d1eece25128714::t_c1d30421dbbea7 192-193
+docs/operations.md
+  s_d1eece25128714::t_2c206b60594fb5 251,253
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "67f6b41826ed8e82f9df7e5ab9f6d0a64d73aea9",
+  "prompts": {},
+  "sessions": {
+    "s_04da1b503ba417": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a182e0-280f-7c62-bca7-356aafbaed8b",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_d1eece25128714": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a18396-995d-7511-a158-99d6c6aebae5",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": null
+    }
+  }
+}
