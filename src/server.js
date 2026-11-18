@@ -14,7 +14,6 @@ const localImage = require('./local-image');
 const security = require('./security');
 const { statusPageHtml } = require('./status-page');
 const { resetTempDebugLogs } = require('./temp-debug-logs');
-const video = require('./video');
 const { PRODUCT_NAME, SHORT_NAME, LEGACY_PRODUCT_NAME } = require('./brand');
 const { createBackendRegistry, IMAGE_CAPABILITY_CONTRACT_VERSION } = require('./backend-registry');
 const { expandWindowsEnvironmentVariables } = require('./local-cli');
@@ -609,7 +608,7 @@ function modelFromPayload(payload, fallback) {
 
 function capabilitiesPayload(context) {
 	if (context.statusCache) {
-		return { ...context.statusCache.capabilities(), product: { name: PRODUCT_NAME, short_name: SHORT_NAME, legacy_name: LEGACY_PRODUCT_NAME }, bridge: { version: packageInfo.version }, frontend_interfaces: { legacy_v1: true, relay_v1: true, legacy_routes: ['/v1/status', '/v1/capabilities', '/v1/models', '/v1/chat', '/v1/images', '/v1/transcribe', '/v1/videos', '/v1/media/analyze', '/v1/music/analyze'], relay_routes: ['/v1/relay/status', '/v1/relay/capabilities', '/v1/relay/models', '/v1/relay/jobs/chat', '/v1/relay/jobs/images', '/v1/relay/jobs/upscale', '/v1/relay/jobs/transcribe', '/v1/relay/jobs/videos', '/v1/relay/jobs/media/analyze', '/v1/relay/jobs/music/analyze'], status_test_route: '/v1/relay/test', local_status_test_route: '/v1/relay/test' } };
+		return { ...context.statusCache.capabilities(), product: { name: PRODUCT_NAME, short_name: SHORT_NAME, legacy_name: LEGACY_PRODUCT_NAME }, bridge: { version: packageInfo.version }, frontend_interfaces: { legacy_v1: true, relay_v1: true, legacy_routes: ['/v1/status', '/v1/capabilities', '/v1/models', '/v1/chat', '/v1/images', '/v1/transcribe', '/v1/media/analyze', '/v1/music/analyze'], relay_routes: ['/v1/relay/status', '/v1/relay/capabilities', '/v1/relay/models', '/v1/relay/jobs/chat', '/v1/relay/jobs/images', '/v1/relay/jobs/upscale', '/v1/relay/jobs/transcribe', '/v1/relay/jobs/videos', '/v1/relay/jobs/media/analyze', '/v1/relay/jobs/music/analyze'], status_test_route: '/v1/relay/test', local_status_test_route: '/v1/relay/test' } };
 	}
 	const codexCapabilities = context.codex.capabilities ? context.codex.capabilities() : { success: true, bridge_features: {} };
 	return {
@@ -629,12 +628,11 @@ function capabilitiesPayload(context) {
 		frontend_interfaces: {
 			legacy_v1: true,
 			relay_v1: true,
-			legacy_routes: ['/v1/status', '/v1/capabilities', '/v1/models', '/v1/chat', '/v1/images', '/v1/transcribe', '/v1/videos', '/v1/media/analyze', '/v1/music/analyze'],
+			legacy_routes: ['/v1/status', '/v1/capabilities', '/v1/models', '/v1/chat', '/v1/images', '/v1/transcribe', '/v1/media/analyze', '/v1/music/analyze'],
 			relay_routes: ['/v1/relay/status', '/v1/relay/capabilities', '/v1/relay/models', '/v1/relay/jobs/chat', '/v1/relay/jobs/images', '/v1/relay/jobs/upscale', '/v1/relay/jobs/transcribe', '/v1/relay/jobs/videos', '/v1/relay/jobs/media/analyze', '/v1/relay/jobs/music/analyze'],
 			status_test_route: '/v1/relay/test',
 			local_status_test_route: '/v1/relay/test',
 		},
-		video: context.video.capabilities ? context.video.capabilities() : { enabled: false },
 		media_analysis: context.mediaAnalysis.capabilities ? context.mediaAnalysis.capabilities() : { enabled: false },
 		music_analysis: context.musicAnalysis.capabilities ? context.musicAnalysis.capabilities() : { enabled: false },
 	};
@@ -688,10 +686,6 @@ function publicStatusProjection(status) {
 
 function modelsPayload(context) {
 	const modelPayload = context.codex.models();
-	const videoCapabilities = context.video.capabilities ? context.video.capabilities() : { enabled: false, models: [] };
-	if (modelPayload && modelPayload.models && videoCapabilities.enabled) {
-		modelPayload.models.video = (videoCapabilities.models || []).map((id) => `openai-video:${id}`);
-	}
 	modelPayload.models = modelPayload.models || {};
 	const backendModels = context.backends.models();
 	const backendDrivers = context.backends.capabilities ? context.backends.capabilities() : [];
@@ -797,7 +791,6 @@ function workflowForJob(jobType, provider) {
 		'local-asr:transcribe': 'Local ASR',
 		'local-image:images': 'Local Qwen-Image',
 		'music-analysis:music.analyze': 'Local music analysis',
-		'openai-videos:videos': 'OpenAI Videos API',
 		'xai-api:chat': 'xAI Chat Completions API',
 		'xai-api:transcribe': 'xAI Speech-to-Text API',
 		'xai-api:images': 'xAI Imagine images',
@@ -1630,18 +1623,22 @@ async function route(req, res, context) {
 		sendJson(res, 200, result, pairedOrigin);
 		return;
 	}
-	if (url.pathname === '/v1/videos' || url.pathname === '/v1/relay/jobs/videos') {
-		const isRelayRoute = url.pathname === '/v1/relay/jobs/videos';
-		const resolved = isRelayRoute ? relayPayloadFor(context, 'videos', body.payload || {}) : { payload: body.payload || {} };
+	if (url.pathname === '/v1/videos') {
+		// OpenAI shut down Sora 2 and the Videos API on 24 Sep 2026; video jobs go through /v1/relay/jobs/videos.
+		sendErrorJson(req, res, 410, { success: false, category: 'configuration', code: 'openai_videos_removed', message: 'The legacy /v1/videos route ran the OpenAI Videos API, which OpenAI shut down. Use /v1/relay/jobs/videos with a Relay video model such as model-relay:xai:imagine-video.' }, pairedOrigin, { requestId: body.request_id, route: url.pathname });
+		return;
+	}
+	if (url.pathname === '/v1/relay/jobs/videos') {
+		const resolved = relayPayloadFor(context, 'videos', body.payload || {});
 		if (resolved.error) { sendErrorJson(req, res, 503, resolved.error, pairedOrigin, { requestId: body.request_id, route: url.pathname }); return; }
-		const display = isRelayRoute ? jobDisplayMeta(context, 'videos', resolved.payload, '', '', resolved.resolved) : { provider: 'openai-videos', providerLabel: 'OpenAI Videos', workflow: workflowForJob('videos', 'openai-videos') };
+		const display = jobDisplayMeta(context, 'videos', resolved.payload, '', '', resolved.resolved);
 		const result = await jobManager.run({
 			requestId: body.request_id,
 			type: 'videos',
-			model: modelFromPayload(resolved.payload, 'sora-2'),
+			model: modelFromPayload(resolved.payload, 'model-relay:xai:imagine-video'),
 			origin: pairedOrigin,
 			...display,
-		}, (session) => isRelayRoute ? context.backends.run('videos', resolved.payload, session) : context.video.run(resolved.payload, session));
+		}, (session) => context.backends.run('videos', resolved.payload, session));
 		if (!result.success) {
 			sendErrorJson(req, res, errorStatusForResult(result), result, pairedOrigin, { requestId: body.request_id, route: url.pathname });
 			return;
@@ -1721,7 +1718,6 @@ function createServer(options = {}) {
 		localUpscale: options.localUpscale || localUpscale,
 		localImage: options.localImage || localImage,
 		security: options.security || security,
-		video: options.video || video,
 		jobManager: options.jobManager || createJobManager({ ...options, onJobState }),
 		statusEvents,
 		relaySettings: options.relaySettings || relaySettings,
@@ -1747,14 +1743,10 @@ function createServer(options = {}) {
 		if ((reason === 'settings' || options.maxConcurrent == null) && context.jobManager && typeof context.jobManager.setMaxConcurrent === 'function' && context.relaySettings && typeof context.relaySettings.resolved === 'function') {
 			context.jobManager.setMaxConcurrent(context.relaySettings.resolved().runtime.max_concurrent_jobs);
 		}
-		if (context.video && typeof context.video.configure === 'function' && driverOpts.video) {
-			context.video.configure(driverOpts.video);
-		}
 		if (context.usesProvidedBackends) return context.backends;
 		context.backends = createBackendRegistry({
 			codex: context.codex,
 			mediaAnalysis: context.mediaAnalysis,
-			video: context.video,
 			musicAnalysis: context.musicAnalysis,
 			upscale: options.upscale || {},
 			image: options.image || {},

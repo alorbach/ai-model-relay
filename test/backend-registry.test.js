@@ -89,14 +89,9 @@ function captureCliSpawn(calls) {
 		images: (payload) => Promise.resolve({ success: true, response: { model: payload.model, data: [] } }),
 		transcribe: (payload) => Promise.resolve({ success: true, response: { model: payload.model, words: [] } }),
 	};
-	const video = {
-		capabilities: () => ({ enabled: true, configured: true, models: ['sora-2'] }),
-		run: () => Promise.resolve({ success: true, response: { id: 'video' } }),
-	};
 	const xaiChatBodies = [];
 	const registry = createBackendRegistry({
 		codex,
-		video,
 		musicAnalysis: {
 			MODEL_ID: 'model-relay:music-analysis:core',
 			capabilities: () => ({ enabled: true, ready: true, runtime_checked: true, models: ['model-relay:music-analysis:core'] }),
@@ -156,7 +151,7 @@ function captureCliSpawn(calls) {
 	assert.deepStrictEqual(xaiVideoModel.test_options.map((option) => option.key), ['aspect_ratio', 'resolution', 'seconds', 'generate_audio']);
 	assert.ok(xaiVideoModel.test_options.find((option) => option.key === 'resolution').choices.some((choice) => choice.value === '1080p'));
 	assert.ok(models.some((model) => model.id === 'model-relay:music-analysis:core' && model.type === 'audio'));
-	assert.ok(models.some((model) => model.id === 'model-relay:openai-videos:sora-2'));
+	assert.ok(!models.some((model) => model.backend === 'openai-videos'));
 	const codexImageModel = models.find((model) => model.id === 'model-relay:codex:image');
 	assert.deepStrictEqual(codexImageModel.test_options.map((option) => option.key), ['size', 'quality']);
 	assert.ok(codexImageModel.test_options.every((option) => option.delivery === 'guidance'));
@@ -173,9 +168,6 @@ function captureCliSpawn(calls) {
 	assert.strictEqual(codexImageModel.image_capabilities.reference_images_max, 4);
 	assert.strictEqual(codexImageModel.image_capabilities.size_constraints, undefined);
 	assert.deepStrictEqual(codexImageModel.image_capabilities.supported_backgrounds, []);
-	const openAiVideoModel = models.find((model) => model.id === 'model-relay:openai-videos:sora-2');
-	assert.deepStrictEqual(openAiVideoModel.test_options.map((option) => option.key), ['size', 'seconds', 'model']);
-	assert.ok(openAiVideoModel.test_options.every((option) => option.delivery === 'direct'));
 	assert.ok(!models.some((model) => model.backend === 'cursor-cli' && model.type === 'image'));
 	const grokImageModel = { id: 'model-relay:grok-cli:image', type: 'image', backend: 'grok-cli', ready: true, job_types: ['images'], image_capabilities: GROK_IMAGE_CAPABILITIES };
 	assert.deepStrictEqual(Object.keys(grokImageModel.image_capabilities.provider_options).sort(), ['aspect_ratio', 'resolution']);
@@ -349,7 +341,6 @@ function captureCliSpawn(calls) {
 	let codexMediaPayload = null;
 	const codexMediaRegistry = createBackendRegistry({
 		codex,
-		video,
 		mediaAnalysis: {
 			analyze: (payload) => {
 				codexMediaPayload = payload;
@@ -1183,7 +1174,6 @@ function captureCliSpawn(calls) {
 
 		const antigravityRegistry = createBackendRegistry({
 			codex,
-			video,
 			mediaAnalysis,
 			musicAnalysis: {
 				MODEL_ID: 'model-relay:music-analysis:core',
@@ -1200,7 +1190,6 @@ function captureCliSpawn(calls) {
 			let configuredCandidates = [];
 			const configuredPathRegistry = createBackendRegistry({
 				codex,
-				video,
 				mediaAnalysis,
 				musicAnalysis: {
 					MODEL_ID: 'model-relay:music-analysis:core',

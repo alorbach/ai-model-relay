@@ -227,12 +227,6 @@ Example response:
     "runtime_checked": false,
     "models": ["local-asr", "local-asr:whisper-large-v3"]
   },
-  "video": {
-    "enabled": false,
-    "configured": false,
-    "provider": "openai-videos-api",
-    "models": ["sora-2", "sora-2-pro"]
-  },
   "media_analysis": {
     "enabled": true,
     "provider": "local-codex-vision",
@@ -299,7 +293,7 @@ Saves the provided relay-only defaults in the existing local state file. Send a 
 }
 ```
 
-Provider routing `defaults` apply only to `/v1/relay/jobs/*`, never to legacy `/v1/chat`, `/v1/images`, `/v1/transcribe`, `/v1/videos`, `/v1/media/analyze`, or `/v1/music/analyze`. `token_defaults` apply to chat and media-analysis jobs on both legacy and relay routes.
+Provider routing `defaults` apply only to `/v1/relay/jobs/*`, never to legacy `/v1/chat`, `/v1/images`, `/v1/transcribe`, `/v1/media/analyze`, or `/v1/music/analyze`. `token_defaults` apply to chat and media-analysis jobs on both legacy and relay routes.
 
 ## `POST /v1/relay/refresh`
 
@@ -558,7 +552,7 @@ Provider-neutral job aliases use the same signed envelope and response shapes as
 - `POST /v1/relay/jobs/media/analyze`
 - `POST /v1/relay/jobs/music/analyze`
 
-Routing is selected from an explicit `payload.provider`, `payload.backend`, or model ID. An explicit selection wins. When none is supplied, the bridge inserts the persisted relay default for the operation: `chat`, `images`, `videos`, `transcribe`, `media.analyze`, or `music.analyze`. For example, `model-relay:xai:grok-4.6` routes to the Grok/xAI API chat driver, `model-relay:xai:imagine-image` and `model-relay:xai:imagine-video` route to xAI Imagine, `model-relay:xai:stt` routes to xAI Speech-to-Text, and `model-relay:local-asr:qwen3-asr-0.6b` routes to the local ASR driver. When `XAI_API_KEY` is set and no video default has been saved, the unsaved video default is `model-relay:xai:imagine-video`. xAI and API-key chat always include resolved `max_tokens` and `max_completion_tokens` and may pass `temperature` / `top_p` when the payload sets them; they do not send `stream`.
+Routing is selected from an explicit `payload.provider`, `payload.backend`, or model ID. An explicit selection wins. When none is supplied, the bridge inserts the persisted relay default for the operation: `chat`, `images`, `videos`, `transcribe`, `media.analyze`, or `music.analyze`. For example, `model-relay:xai:grok-4.6` routes to the Grok/xAI API chat driver, `model-relay:xai:imagine-image` and `model-relay:xai:imagine-video` route to xAI Imagine, `model-relay:xai:stt` routes to xAI Speech-to-Text, and `model-relay:local-asr:qwen3-asr-0.6b` routes to the local ASR driver. The unsaved video default is `model-relay:xai:imagine-video`. A saved OpenAI Videos default (`model-relay:openai-videos:*`) falls back to it, because OpenAI shut down Sora 2 and the Videos API on 24 Sep 2026. xAI and API-key chat always include resolved `max_tokens` and `max_completion_tokens` and may pass `temperature` / `top_p` when the payload sets them; they do not send `stream`.
 
 If the selected/default provider is unknown, disabled, unauthenticated, or does not support the requested operation, the route returns a configuration error naming the selected model and safe reason. It never falls back to another provider. `grok` and `grok-cli` select the local Grok CLI; `xai` and `xai-api` select the separately configured xAI API. This rule is limited to `/v1/relay/jobs/*`; legacy routes retain their existing behavior.
 
@@ -802,30 +796,9 @@ Runs bounded local acoustic feature extraction. It requires pairing and the sign
 
 Sections are deliberately neutral numbered boundaries, not verse/chorus labels. This first local pipeline does not separate stems, detect chords, extract melody/MIDI, rank similarity, or chain transcription automatically.
 
-## `POST /v1/videos`
+## `POST /v1/videos` (removed)
 
-The legacy `/v1/videos` route still runs an optional OpenAI Videos API job. It is disabled unless `ALORBACH_CODEX_ENABLE_VIDEO=1` and `ALORBACH_OPENAI_API_KEY` or `OPENAI_API_KEY` are configured. OpenAI lists Sora 2 and the Videos API for removal on 24 Sep 2026. Prefer `/v1/relay/jobs/videos` with `model-relay:xai:imagine-video` when an xAI key is configured.
-
-Request:
-
-```json
-{
-  "job_token": "<wordpress-job-token>",
-  "request_hash": "<wordpress-request-hash>",
-  "request_id": "<wordpress-request-id>",
-  "payload": {
-    "action": "create",
-    "model": "sora-2",
-    "prompt": "A product teaser clip for a desktop bridge app.",
-    "size": "1280x720",
-    "seconds": "8",
-    "poll": true,
-    "download": false
-  }
-}
-```
-
-Supported `action` values are `create`, `retrieve`, `download`, `remix`, and `delete`. Create/remix responses may return queued or in-progress jobs unless `poll` is true. Downloads return base64 MP4 content in `response.b64_video` or `response.content.b64_video`.
+This legacy route ran the OpenAI Videos API. OpenAI shut down Sora 2 and the Videos API on 24 Sep 2026, so the route now returns HTTP 410 with code `openai_videos_removed`. Use `/v1/relay/jobs/videos` with a Relay video model such as `model-relay:xai:imagine-video` or `model-relay:grok-cli:video`.
 
 ## `POST /v1/media/analyze`
 

@@ -7,7 +7,7 @@ const { normalizeTokenDefault, normalizeTokenDefaults } = require('./token-polic
 const DEFAULTS = {
 	chat: 'model-relay:codex:auto',
 	images: 'model-relay:codex:image',
-	videos: 'model-relay:openai-videos:sora-2',
+	videos: 'model-relay:xai:imagine-video',
 	transcribe: 'model-relay:local-asr:auto',
 	'media.analyze': 'model-relay:codex:auto',
 	'music.analyze': 'model-relay:music-analysis:core',
@@ -36,26 +36,20 @@ const TIMEOUT_SPECS = {
 	anthropic_chat_ms: { env: 'AI_MODEL_RELAY_ANTHROPIC_CHAT_TIMEOUT_MS', fallback: 600000 },
 	xai_poll_timeout_ms: { env: 'ALORBACH_VIDEO_POLL_TIMEOUT_MS', fallback: 600000 },
 	xai_poll_interval_ms: { env: 'ALORBACH_VIDEO_POLL_INTERVAL_MS', fallback: 3000 },
-	openai_poll_timeout_ms: { env: 'ALORBACH_VIDEO_POLL_TIMEOUT_MS', fallback: 600000 },
-	openai_poll_interval_ms: { env: 'ALORBACH_VIDEO_POLL_INTERVAL_MS', fallback: 3000 },
 };
 
 const MAX_TIMEOUT_MS = 24 * 60 * 60 * 1000;
 const MAX_CONCURRENT_JOBS = 32;
 
-function defaultFor(jobType, providers) {
-	if (jobType === 'videos' && resolvedXaiApiKey(providers)) {
-		return 'model-relay:xai:imagine-video';
-	}
-	return DEFAULTS[jobType];
-}
+// OpenAI shut down Sora 2 and the Videos API on 24 Sep 2026, so a stored OpenAI Videos default falls back.
+const REMOVED_DEFAULT_PATTERN = /^(model-relay:openai-videos:|openai-video:)/i;
 
-function normalizeDefaults(value = {}, providers) {
+function normalizeDefaults(value = {}) {
 	const source = value && typeof value === 'object' ? value : {};
 	const normalized = {};
 	for (const jobType of Object.keys(DEFAULTS)) {
 		const selected = String(source[jobType] || '').trim();
-		normalized[jobType] = selected || defaultFor(jobType, providers);
+		normalized[jobType] = selected && !REMOVED_DEFAULT_PATTERN.test(selected) ? selected : DEFAULTS[jobType];
 	}
 	return normalized;
 }
@@ -111,14 +105,6 @@ function optionalString(value, previous = '', maxLength = 32767) {
 
 function normalizeCodexImageTool(value) {
 	return String(value || '').trim() === 'generations' ? 'generations' : 'image_gen';
-}
-
-function optionalBoolean(value, previous = null) {
-	if (value === undefined) return previous === true || previous === false ? previous : null;
-	if (value === null || value === '') return null;
-	if (value === true || value === 'true' || value === '1' || value === 1) return true;
-	if (value === false || value === 'false' || value === '0' || value === 0) return false;
-	return previous === true || previous === false ? previous : null;
 }
 
 function nextSecret(group, previousGroup) {
@@ -223,8 +209,6 @@ function normalizeProviders(value = {}, previous = {}) {
 	const prior = previous && typeof previous === 'object' ? previous : {};
 	const xai = source.xai && typeof source.xai === 'object' ? source.xai : {};
 	const priorXai = prior.xai && typeof prior.xai === 'object' ? prior.xai : {};
-	const openai = source.openai_videos && typeof source.openai_videos === 'object' ? source.openai_videos : {};
-	const priorOpenai = prior.openai_videos && typeof prior.openai_videos === 'object' ? prior.openai_videos : {};
 	const apiKeyChat = source.api_key_chat && typeof source.api_key_chat === 'object' ? source.api_key_chat : {};
 	const priorApiKeyChat = prior.api_key_chat && typeof prior.api_key_chat === 'object' ? prior.api_key_chat : {};
 	const cliProcess = source.cli_process && typeof source.cli_process === 'object' ? source.cli_process : {};
@@ -241,10 +225,6 @@ function normalizeProviders(value = {}, previous = {}) {
 			api_key: nextSecret(xai, priorXai),
 			base_url: optionalString(xai.base_url, priorXai.base_url),
 			models: optionalString(xai.models, priorXai.models),
-		},
-		openai_videos: {
-			enabled: optionalBoolean(openai.enabled, priorOpenai.enabled),
-			api_key: nextSecret(openai, priorOpenai),
 		},
 		api_key_chat: {
 			api_key: nextSecret(apiKeyChat, priorApiKeyChat),
@@ -281,7 +261,7 @@ function settings() {
 	const relay = storedRelay();
 	const providers = normalizeProviders(relay.providers, emptyProviders());
 	return {
-		defaults: normalizeDefaults(relay.defaults, providers),
+		defaults: normalizeDefaults(relay.defaults),
 		cli_paths: normalizeCliPaths(relay.cli_paths),
 		token_defaults: normalizeTokenDefaults(relay.token_defaults),
 		runtime: normalizeRuntime(relay.runtime, emptyRuntime()),
@@ -313,10 +293,6 @@ function publicProviders(providers) {
 			api_key: maskSecret(source.xai && source.xai.api_key),
 			base_url: source.xai && source.xai.base_url || '',
 			models: source.xai && source.xai.models || '',
-		},
-		openai_videos: {
-			enabled: source.openai_videos && source.openai_videos.enabled,
-			api_key: maskSecret(source.openai_videos && source.openai_videos.api_key),
 		},
 		api_key_chat: {
 			api_key: maskSecret(source.api_key_chat && source.api_key_chat.api_key),
@@ -383,19 +359,6 @@ function resolvedXaiApiKey(providers) {
 	return resolvedString(stored, ['XAI_API_KEY', 'AI_MODEL_RELAY_XAI_API_KEY']);
 }
 
-function resolvedOpenaiEnabled(providers) {
-	const source = providers || (storedRelay().providers || {});
-	const stored = source.openai_videos && source.openai_videos.enabled;
-	if (stored === true || stored === false) return stored;
-	return /^(1|true|yes|on)$/i.test(String(process.env.ALORBACH_CODEX_ENABLE_VIDEO || ''));
-}
-
-function resolvedOpenaiApiKey(providers) {
-	const source = providers || (storedRelay().providers || {});
-	const stored = source.openai_videos && source.openai_videos.api_key;
-	return resolvedString(stored, ['ALORBACH_OPENAI_API_KEY', 'OPENAI_API_KEY']);
-}
-
 function resolved() {
 	const stored = settings();
 	const timeouts = {};
@@ -424,10 +387,6 @@ function resolved() {
 				api_key: resolvedXaiApiKey(stored.providers),
 				base_url: resolvedString(stored.providers.xai.base_url, ['XAI_BASE_URL', 'AI_MODEL_RELAY_XAI_BASE_URL'], 'https://api.x.ai/v1'),
 				models: resolvedString(stored.providers.xai.models, ['AI_MODEL_RELAY_XAI_MODELS']),
-			},
-			openai_videos: {
-				enabled: resolvedOpenaiEnabled(stored.providers),
-				api_key: resolvedOpenaiApiKey(stored.providers),
 			},
 			api_key_chat: {
 				api_key: resolvedString(stored.providers.api_key_chat.api_key, ['AI_MODEL_RELAY_CHAT_API_KEY']),
@@ -496,12 +455,6 @@ function driverOptions() {
 			args: values.providers.cli_process.args,
 			timeoutMs: timeouts.cli_process_ms,
 		},
-		video: {
-			enabled: values.providers.openai_videos.enabled,
-			apiKey: values.providers.openai_videos.api_key,
-			pollTimeoutMs: timeouts.openai_poll_timeout_ms,
-			pollIntervalMs: timeouts.openai_poll_interval_ms,
-		},
 	};
 }
 
@@ -532,7 +485,7 @@ function saveSettings(next = {}) {
 			: normalizeProviders(relay.providers, emptyProviders());
 		state.relay = {
 			...relay,
-			defaults: normalizeDefaults(defaultsSource, providers),
+			defaults: normalizeDefaults(defaultsSource),
 			cli_paths: hasCliPaths
 				? normalizeCliPaths(next.cli_paths)
 				: normalizeCliPaths(relay.cli_paths),

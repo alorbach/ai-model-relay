@@ -183,11 +183,11 @@ function createMockSecurity() {
 		return text ? { configured: true, suffix: text.slice(-4) } : { configured: false, suffix: '' };
 	};
 	const storedRelay = {
-		defaults: { chat: 'model-relay:codex:auto', images: 'model-relay:codex:image', videos: 'model-relay:openai-videos:sora-2', transcribe: 'model-relay:local-asr:auto', 'media.analyze': 'model-relay:codex:auto', 'music.analyze': 'model-relay:music-analysis:core' },
+		defaults: { chat: 'model-relay:codex:auto', images: 'model-relay:codex:image', videos: 'model-relay:xai:imagine-video', transcribe: 'model-relay:local-asr:auto', 'media.analyze': 'model-relay:codex:auto', 'music.analyze': 'model-relay:music-analysis:core' },
 		cli_paths: {},
 		token_defaults: { chat: '', 'media.analyze': '' },
 		runtime: { max_concurrent_jobs: '', timeouts: {} },
-		providers: { xai: { api_key: '', base_url: '', models: '' }, openai_videos: { enabled: null, api_key: '' }, api_key_chat: { api_key: '', base_url: '', provider_id: '', model: '' }, cli_process: { args: '' }, grok: { imagine_skill: '' }, antigravity: { state_dir: '' } },
+		providers: { xai: { api_key: '', base_url: '', models: '' }, api_key_chat: { api_key: '', base_url: '', provider_id: '', model: '' }, cli_process: { args: '' }, grok: { imagine_skill: '' }, antigravity: { state_dir: '' } },
 	};
 	function nextSecret(group, previous) {
 		const next = group && typeof group === 'object' ? group : {};
@@ -205,10 +205,6 @@ function createMockSecurity() {
 		pairingCodePersistenceAvailable: true,
 		savePersistentPairingCode: async (code) => { savedPersistentPairingCode = code; },
 		maxConcurrent: 2,
-		video: {
-			capabilities: () => ({ enabled: false, configured: false, models: ['sora-2'] }),
-			run: () => Promise.resolve({ success: true, response: {} }),
-		},
 		mediaAnalysis: {
 			capabilities: () => ({ enabled: true }),
 			analyze: () => Promise.resolve({ success: true, response: { text: 'media ok' } }),
@@ -230,7 +226,6 @@ function createMockSecurity() {
 			publicSettings: () => {
 				const copy = JSON.parse(JSON.stringify(storedRelay));
 				copy.providers.xai.api_key = maskSecret(copy.providers.xai.api_key);
-				copy.providers.openai_videos.api_key = maskSecret(copy.providers.openai_videos.api_key);
 				copy.providers.api_key_chat.api_key = maskSecret(copy.providers.api_key_chat.api_key);
 				return copy;
 			},
@@ -260,11 +255,6 @@ function createMockSecurity() {
 						...storedRelay.providers.xai,
 						...(next.xai || {}),
 						api_key: nextSecret(next.xai, storedRelay.providers.xai.api_key),
-					};
-					storedRelay.providers.openai_videos = {
-						...storedRelay.providers.openai_videos,
-						...(next.openai_videos || {}),
-						api_key: nextSecret(next.openai_videos, storedRelay.providers.openai_videos.api_key),
 					};
 					storedRelay.providers.api_key_chat = {
 						...storedRelay.providers.api_key_chat,
@@ -541,7 +531,7 @@ function createMockSecurity() {
 		assert.strictEqual(invalidTestRequestId.statusCode, 400);
 		assert.match(invalidTestRequestId.body.message, /request IDs must start with status-test/i);
 
-                const localVideoTest = await requestJson(port, 'POST', '/v1/relay/test', { job_type: 'videos', model: 'model-relay:openai-videos:sora-2', prompt: 'test video', input_reference_data_url: 'data:image/png;base64,AA==', size: '1280x720', seconds: '8' }, pageOrigin);
+                const localVideoTest = await requestJson(port, 'POST', '/v1/relay/test', { job_type: 'videos', model: 'model-relay:grok-cli:video', prompt: 'test video', input_reference_data_url: 'data:image/png;base64,AA==', size: '1280x720', seconds: '8' }, pageOrigin);
 		assert.strictEqual(localVideoTest.statusCode, 200);
                 assert.strictEqual(calls[calls.length - 1].route, 'relay-videos');
                 assert.strictEqual(calls[calls.length - 1].payload.input_reference_data_url, 'data:image/png;base64,AA==');

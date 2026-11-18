@@ -74,10 +74,14 @@ try {
 		delete process.env.XAI_API_KEY;
 		delete process.env.AI_MODEL_RELAY_XAI_API_KEY;
 		state = {};
-		assert.strictEqual(relaySettings.settings().defaults.videos, 'model-relay:openai-videos:sora-2');
-		process.env.XAI_API_KEY = 'test-xai-key';
-		state = {};
 		assert.strictEqual(relaySettings.settings().defaults.videos, 'model-relay:xai:imagine-video');
+		state = { relay: { defaults: { videos: 'model-relay:openai-videos:sora-2' }, providers: { openai_videos: { enabled: true, api_key: 'sk-old' } } } };
+		assert.strictEqual(relaySettings.settings().defaults.videos, 'model-relay:xai:imagine-video', 'removed OpenAI Videos default falls back');
+		assert.strictEqual(relaySettings.settings().providers.openai_videos, undefined, 'stored OpenAI Videos settings are dropped');
+		assert.strictEqual(relaySettings.resolved().providers.openai_videos, undefined);
+		assert.strictEqual(relaySettings.driverOptions().video, undefined);
+		state = { relay: { defaults: { videos: 'model-relay:grok-cli:video' } } };
+		assert.strictEqual(relaySettings.settings().defaults.videos, 'model-relay:grok-cli:video');
 	} finally {
 		if (previousXaiKey === undefined) delete process.env.XAI_API_KEY;
 		else process.env.XAI_API_KEY = previousXaiKey;

@@ -50,9 +50,7 @@ The listen port and the state directory are read only when the process starts an
 | `AI_MODEL_RELAY_XAI_MODELS` | Comma-separated Grok chat models exposed as `model-relay:xai:*`. | `grok-4.6,grok-4.5,grok-4.3,latest` |
 | `AI_MODEL_RELAY_CHAT_API_KEY`, `AI_MODEL_RELAY_CHAT_BASE_URL`, `AI_MODEL_RELAY_CHAT_MODEL` | **API Key Chat**: any OpenAI-compatible `/chat/completions` endpoint. | not set |
 | `AI_MODEL_RELAY_CHAT_PROVIDER_ID` | Provider label reported for API Key Chat. | `api-key-chat` |
-| `ALORBACH_CODEX_ENABLE_VIDEO` | `1` enables the OpenAI Videos driver. OpenAI scheduled Sora 2 and the Videos API for removal on 24 Sep 2026; prefer xAI Imagine video. | off |
-| `ALORBACH_OPENAI_API_KEY`, `OPENAI_API_KEY` | Key for OpenAI Videos. Codex image jobs never use it. | not set |
-| `ALORBACH_VIDEO_POLL_TIMEOUT_MS`, `ALORBACH_VIDEO_POLL_INTERVAL_MS` | OpenAI Videos polling. | `600000`, `3000` |
+| `ALORBACH_VIDEO_POLL_TIMEOUT_MS`, `ALORBACH_VIDEO_POLL_INTERVAL_MS` | xAI Imagine video polling. | `600000`, `3000` |
 
 API keys saved on the status page are stored in the local state file. The settings API returns only `configured` and the last characters; **Clear** removes a saved key so the environment variable applies again.
 

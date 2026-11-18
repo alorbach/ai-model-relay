@@ -734,8 +734,6 @@
 				timeouts[input.getAttribute('data-relay-timeout')] = input.value.trim();
 			});
 			const maxConcurrent = document.getElementById('relayMaxConcurrent');
-			const enabledSelect = document.getElementById('relayOpenaiEnabled');
-			const enabledValue = enabledSelect ? enabledSelect.value : '';
 			const runtime = { timeouts };
 			if (maxConcurrent) runtime.max_concurrent_jobs = maxConcurrent.value.trim();
 			const codexImageToolValue = (document.getElementById('relayCodexImageTool') || {}).value === 'generations' ? 'generations' : 'image_gen';
@@ -762,11 +760,6 @@
 						clear_api_key: !!(document.getElementById('relayXaiApiKeyClear') && document.getElementById('relayXaiApiKeyClear').checked),
 						base_url: (document.getElementById('relayXaiBaseUrl') || {}).value || '',
 						models: (document.getElementById('relayXaiModels') || {}).value || '',
-					},
-					openai_videos: {
-						enabled: enabledValue === '' ? null : enabledValue === 'true',
-						api_key: (document.getElementById('relayOpenaiApiKey') || {}).value || '',
-						clear_api_key: !!(document.getElementById('relayOpenaiApiKeyClear') && document.getElementById('relayOpenaiApiKeyClear').checked),
 					},
 					api_key_chat: {
 						api_key: (document.getElementById('relayApiKeyChatKey') || {}).value || '',
@@ -841,7 +834,6 @@
 			});
 			const providers = preserved.providers || {};
 			const xai = providers.xai || {};
-			const openai = providers.openai_videos || {};
 			const apiKeyChat = providers.api_key_chat || {};
 			const setValue = (id, value) => {
 				const el = document.getElementById(id);
@@ -865,10 +857,6 @@
 			setChecked('relayXaiApiKeyClear', xai.clear_api_key);
 			setValue('relayXaiBaseUrl', xai.base_url);
 			setValue('relayXaiModels', xai.models);
-			const enabledSelect = document.getElementById('relayOpenaiEnabled');
-			if (enabledSelect) enabledSelect.value = openai.enabled === true ? 'true' : (openai.enabled === false ? 'false' : '');
-			setValue('relayOpenaiApiKey', openai.api_key);
-			setChecked('relayOpenaiApiKeyClear', openai.clear_api_key);
 			setValue('relayApiKeyChatKey', apiKeyChat.api_key);
 			setChecked('relayApiKeyChatKeyClear', apiKeyChat.clear_api_key);
 			setValue('relayApiKeyChatBaseUrl', apiKeyChat.base_url);
@@ -2160,7 +2148,6 @@
 				'grok-cli': { label: 'Grok CLI', kind: 'cli', cliPath: { label: 'Grok CLI executable', placeholder: 'grok or C:\\Tools\\grok.exe' }, fields: ['grokImagineSkill'] },
 				'cursor-cli': { label: 'Cursor Agent', kind: 'cli', cliPath: { label: 'Cursor Agent executable', placeholder: 'cursor-agent or C:\\Tools\\cursor-agent.exe' }, fields: [] },
 				'antigravity-cli': { label: 'Antigravity CLI', kind: 'cli', cliPath: { label: 'Antigravity CLI executable', placeholder: 'agy or C:\\Tools\\agy.exe', hint: 'Windows auto-detects %LOCALAPPDATA%\\agy\\bin\\agy.exe; enter another path here to override it.' }, fields: ['antigravityStateDir'] },
-				'openai-videos': { label: 'OpenAI Videos', kind: 'api', fields: ['openaiVideos'] },
 				'api-key-chat': { label: 'API-key chat', kind: 'api', fields: ['apiKeyChat'] },
 				'cli-process': { label: 'CLI Process', kind: 'cli', cliPath: { label: 'CLI Process executable', placeholder: 'Optional generic command path' }, fields: ['cliProcessArgs'] },
 				'local-asr': { label: 'Local ASR', kind: 'local', route: 'asr', routeLabel: 'Open Local ASR settings', description: 'Whisper and Qwen models run on this computer. Install models and set paths on the Local ASR page.' },
@@ -2307,7 +2294,6 @@
 			const providers = settings.providers || {};
 			const anthropic = providers.anthropic || {};
 			const xai = providers.xai || {};
-			const openai = providers.openai_videos || {};
 			const apiKeyChat = providers.api_key_chat || {};
 			const savedAt = anthropic.credit_balance_as_of && formatLocalDateTime(anthropic.credit_balance_as_of);
 			if (key === 'codexImageTool') return providerCodexImageToolField(settings);
@@ -2328,12 +2314,6 @@
 					providerSecretField('relayXaiApiKey', 'xAI API key', xai.api_key, 'XAI_API_KEY'),
 					providerInputField({ id: 'relayXaiBaseUrl', label: 'xAI base URL', value: xai.base_url, placeholder: 'https://api.x.ai/v1' }),
 					providerInputField({ id: 'relayXaiModels', label: 'xAI chat models', value: xai.models, placeholder: 'grok-4.6,grok-4.5,grok-4.3,latest', hint: 'Comma-separated native model IDs.' }),
-				].join('');
-			}
-			if (key === 'openaiVideos') {
-				return [
-					'<label class="field"><span>OpenAI Videos</span><select id="relayOpenaiEnabled"><option value="">Use environment</option><option value="true"' + (openai.enabled === true ? ' selected' : '') + '>Enabled</option><option value="false"' + (openai.enabled === false ? ' selected' : '') + '>Disabled</option></select></label>',
-					providerSecretField('relayOpenaiApiKey', 'OpenAI API key', openai.api_key, 'OPENAI_API_KEY'),
 				].join('');
 			}
 			if (key === 'apiKeyChat') {
@@ -2716,8 +2696,6 @@
 				{ key: 'anthropic_chat_ms', label: 'Claude API chat timeout (ms)', placeholder: '600000' },
 				{ key: 'xai_poll_timeout_ms', label: 'xAI video poll timeout (ms)', placeholder: '600000' },
 				{ key: 'xai_poll_interval_ms', label: 'xAI video poll interval (ms)', placeholder: '3000' },
-				{ key: 'openai_poll_timeout_ms', label: 'OpenAI Videos poll timeout (ms)', placeholder: '600000' },
-				{ key: 'openai_poll_interval_ms', label: 'OpenAI Videos poll interval (ms)', placeholder: '3000' },
 			];
 			if (fields.relayRuntimeSettings) {
 				fields.relayRuntimeSettings.innerHTML = [
@@ -2894,13 +2872,7 @@
                 function renderProviderMediaTests(models, backends) {
 			const imageTests = readyMediaModels(models, backends, 'images', 'image').map((model) => ({ model, jobType: 'images', title: 'Image generation', prompt: 'Ultrarealistic scene Cool Kungfu Cat' }));
                         const videoModels = readyMediaModels(models, backends, 'videos', 'video');
-                        const renderedVideoBackends = new Set();
-                        const videoTests = videoModels.filter((model) => {
-                                if (model.backend !== 'openai-videos') return true;
-                                if (renderedVideoBackends.has(model.backend)) return false;
-                                renderedVideoBackends.add(model.backend);
-                                return true;
-                        }).map((model) => ({ model, jobType: 'videos', title: 'Video generation', prompt: 'Create a short, subtle cinematic motion from the supplied reference image.' }));
+                        const videoTests = videoModels.map((model) => ({ model, jobType: 'videos', title: 'Video generation', prompt: 'Create a short, subtle cinematic motion from the supplied reference image.' }));
                         const analysisTests = readyMediaModels(models, backends, 'media.analyze', 'text').map((model) => ({ model, jobType: 'media.analyze', title: 'Video analysis', prompt: 'Summarize the visible action, text, timing, and user-facing issues in this video.' }));
                         const audioTests = [
                                 ...readyMediaModels(models, backends, 'transcribe', 'audio').map((model) => ({ model, jobType: 'transcribe', title: model.backend === 'xai-api' ? 'xAI Speech-to-Text (cloud)' : 'Audio transcription', prompt: '' })),

@@ -174,15 +174,6 @@ async function withServer(options, callback) {
 	}
 	assert.strictEqual(framesFromPayload({ frames: Array(10).fill(framePng) }).length, 6);
 
-	const video = {
-		capabilities: () => ({ enabled: true, models: ['sora-2', 'sora-2-pro'], operations: ['create', 'retrieve', 'download', 'remix', 'delete'] }),
-		run: (payload) => {
-			if (payload.action === 'download') {
-				return { success: true, response: { video_id: payload.video_id, b64_video: Buffer.from('mp4').toString('base64') } };
-			}
-			return { success: true, response: { id: payload.video_id || 'video-123', status: payload.status || 'queued', model: payload.model || 'sora-2' } };
-		},
-	};
 	const codex = {
 		lastChatPayload: null,
 		outputSchema: true,
@@ -215,25 +206,20 @@ async function withServer(options, callback) {
 	};
 	const mediaAnalysis = require('../src/media-analysis');
 
-	await withServer({ codex, video, mediaAnalysis, security: createMockSecurity(), maxConcurrent: 2 }, async (port) => {
+	await withServer({ codex, mediaAnalysis, security: createMockSecurity(), maxConcurrent: 2 }, async (port) => {
 		const capabilities = await requestJson(port, 'GET', '/v1/capabilities');
 		assert.strictEqual(capabilities.statusCode, 200);
 		assert.strictEqual(capabilities.body.features.structured_exec_json, true);
-		assert.strictEqual(capabilities.body.video.enabled, true);
+		assert.strictEqual(capabilities.body.video, undefined);
+		assert.ok(!capabilities.body.frontend_interfaces.legacy_routes.includes('/v1/videos'));
 
 		const models = await requestJson(port, 'GET', '/v1/models');
 		assert.strictEqual(models.statusCode, 200);
-		assert.deepStrictEqual(models.body.models.video, ['openai-video:sora-2', 'openai-video:sora-2-pro']);
+		assert.strictEqual(models.body.models.video, undefined);
 
-		for (const status of ['queued', 'in_progress', 'completed', 'failed', 'expired']) {
-			const result = await requestJson(port, 'POST', '/v1/videos', jobBody(`video-${status}`, { action: 'retrieve', video_id: `video-${status}`, status }));
-			assert.strictEqual(result.statusCode, 200);
-			assert.strictEqual(result.body.response.status, status);
-		}
-
-		const downloaded = await requestJson(port, 'POST', '/v1/videos', jobBody('video-download', { action: 'download', video_id: 'video-completed' }));
-		assert.strictEqual(downloaded.statusCode, 200);
-		assert.strictEqual(downloaded.body.response.b64_video, Buffer.from('mp4').toString('base64'));
+		const removedVideos = await requestJson(port, 'POST', '/v1/videos', jobBody('video-removed', { prompt: 'make video' }));
+		assert.strictEqual(removedVideos.statusCode, 410);
+		assert.strictEqual(removedVideos.body.code, 'openai_videos_removed');
 
 		const analyzed = await requestJson(port, 'POST', '/v1/media/analyze', jobBody('media', {
 			frames: [framePng],
@@ -280,21 +266,7 @@ async function withServer(options, callback) {
 		assert.strictEqual(codex.lastChatInternalOptions, null);
 	});
 
-	await withServer({
-		codex,
-		video: {
-			capabilities: () => ({ enabled: false, configured: false }),
-			run: () => ({ success: false, category: 'configuration', code: 'video_not_configured', message: 'disabled' }),
-		},
-		mediaAnalysis,
-		security: createMockSecurity(),
-	}, async (port) => {
-		const disabled = await requestJson(port, 'POST', '/v1/videos', jobBody('disabled', { prompt: 'make video' }));
-		assert.strictEqual(disabled.statusCode, 503);
-		assert.strictEqual(disabled.body.code, 'video_not_configured');
-	});
-
-	await withServer({ codex, video, mediaAnalysis, security: createMockSecurity(64) }, async (port) => {
+	await withServer({ codex, mediaAnalysis, security: createMockSecurity(64) }, async (port) => {
 		const oversized = await requestJson(port, 'POST', '/v1/media/analyze', jobBody('large', { frames: ['x'.repeat(200)] }));
 		assert.strictEqual(oversized.statusCode, 413);
 		assert.strictEqual(oversized.body.message, 'Request body is too large.');

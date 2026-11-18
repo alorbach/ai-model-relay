@@ -52,12 +52,11 @@ The **Providers** page shows one expandable card for every supported local/API d
 - **Claude API (Anthropic)**: chat with optional images through an API key (`model-relay:anthropic:*`). The **Overview** page shows the usage panel (credits estimate, month-to-date spend, rate limits).
 - **Grok / xAI API**: chat, Imagine image, Imagine video, and Speech-to-Text with one `XAI_API_KEY`.
 - **API Key Chat**: any OpenAI-compatible `/chat/completions` endpoint, configured with base URL, key, and model.
-- **OpenAI Videos**: opt-in Sora 2 video driver. OpenAI scheduled Sora 2 and the Videos API for removal on 24 Sep 2026; prefer xAI Imagine video.
 - **Local ASR**, **Local Image**, **Local CUDA Upscale**, **Local Music Analysis**: engines on this computer, each with its own sidebar page for setup and settings.
 
 HTTP chat bodies (xAI, API Key Chat) include the resolved `max_tokens` / `max_completion_tokens`. Every environment variable is listed in [Configuration](configuration.md).
 
-The selectors in the **Routing** card route only `/v1/relay/jobs/*`: chat, images, videos, transcription, media analysis, and music analysis. Explicit `payload.model`, `payload.provider`, or `payload.backend` always overrides the saved default. Legacy `/v1/chat`, `/v1/images`, `/v1/transcribe`, `/v1/videos`, and `/v1/media/analyze` remain unchanged for provider routing.
+The selectors in the **Routing** card route only `/v1/relay/jobs/*`: chat, images, videos, transcription, media analysis, and music analysis. Explicit `payload.model`, `payload.provider`, or `payload.backend` always overrides the saved default. Legacy `/v1/chat`, `/v1/images`, `/v1/transcribe`, and `/v1/media/analyze` remain unchanged for provider routing.
 
 The status page settings are the primary operator control. Use **Providers** (cards with CLI paths, API keys, models, extra CLI options, plus the **Routing** card for default models and token defaults), **Runtime** (concurrency and timeouts), **CUDA Upscale**, **Music Analysis**, **Local Image**, and **Local ASR** in the sidebar. A non-empty saved value wins; leave a field blank to keep the matching environment variable or code default. API keys are stored in the local state file, returned only as `configured` plus a 4-character suffix, and can be cleared so environment variables apply again: a saved key shows "Saved key ends with ..." with **Replace** and **Clear** buttons, and the key itself is never sent back to the page. The listen port (`ALORBACH_CODEX_BRIDGE_PORT`) and state directory remain process-start environment settings and are shown read-only on the Runtime page.
 
@@ -344,7 +343,7 @@ The product was originally released as **Codex Local Bridge** and has been renam
 ### What remains unchanged
 
 - The default bridge URL and port: `http://127.0.0.1:8765`.
-- The legacy `/v1` HTTP routes: `/v1/status`, `/v1/capabilities`, `/v1/chat`, `/v1/images`, `/v1/transcribe`, `/v1/videos`, `/v1/media/analyze`, `/v1/models`, `/v1/pair`, `/v1/unpair`, and `/v1/asr/settings`. The additive relay routes live under `/v1/relay/*`.
+- The legacy `/v1` HTTP routes: `/v1/status`, `/v1/capabilities`, `/v1/chat`, `/v1/images`, `/v1/transcribe`, `/v1/media/analyze`, `/v1/models`, `/v1/pair`, `/v1/unpair`, and `/v1/asr/settings`. The additive relay routes live under `/v1/relay/*`.
 - Text and image model IDs: `codex-local:auto`, `codex-local:image`, and any `codex-local:<id>` IDs from `models_cache.json`.
 - The user state directory: `%USERPROFILE%\.alorbach-codex-bridge`.
 - The bridge process name, tray binary name, and installer package ID used by existing WordPress plugins.

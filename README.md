@@ -31,7 +31,7 @@ flowchart LR
     App["Web app in the browser<br/>(WordPress Gateway, BuchWerk, your app)"]
     Relay["AI Model Relay<br/>127.0.0.1:8765"]
     CLI["Subscription CLIs<br/>Codex · Grok · Cursor · Antigravity · any CLI"]
-    API["API-key providers<br/>Claude · xAI · OpenAI-compatible · OpenAI Videos"]
+    API["API-key providers<br/>Claude · xAI · OpenAI-compatible"]
     Local["Local engines<br/>ASR · Image · Upscale · Music"]
 
     App -- "one job format<br/>(paired origin + token)" --> Relay
@@ -58,14 +58,12 @@ flowchart LR
 | **Claude API (Anthropic)** | API key | ✓ (with images) | | | | |
 | **Grok / xAI API** | API key | ✓ | ✓ Imagine | ✓ Imagine | | ✓ Speech-to-Text |
 | **API Key Chat** | Any OpenAI-compatible `/chat/completions` endpoint | ✓ | | | | |
-| **OpenAI Videos** | API key, opt-in ² | | | ✓ | | |
 | **Local ASR** | Local Python: faster-whisper, Qwen3 ASR with word timestamps | | | | | ✓ |
 | **Local Image** | Local GPU: Qwen-Image, FLUX.2-dev, NVIDIA Sana, Ideogram 4.0 GGUF | | ✓ | | | |
 | **Local CUDA Upscale** | Local GPU: SwinIR, Real-ESRGAN, HAT-S, DRCT, APISR (native ×2 / ×4) | | upscale | | | |
 | **Local Music Analysis** | Local Python: tempo, key, loudness, sections | | | | music | |
 
 ¹ Only when the local Grok Imagine skill declares the matching tools.
-² OpenAI scheduled Sora 2 and the Videos API for removal on 24 Sep 2026. The driver stays for compatibility; prefer xAI Imagine video.
 
 The Relay only uses what is installed and configured. CLIs are found on `PATH` or at a path you set on the status page; local engines are installed only when you press their **Install** / **Setup** button.
 

@@ -1379,48 +1379,6 @@ function createMusicAnalysisDriver(musicAnalysis) {
 	};
 }
 
-function createOpenAiVideosDriver(video) {
-	return {
-		id: 'openai-videos',
-		label: 'OpenAI Videos',
-		kind: 'api',
-		job_types: ['videos'],
-		checkStatus: () => ({ success: true, message: 'OpenAI video driver loaded.', details: video.capabilities ? video.capabilities() : {} }),
-		capabilities: () => {
-			const caps = video.capabilities ? video.capabilities() : { enabled: false };
-			return {
-				id: 'openai-videos',
-				label: 'OpenAI Videos',
-				kind: 'api',
-				enabled: !!caps.enabled,
-				configured: !!caps.configured,
-				ready: !!caps.enabled,
-				models: caps.models || [],
-			};
-		},
-		models: () => {
-			const caps = video.capabilities ? video.capabilities() : { models: [] };
-			const models = (caps.models || []).map((id) => ({ id: relayModel('openai-videos', id), legacy_id: `openai-video:${id}`, type: 'video', backend: 'openai-videos' }));
-			const testOptions = [
-				testOption('size', 'Resolution', 'direct', [
-					{ value: '1280x720', label: 'Landscape · 1280 × 720' },
-					{ value: '720x1280', label: 'Portrait · 720 × 1280' },
-					{ value: '1792x1024', label: 'Wide · 1792 × 1024' },
-					{ value: '1024x1792', label: 'Tall · 1024 × 1792' },
-				]),
-				testOption('seconds', 'Clip length', 'direct', [
-					{ value: '4', label: '4 seconds' },
-					{ value: '8', label: '8 seconds' },
-					{ value: '12', label: '12 seconds' },
-				]),
-				testOption('model', 'Quality', 'direct', models.map((entry) => ({ value: entry.id, label: /pro/i.test(entry.id) ? 'Pro · Sora 2 Pro' : 'Standard · Sora 2' }))),
-			];
-			return models.map((model) => ({ ...model, test_options: testOptions }));
-		},
-		videos: (payload, session) => video.run(payload, session),
-	};
-}
-
 function createXaiApiDriver(options = {}) {
 	const fetchImpl = withFetchTimeout(options.fetch || globalThis.fetch, Number(options.fetchTimeoutMs || process.env.AI_MODEL_RELAY_PROVIDER_FETCH_TIMEOUT_MS || 60000));
 	const apiKey = options.apiKey || process.env.XAI_API_KEY || process.env.AI_MODEL_RELAY_XAI_API_KEY || '';
@@ -2123,7 +2081,6 @@ function createBackendRegistry(options = {}) {
 		createLocalUpscaleDriver(options.upscale || {}),
 		createLocalImageDriver(options.image || {}),
 		createMusicAnalysisDriver(options.musicAnalysis),
-		createOpenAiVideosDriver(options.video),
 		createXaiApiDriver({ fetchTimeoutMs, ...(options.xai || {}) }),
 		createAnthropicApiDriver({ fetchTimeoutMs, ...(options.anthropic || {}) }),
 		createCliProcessDriver(configuredCliOptions(options.cli, 'cli-process')),
@@ -2153,8 +2110,6 @@ function createBackendRegistry(options = {}) {
 		cli: 'cli-process',
 		'cli-process': 'cli-process',
 		'api-key-chat': 'api-key-chat',
-		video: 'openai-videos',
-		'openai-videos': 'openai-videos',
 	};
 
 	function requestedSelection(payload = {}) {
@@ -2258,7 +2213,6 @@ module.exports = {
 	createLocalUpscaleDriver,
 	createLocalImageDriver,
 	createMusicAnalysisDriver,
-	createOpenAiVideosDriver,
 	createXaiApiDriver,
 	GROK_MEDIA_TIMEOUT_MS,
 	providerFromPayload,

@@ -424,7 +424,7 @@ function loadProviderTestApi(deps = {}) {
 		expectRoute('#tests/chat', 'tests', '', '', 'chat');
 		expectRoute('#tests/images/xai-api', 'tests', '', 'xai-api', 'images');
 		expectRoute('#tests/image/xai-api', 'tests', '', 'xai-api', 'images');
-		expectRoute('#tests/video/openai-videos', 'tests', '', 'openai-videos', 'videos');
+		expectRoute('#tests/video/xai-api', 'tests', '', 'xai-api', 'videos');
 		expectRoute('#tests/analysis/antigravity-cli', 'tests', '', 'antigravity-cli', 'analysis');
 		expectRoute('#tests/media.analyze/antigravity-cli', 'tests', '', 'antigravity-cli', 'analysis');
 		expectRoute('#tests/audio/local-asr', 'tests', '', 'local-asr', 'audio');
@@ -514,7 +514,7 @@ function loadProviderTestApi(deps = {}) {
 		env.api.navigateTo('tests');
 		assert.strictEqual(env.state.testTabs.length, tabCalls, 'the plain Tests route keeps the selected segment');
 		assert.deepStrictEqual(env.state.testNotices.slice(-1), [''], 'the focus notice is cleared');
-		env.api.navigateTo('tests/video/openai-videos');
+		env.api.navigateTo('tests/video/xai-api');
 		assert.ok(env.api.testPending());
 		env.api.navigateTo('debug');
 		assert.strictEqual(env.api.testPending(), null, 'leaving Tests drops a pending test focus');
@@ -669,9 +669,8 @@ function loadProviderTestApi(deps = {}) {
 	const backends = [
 		chat('codex-cli', 'Codex CLI', { job_types: ['chat', 'images', 'media.analyze'], version: 'codex 1.2.3', command: 'C:\\Tools\\codex.exe', features: { structured_exec_json: true, output_schema: false } }),
 		chat('anthropic-api', 'Claude API (Anthropic)', { provider_kind: 'api', diagnostic: 'Ready.' }),
-		{ id: 'xai-api', label: 'Grok / xAI API', ready: false, enabled: false, configured: false, provider_kind: 'api', job_types: ['chat', 'images'] },
+		{ id: 'xai-api', label: 'Grok / xAI API', ready: false, enabled: false, configured: false, provider_kind: 'api', job_types: ['chat', 'images', 'videos'] },
 		{ id: 'grok-cli', label: 'Grok CLI', ready: false, state: 'not_authenticated', diagnostic: 'Run grok login.', provider_kind: 'local-cli', job_types: ['chat'] },
-		{ id: 'openai-videos', label: 'OpenAI Videos', ready: true, provider_kind: 'api', job_types: ['videos'] },
 		{ id: 'local-asr', label: 'Local ASR', ready: false, enabled: true, provider_kind: 'local-runtime', job_types: ['transcribe'], diagnostic: 'Install a model.' },
 		{ id: 'local-upscale', label: 'Local CUDA Upscale', ready: true, provider_kind: 'local-runtime', job_types: ['upscale'], models: [{ id: 'm1', label: 'Real <ESRGAN>', state: 'installed' }] },
 		{ id: 'mystery', label: 'Mystery Provider', ready: false, state: 'error', diagnostic: 'Broke.', job_types: [] },
@@ -688,7 +687,6 @@ function loadProviderTestApi(deps = {}) {
 		providers: {
 			anthropic: { api_key: { configured: true, suffix: 'abcd', value: 'sk-ant-FULL-SECRET' }, admin_api_key: { configured: false }, base_url: '', models: ['claude-opus-5-5', 'claude-haiku-5-5'], monthly_limit_usd: 500, credit_balance_usd: 250, credit_balance_as_of: '2026-10-01T00:00:00Z' },
 			xai: { api_key: { configured: true, suffix: '<x>' }, base_url: 'https://api.x.ai/v1', models: 'grok-4.3' },
-			openai_videos: { enabled: true, api_key: { configured: false } },
 			api_key_chat: { api_key: { configured: false }, base_url: '"><script>', provider_id: 'p1', model: 'm1' },
 			cli_process: { args: '--flag' },
 			grok: { imagine_skill: 'C:\\skill.md' },
@@ -700,7 +698,7 @@ function loadProviderTestApi(deps = {}) {
 	const attrs = () => Array.from(markup.matchAll(/data-provider-id="([^"]*)"/g)).map((match) => match[1]);
 
 	// One card per backend (in a stable order), plus a card for every provider that owns settings fields even when unreported.
-	assert.deepStrictEqual(attrs(), ['codex-cli', 'anthropic-api', 'xai-api', 'grok-cli', 'cursor-cli', 'antigravity-cli', 'openai-videos', 'api-key-chat', 'cli-process', 'local-asr', 'local-upscale', 'mystery'], 'spec order, synthetic cards for unreported settings providers, unknown backends last');
+	assert.deepStrictEqual(attrs(), ['codex-cli', 'anthropic-api', 'xai-api', 'grok-cli', 'cursor-cli', 'antigravity-cli', 'api-key-chat', 'cli-process', 'local-asr', 'local-upscale', 'mystery'], 'spec order, synthetic cards for unreported settings providers, unknown backends last');
 	assert.ok(!attrs().includes('local-image') && !attrs().includes('music-analysis'), 'engines are listed only when reported');
 	const ids = Array.from(markup.matchAll(/ id="([^"]+)"/g)).map((match) => match[1]);
 	assert.strictEqual(new Set(ids).size, ids.length, 'element ids are unique');
@@ -726,8 +724,7 @@ function loadProviderTestApi(deps = {}) {
 	assert.ok(claude.includes('data-field-key="relayAnthropicMonthlyLimit"') && claude.includes('id="fieldError-relayAnthropicMonthlyLimit"') && claude.includes('aria-describedby="fieldError-relayAnthropicCreditBalance"'), 'USD fields have an inline error slot');
 	assert.ok(claude.includes('data-claude-card-usage') && claude.includes('data-nav-hash="overview"'), 'compact usage summary links to the Overview panel');
 	assert.ok(cardMarkup('xai-api').includes('id="relayXaiApiKey"') && cardMarkup('xai-api').includes('id="relayXaiBaseUrl"') && cardMarkup('xai-api').includes('id="relayXaiModels"'));
-	const videos = cardMarkup('openai-videos');
-	assert.ok(videos.includes('id="relayOpenaiEnabled"') && videos.includes('<option value="true" selected>') && videos.includes('id="relayOpenaiApiKey"'));
+	assert.ok(!markup.includes('openai-videos') && !markup.includes('relayOpenai'), 'the removed OpenAI Videos provider has no card or fields');
 	assert.ok(cardMarkup('api-key-chat').includes('id="relayApiKeyChatKey"') && cardMarkup('api-key-chat').includes('id="relayApiKeyChatProviderId"') && cardMarkup('api-key-chat').includes('id="relayApiKeyChatModel"') && cardMarkup('api-key-chat').includes('id="relayApiKeyChatBaseUrl"'));
 	assert.ok(cardMarkup('cli-process').includes('data-relay-cli-path="cli-process"') && cardMarkup('cli-process').includes('id="relayCliProcessArgs"'));
 	assert.ok(cardMarkup('grok-cli').includes('id="relayGrokImagineSkill"') && cardMarkup('grok-cli').includes('data-relay-cli-path="grok-cli"'));
@@ -754,7 +751,7 @@ function loadProviderTestApi(deps = {}) {
 	assert.ok(claude.includes('data-provider-test="chat" data-model="model-relay:anthropic:claude-opus-5-5"') && !claude.includes('<select data-test-option="model">') && claude.includes('This request is sent to Claude API (Anthropic); usage charges may apply.'), 'a single model needs no select; API cards show the cost hint');
 	assert.ok(codex.includes('data-test-prompt maxlength="8000" value="Reply with exactly: OK"') && codex.includes('data-chat-max-tokens'), 'the default prompt is used; options sit behind a disclosure');
 	assert.ok(codex.includes('data-open-test-tab="provider-test-tab-images"') && codex.includes('data-open-test-tab="provider-test-tab-analysis"') && !codex.includes('data-open-test-tab="provider-test-tab-videos"'), 'media test links follow the job types');
-	assert.ok(videos.includes('data-open-test-tab="provider-test-tab-videos"') && !videos.includes('data-provider-test="chat"'), 'a media-only provider links to the Tests route');
+	assert.ok(cardMarkup('xai-api').includes('data-open-test-tab="provider-test-tab-videos"'), 'a video provider links to the video Tests route');
 	assert.ok(cardMarkup('xai-api').includes('<button type="button" disabled>Test</button>') && cardMarkup('xai-api').includes('Chat tests need a ready provider.'), 'a chat provider that is not ready has a disabled Test');
 	assert.ok(!grok.includes('data-provider-test="chat"') && grok.includes('<button type="button" disabled>Test</button>'));
 	const asr = cardMarkup('local-asr');
