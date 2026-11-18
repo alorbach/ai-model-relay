@@ -106,7 +106,7 @@ const tinyPng = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8
 		assert.strictEqual(logged.length, 1);
 		assert.strictEqual(logged[0].url, 'https://example.test/backend-api/codex/images/generations');
 		assert.strictEqual(logged[0].body.model, 'gpt-image-2.5-sunburst');
-		assert.strictEqual(logged[0].body.prompt, 'a glass orb');
+		assert.strictEqual(logged[0].body.prompt, 'Use a landscape composition with a 3:2 aspect ratio. Prefer high visual detail. Scene: a glass orb');
 		assert.strictEqual(logged[0].body.size, '1536x1024');
 		assert.strictEqual(logged[0].body.quality, 'high');
 		assert.strictEqual(logged[0].body.output_format, 'png');
@@ -122,6 +122,7 @@ const tinyPng = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8
 		const mediumQuality = await images({ prompt: 'medium orb', size: '1024x1536', quality: 'medium', output_format: 'png' });
 		assert.strictEqual(mediumQuality.success, true);
 		assert.strictEqual(logged[logged.length - 1].body.quality, 'medium');
+		assert.strictEqual(logged[logged.length - 1].body.prompt, 'Use a portrait composition with a 2:3 aspect ratio. Prefer medium visual detail. Scene: medium orb');
 		assert.strictEqual(logged[logged.length - 1].url, 'https://example.test/backend-api/codex/images/generations');
 		const omitted = await images({ prompt: 'provider chooses', size: 'auto', quality: 'auto', output_format: 'image/png' });
 		assert.strictEqual(omitted.success, true);

@@ -1138,14 +1138,23 @@ function imageAspectHint(size) {
 	return `${landscape ? 'landscape' : 'portrait'} composition with a ${label} aspect ratio`;
 }
 
-function imagePrompt(payload, attachments = []) {
+// Both Codex image routes put the requested aspect ratio and detail into the
+// prompt text. The login images endpoint takes `size` too, but measured runs
+// ignored it in several cases; with this hint the ratio matched every time.
+function guidedImagePrompt(payload) {
 	const prompt = String(payload.prompt || '').trim();
 	const aspect = imageAspectHint(payload.size);
 	const quality = String(payload.quality || 'auto').trim().toLowerCase();
 	const hints = [];
 	if (aspect) hints.push(`Use a ${aspect}.`);
 	if (quality && quality !== 'auto') hints.push(`Prefer ${quality} visual detail.`);
-	const generationPrompt = [...hints, `Scene: ${prompt}`].join(' ');
+	return hints.length ? [...hints, `Scene: ${prompt}`].join(' ') : prompt;
+}
+
+function imagePrompt(payload, attachments = []) {
+	const prompt = String(payload.prompt || '').trim();
+	const guided = guidedImagePrompt(payload);
+	const generationPrompt = guided === prompt ? `Scene: ${prompt}` : guided;
 	const lines = [
 		'Generate exactly one image using your built-in image_gen tool.',
 		'Pass the following text verbatim as the image_gen prompt:',
@@ -1355,7 +1364,7 @@ async function imagesWithGenerations(payload, session = {}) {
 	if (pathError) return pathError;
 	const references = codexGenerationReferences(payload, 4);
 	if (references.error) return { success: false, category: 'validation', code: 'codex_image_reference_invalid', message: references.error };
-	const body = { model: 'gpt-image-2.5-sunburst', prompt };
+	const body = { model: 'gpt-image-2.5-sunburst', prompt: guidedImagePrompt(payload) };
 	if (sizeText) body.size = sizeText;
 	if (qualityText && qualityText !== 'auto') body.quality = qualityText;
 	if (outputFormat) body.output_format = outputFormat;
