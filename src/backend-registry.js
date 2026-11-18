@@ -504,16 +504,23 @@ function testOption(key, label, delivery, choices) {
 	return { key, label, delivery, choices };
 }
 
+// Codex image output is always about 1.57 MP; only the aspect ratio follows the
+// requested size. The labels name the measured output. The 2K/4K values stay
+// accepted for existing clients, but their labels state the size actually delivered.
 const CODEX_IMAGE_SIZE_CHOICES = [
 	{ value: 'auto', label: 'Auto · provider chooses' },
-	{ value: '1024x1024', label: 'Square · 1024 × 1024' },
-	{ value: '1536x1024', label: 'Landscape · 1536 × 1024' },
-	{ value: '1024x1536', label: 'Portrait · 1024 × 1536' },
-	{ value: '2048x2048', label: '2K square · 2048 × 2048 (requested, not guaranteed)' },
-	{ value: '2560x1440', label: '2K landscape · 2560 × 1440 (requested, not guaranteed)' },
-	{ value: '1440x2560', label: '2K portrait · 1440 × 2560 (requested, not guaranteed)' },
-	{ value: '3840x2160', label: '4K landscape · 3840 × 2160 (requested, not guaranteed)' },
-	{ value: '2160x3840', label: '4K portrait · 2160 × 3840 (requested, not guaranteed)' },
+	{ value: '1024x1024', label: 'Square 1:1 · delivers 1254 × 1254' },
+	{ value: '1536x1024', label: 'Landscape 3:2 · 1536 × 1024' },
+	{ value: '1024x1536', label: 'Portrait 2:3 · 1024 × 1536' },
+	{ value: '1672x941', label: 'Landscape 16:9 · 1672 × 941' },
+	{ value: '941x1672', label: 'Portrait 9:16 · 941 × 1672' },
+	{ value: '2172x724', label: 'Panorama 3:1 · 2172 × 724' },
+	{ value: '724x2172', label: 'Tall 1:3 · 724 × 2172' },
+	{ value: '2048x2048', label: '2K square requested · delivers 1254 × 1254' },
+	{ value: '2560x1440', label: '2K 16:9 requested · delivers 1672 × 941' },
+	{ value: '1440x2560', label: '2K 9:16 requested · delivers 941 × 1672' },
+	{ value: '3840x2160', label: '4K 16:9 requested · delivers 1672 × 941' },
+	{ value: '2160x3840', label: '4K 9:16 requested · delivers 941 × 1672' },
 ];
 
 const CODEX_IMAGE_QUALITY_CHOICES = [

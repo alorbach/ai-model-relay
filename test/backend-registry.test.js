@@ -161,11 +161,12 @@ function captureCliSpawn(calls) {
 	assert.deepStrictEqual(codexImageModel.test_options.map((option) => option.key), ['size', 'quality']);
 	assert.ok(codexImageModel.test_options.every((option) => option.delivery === 'guidance'));
 	assert.strictEqual(codexImageModel.image_capabilities.contract_version, 1);
-	assert.deepStrictEqual(codexImageModel.image_capabilities.supported_sizes, ['1024x1024', '1536x1024', '1024x1536', '2048x2048', '2560x1440', '1440x2560', '3840x2160', '2160x3840']);
+	assert.deepStrictEqual(codexImageModel.image_capabilities.supported_sizes, ['1024x1024', '1536x1024', '1024x1536', '1672x941', '941x1672', '2172x724', '724x2172', '2048x2048', '2560x1440', '1440x2560', '3840x2160', '2160x3840']);
 	assert.deepStrictEqual(Object.keys(codexImageModel.image_capabilities.provider_options), ['size']);
 	assert.strictEqual(codexImageModel.image_capabilities.provider_options.size.delivery, 'guidance');
-	assert.deepStrictEqual(codexImageModel.test_options[0].choices.map((choice) => choice.value), ['auto', '1024x1024', '1536x1024', '1024x1536', '2048x2048', '2560x1440', '1440x2560', '3840x2160', '2160x3840']);
-	assert.ok(codexImageModel.test_options[0].choices.filter((choice) => !['auto', '1024x1024', '1536x1024', '1024x1536'].includes(choice.value)).every((choice) => choice.label.includes('(requested, not guaranteed)')));
+	assert.deepStrictEqual(codexImageModel.test_options[0].choices.map((choice) => choice.value), ['auto', '1024x1024', '1536x1024', '1024x1536', '1672x941', '941x1672', '2172x724', '724x2172', '2048x2048', '2560x1440', '1440x2560', '3840x2160', '2160x3840']);
+	// Codex always returns about 1.57 MP: the 2K/4K presets must name the delivered size.
+	assert.ok(codexImageModel.test_options[0].choices.filter((choice) => ['2048x2048', '2560x1440', '1440x2560', '3840x2160', '2160x3840'].includes(choice.value)).every((choice) => /requested · delivers \d+ × \d+$/.test(choice.label)));
 	assert.deepStrictEqual(codexImageModel.test_options[1].choices.map((choice) => choice.value), ['auto', 'low', 'medium', 'high']);
 	assert.deepStrictEqual(codexImageModel.image_capabilities.supported_output_formats, ['image/png']);
 	assert.strictEqual(codexImageModel.image_capabilities.candidate_count_max, 1);

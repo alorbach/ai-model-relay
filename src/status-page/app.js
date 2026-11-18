@@ -2300,7 +2300,7 @@
 
 		function providerCodexImageToolField(settings) {
 			const value = settings.codex_image_tool === 'generations' ? 'generations' : 'image_gen';
-			return '<label class="field"><span>Codex image route</span><select id="relayCodexImageTool"><option value="image_gen"' + (value === 'image_gen' ? ' selected' : '') + '>Codex exec image_gen tool</option><option value="generations"' + (value === 'generations' ? ' selected' : '') + '>Codex login images request</option></select><small class="muted">image_gen is the default. It asks Codex exec to pass size and quality inside the image_gen prompt. Those values are scene hints only. The built-in tool accepts only prompt, referenced_image_paths, and num_last_images_to_include, and returns PNG. generations posts size and quality on the Codex login images request; that endpoint does not apply them.</small></label>';
+			return '<label class="field"><span>Codex image route</span><select id="relayCodexImageTool"><option value="image_gen"' + (value === 'image_gen' ? ' selected' : '') + '>Codex exec image_gen tool</option><option value="generations"' + (value === 'generations' ? ' selected' : '') + '>Codex login images request</option></select><small class="muted">image_gen is the default. It asks Codex exec to pass size and quality inside the image_gen prompt. Those values are scene hints only. The built-in tool accepts only prompt, referenced_image_paths, and num_last_images_to_include, and returns PNG. generations posts size and quality on the Codex login images request; it follows the aspect ratio of the size. Both routes always return about 1.57 MP.</small></label>';
 		}
 
 		function providerFieldGroup(key, settings) {

@@ -7,6 +7,7 @@ const path = require('path');
 const security = require('../src/security');
 const {
 	collectImageAttachments,
+	imageAspectHint,
 	imagePrompt,
 	images,
 	capabilities,
@@ -50,20 +51,26 @@ const tinyPng = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8
 	assert.strictEqual(fromFrames.length, 1);
 
 	const prompt = imagePrompt({ prompt: 'TELE ad', size: '1536x1024', quality: 'high' }, fromRefs);
-	assert.ok(prompt.includes('Use a landscape composition. Prefer high visual detail. Scene: TELE ad'));
+	assert.ok(prompt.includes('Use a landscape composition with a 3:2 aspect ratio. Prefer high visual detail. Scene: TELE ad'));
 	assert.ok(prompt.includes('Those are not tool arguments.'));
 	assert.ok(!prompt.includes('1536x1024'));
 	const autoQuality = imagePrompt({ prompt: 'TELE ad', size: '1536x1024', quality: 'auto' });
-	assert.ok(autoQuality.includes('Use a landscape composition. Scene: TELE ad'));
+	assert.ok(autoQuality.includes('Use a landscape composition with a 3:2 aspect ratio. Scene: TELE ad'));
 	assert.ok(!/Prefer .* visual detail/.test(autoQuality));
 	const omittedQuality = imagePrompt({ prompt: 'TELE ad', size: '1536x1024' });
-	assert.ok(omittedQuality.includes('Use a landscape composition. Scene: TELE ad'));
-	assert.ok(imagePrompt({ prompt: 'TELE ad', size: '1024x1024' }).includes('Use a square composition. Scene: TELE ad'));
-	assert.ok(imagePrompt({ prompt: 'TELE ad', size: '1024x1536' }).includes('Use a portrait composition. Scene: TELE ad'));
+	assert.ok(omittedQuality.includes('Use a landscape composition with a 3:2 aspect ratio. Scene: TELE ad'));
+	assert.ok(imagePrompt({ prompt: 'TELE ad', size: '1024x1024' }).includes('Use a square composition with a 1:1 aspect ratio. Scene: TELE ad'));
+	assert.ok(imagePrompt({ prompt: 'TELE ad', size: '1024x1536' }).includes('Use a portrait composition with a 2:3 aspect ratio. Scene: TELE ad'));
+	assert.strictEqual(imageAspectHint('3840x2160'), 'landscape composition with a 16:9 aspect ratio');
+	assert.strictEqual(imageAspectHint('1672x941'), 'landscape composition with a 16:9 aspect ratio');
+	assert.strictEqual(imageAspectHint('941x1672'), 'portrait composition with a 9:16 aspect ratio');
+	assert.strictEqual(imageAspectHint('2172x724'), 'landscape composition with a 3:1 aspect ratio');
+	assert.strictEqual(imageAspectHint('724x2172'), 'portrait composition with a 1:3 aspect ratio');
+	assert.strictEqual(imageAspectHint('auto'), '');
 	assert.ok(prompt.includes('Pass the following text verbatim as the image_gen prompt'));
 	assert.ok(prompt.includes('Image 1 (product)'));
 	assert.ok(prompt.includes('Image 2 (layout)'));
-	assert.ok(prompt.includes('Merge products from Image 1'));
+	assert.ok(!prompt.includes('Merge products'));
 
 	const caps = capabilities();
 	assert.strictEqual(caps.bridge_features.image_reference_attachments, true);
@@ -141,8 +148,22 @@ const tinyPng = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8
 		global.fetch = async () => ({ ok: false, status: 401, text: async () => `Bearer ${accessToken}` });
 		const authFailure = await images({ prompt: 'rejected', size: '1024x1024' });
 		assert.strictEqual(authFailure.code, 'codex_image_auth_failed');
+		assert.strictEqual(authFailure.details.http_status, 401);
 		assert.strictEqual(JSON.stringify(authFailure).includes(accessToken), false);
 		assert.strictEqual(JSON.stringify(authFailure).includes('Authorization'), false);
+		global.fetch = async () => ({ ok: false, status: 400, text: async () => JSON.stringify({ error: { message: 'Invalid size 9x9', token: accessToken } }) });
+		const badRequest = await images({ prompt: 'bad size', size: '1024x1024' });
+		assert.strictEqual(badRequest.code, 'codex_image_request_failed');
+		assert.strictEqual(badRequest.details.http_status, 400);
+		assert.match(badRequest.details.provider_error, /Invalid size 9x9/);
+		assert.strictEqual(JSON.stringify(badRequest).includes(accessToken), false);
+		let pathFetchCalled = false;
+		global.fetch = async () => { pathFetchCalled = true; return { ok: true, status: 200, text: async () => '{}' }; };
+		const pathRefs = await images({ prompt: 'recolor', size: '1024x1024', referenced_image_paths: [imagePath] });
+		assert.strictEqual(pathFetchCalled, false);
+		assert.strictEqual(pathRefs.success, false);
+		assert.strictEqual(pathRefs.category, 'validation');
+		assert.strictEqual(pathRefs.code, 'codex_image_reference_invalid');
 		fs.writeFileSync(path.join(codexHome, 'auth.json'), JSON.stringify({ tokens: {} }));
 		let fetchCalled = false;
 		global.fetch = async () => { fetchCalled = true; return { ok: true, status: 200, text: async () => '{}' }; };

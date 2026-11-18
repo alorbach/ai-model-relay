@@ -6,7 +6,7 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { buildChatArgs, codexChatModelUnsupported, codexImageFailureFromOutput, codexJsonUnsupported, codexOutputSchemaUnsupported, detectNewImage, imagePathsFromJsonEvents, listGeneratedImages, nativeCodexChatModel, parseCodexJsonEvents, readGeneratedImage, runCodexAsync } = require('../src/codex');
+const { buildChatArgs, codexChatModelUnsupported, codexImageFailureFromOutput, codexThreadIdFromStructured, codexJsonUnsupported, codexOutputSchemaUnsupported, detectNewImage, imagePathsFromJsonEvents, listGeneratedImages, nativeCodexChatModel, parseCodexJsonEvents, readGeneratedImage, runCodexAsync } = require('../src/codex');
 
 (async () => {
 	const input = `start\n${'x'.repeat(128 * 1024)}\nend`;
@@ -118,6 +118,36 @@ const { buildChatArgs, codexChatModelUnsupported, codexImageFailureFromOutput, c
 		assert.strictEqual(detected[0].path, namedPath);
 		assert.ok(!detected.some((item) => item.path === stalePath));
 		assert.strictEqual(detectNewImage(before, after, { startedAt: Date.now() + 60000 }).length, 0);
+		// Images in another Codex thread's folder must never be returned for this run.
+		const threadEvents = parseCodexJsonEvents([
+			JSON.stringify({ type: 'thread.started', thread_id: '01a1f083-own-thread' }),
+			JSON.stringify({ type: 'turn.completed' }),
+		].join('\n'));
+		assert.strictEqual(codexThreadIdFromStructured(threadEvents), '01a1f083-own-thread');
+		assert.strictEqual(codexThreadIdFromStructured(parseCodexJsonEvents(JSON.stringify({ type: 'thread.started', thread_id: '../escape' }))), '');
+		assert.strictEqual(codexThreadIdFromStructured(null), '');
+		const threadRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-image-thread-test-'));
+		try {
+			const threadBefore = listGeneratedImages(threadRoot);
+			const threadStart = Date.now();
+			fs.mkdirSync(path.join(threadRoot, '01a1f083-own-thread'));
+			fs.mkdirSync(path.join(threadRoot, 'other-thread'));
+			const ownPath = path.join(threadRoot, '01a1f083-own-thread', 'exec-own.png');
+			const foreignPath = path.join(threadRoot, 'other-thread', 'exec-foreign.png');
+			fs.writeFileSync(ownPath, Buffer.from('own image'));
+			fs.utimesSync(ownPath, new Date(threadStart + 1000), new Date(threadStart + 1000));
+			fs.writeFileSync(foreignPath, Buffer.from('foreign image'));
+			fs.utimesSync(foreignPath, new Date(threadStart + 5000), new Date(threadStart + 5000));
+			const threadAfter = listGeneratedImages(threadRoot);
+			const own = detectNewImage(threadBefore, threadAfter, { startedAt: threadStart, threadId: '01a1f083-own-thread', rootDir: threadRoot });
+			assert.deepStrictEqual(own.map((item) => item.path), [ownPath]);
+			const foreignOnly = detectNewImage(threadBefore, threadAfter.filter((item) => item.path !== ownPath), { startedAt: threadStart, threadId: '01a1f083-own-thread', rootDir: threadRoot });
+			assert.strictEqual(foreignOnly.length, 0);
+			// Without a thread id the legacy newest-file behavior stays.
+			assert.strictEqual(detectNewImage(threadBefore, threadAfter, { startedAt: threadStart })[0].path, foreignPath);
+		} finally {
+			fs.rmSync(threadRoot, { recursive: true, force: true });
+		}
 		const oversizedPath = path.join(imageRoot, 'oversized.png');
 		fs.writeFileSync(oversizedPath, Buffer.alloc(20 * 1024 * 1024 + 1));
 		assert.ok(listGeneratedImages(imageRoot).some((item) => item.path === oversizedPath));

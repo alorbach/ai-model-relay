@@ -1065,10 +1065,25 @@ function detectNewImage(before, after, options = {}) {
 	const settings = typeof options === 'number' ? { startedAt: options } : (options || {});
 	const startedAt = Number(settings.startedAt || 0);
 	const known = new Set((Array.isArray(before) ? before : []).map((item) => imagePathKey(item && item.path)));
-	const fresh = (Array.isArray(after) ? after : [])
+	let fresh = (Array.isArray(after) ? after : [])
 		.filter((item) => item && item.path && !known.has(imagePathKey(item.path)))
 		.filter((item) => !startedAt || Number(item.mtimeMs) >= startedAt)
 		.sort((a, b) => Number(b.mtimeMs || 0) - Number(a.mtimeMs || 0));
+	const threadId = safeCodexThreadId(settings.threadId);
+	if (threadId && settings.rootDir) {
+		// Codex writes each thread's images to generated_images/<thread_id>/.
+		// Files in another thread's folder belong to a different Codex run
+		// (the Codex app, another CLI, or another Relay) and must not be
+		// returned for this job; files in our own folder go first.
+		const rootKey = imagePathKey(settings.rootDir);
+		const ownKey = imagePathKey(path.join(settings.rootDir, threadId));
+		const inOwn = (item) => {
+			const dirKey = imagePathKey(path.dirname(item.path));
+			return dirKey === ownKey || dirKey.startsWith(`${ownKey}${path.sep}`);
+		};
+		fresh = fresh.filter((item) => inOwn(item) || imagePathKey(path.dirname(item.path)) === rootKey);
+		fresh = [...fresh.filter(inOwn), ...fresh.filter((item) => !inOwn(item))];
+	}
 	if (!Array.isArray(settings.namedPaths) || !settings.namedPaths.length) {
 		return fresh;
 	}
@@ -1086,14 +1101,41 @@ function detectNewImage(before, after, options = {}) {
 	return [...preferred, ...fresh.filter((item) => !selected.has(imagePathKey(item.path)))];
 }
 
+function safeCodexThreadId(value) {
+	const text = String(value || '').trim();
+	return /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(text) ? text : '';
+}
+
+function codexThreadIdFromStructured(structured) {
+	const events = structured && Array.isArray(structured.events) ? structured.events : [];
+	for (const event of events) {
+		if (event && String(event.type || '') === 'thread.started') {
+			const threadId = safeCodexThreadId(event.thread_id);
+			if (threadId) return threadId;
+		}
+	}
+	return '';
+}
+
+// Common ratios the image model snaps to. Measured Codex output keeps about
+// 1.57 MP and follows these ratios (for example 16:9 -> 1672x941, 3:1 -> 2172x724).
+const IMAGE_ASPECT_RATIOS = [[1, 1], [5, 4], [4, 3], [3, 2], [16, 9], [2, 1], [21, 9], [3, 1]];
+
 function imageAspectHint(size) {
 	const match = String(size || '').trim().match(/^(\d+)x(\d+)$/i);
 	if (!match) return '';
 	const width = Number(match[1]);
 	const height = Number(match[2]);
 	if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width <= 0 || height <= 0) return '';
-	if (width === height) return 'square';
-	return width > height ? 'landscape' : 'portrait';
+	if (width === height) return 'square composition with a 1:1 aspect ratio';
+	const landscape = width > height;
+	const ratio = Math.max(width, height) / Math.min(width, height);
+	let best = IMAGE_ASPECT_RATIOS[0];
+	for (const candidate of IMAGE_ASPECT_RATIOS) {
+		if (Math.abs(Math.log(ratio / (candidate[0] / candidate[1]))) < Math.abs(Math.log(ratio / (best[0] / best[1])))) best = candidate;
+	}
+	const label = landscape ? `${best[0]}:${best[1]}` : `${best[1]}:${best[0]}`;
+	return `${landscape ? 'landscape' : 'portrait'} composition with a ${label} aspect ratio`;
 }
 
 function imagePrompt(payload, attachments = []) {
@@ -1101,7 +1143,7 @@ function imagePrompt(payload, attachments = []) {
 	const aspect = imageAspectHint(payload.size);
 	const quality = String(payload.quality || 'auto').trim().toLowerCase();
 	const hints = [];
-	if (aspect) hints.push(`Use a ${aspect} composition.`);
+	if (aspect) hints.push(`Use a ${aspect}.`);
 	if (quality && quality !== 'auto') hints.push(`Prefer ${quality} visual detail.`);
 	const generationPrompt = [...hints, `Scene: ${prompt}`].join(' ');
 	const lines = [
@@ -1118,9 +1160,6 @@ function imagePrompt(payload, attachments = []) {
 		for (let i = 0; i < attachments.length; i++) {
 			const label = attachments[i].label ? ` (${attachments[i].label})` : '';
 			lines.push(`- Image ${i + 1}${label}: exact reference from attachment ${i + 1}.`);
-		}
-		if (attachments.length >= 2) {
-			lines.push('- Merge products from Image 1 into the layout structure of Image 2 photorealistically.');
 		}
 	}
 	lines.push('After the image has been generated, reply with a short plain-text confirmation only.');
@@ -1246,6 +1285,33 @@ function codexImageSignal(session) {
 	return jobSignal || timeout || undefined;
 }
 
+function codexImageErrorExcerpt(text, secrets = []) {
+	let excerpt = String(text || '').slice(0, 20000);
+	for (const secret of secrets) {
+		if (secret && String(secret).length >= 8) excerpt = excerpt.split(String(secret)).join('[redacted]');
+	}
+	return excerpt
+		.replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [redacted]')
+		.replace(/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]+/g, '[redacted]')
+		.replace(/\s+/g, ' ')
+		.trim()
+		.slice(0, 500);
+}
+
+// Codex image jobs never read caller-supplied filesystem paths: a local path
+// could point at any file the bridge can read. Fail clearly instead of
+// silently generating an image without the intended reference.
+function codexReferencePathsError(payload) {
+	const paths = Array.isArray(payload && payload.referenced_image_paths) ? payload.referenced_image_paths.filter((value) => String(value || '').trim()) : [];
+	if (!paths.length) return null;
+	return {
+		success: false,
+		category: 'validation',
+		code: 'codex_image_reference_invalid',
+		message: 'Codex image jobs do not read local files from referenced_image_paths. Send reference images as PNG, JPEG, or WebP data URLs or { b64_json, mime_type } objects.',
+	};
+}
+
 function codexImageCancelled() {
 	return {
 		success: false,
@@ -1285,6 +1351,8 @@ async function imagesWithGenerations(payload, session = {}) {
 		count = Number(countSource);
 		if (!Number.isInteger(count) || count < 1 || count > 1) return imageOptionsError(payload.model || 'model-relay:codex:image', 'The requested image candidate count is not supported by the selected Relay image model.');
 	}
+	const pathError = codexReferencePathsError(payload);
+	if (pathError) return pathError;
 	const references = codexGenerationReferences(payload, 4);
 	if (references.error) return { success: false, category: 'validation', code: 'codex_image_reference_invalid', message: references.error };
 	const body = { model: 'gpt-image-2.5-sunburst', prompt };
@@ -1320,9 +1388,11 @@ async function imagesWithGenerations(payload, session = {}) {
 	}
 	if (!response || !response.ok) {
 		const status = response && response.status;
-		try { if (response && typeof response.text === 'function') await response.text(); } catch (error) {}
+		let errorText = '';
+		try { if (response && typeof response.text === 'function') errorText = await response.text(); } catch (error) {}
+		const details = { http_status: status || 0, provider_error: codexImageErrorExcerpt(errorText, [auth.accessToken, auth.accountId]) };
 		if (status === 401 || status === 403) {
-			return { success: false, category: 'configuration', code: 'codex_image_auth_failed', message: 'Codex image generation rejected the saved login. Log in with the Codex CLI and try again.' };
+			return { success: false, category: 'configuration', code: 'codex_image_auth_failed', message: 'Codex image generation rejected the saved login. Log in with the Codex CLI and try again.', details };
 		}
 		return {
 			success: false,
@@ -1330,6 +1400,7 @@ async function imagesWithGenerations(payload, session = {}) {
 			code: 'codex_image_request_failed',
 			message: `Codex image generation failed with HTTP ${status || 0}.`,
 			retryable: status === 429 || status >= 500,
+			details,
 		};
 	}
 	const maxResponseBytes = Math.ceil(MAX_CODEX_IMAGE_BYTES * 4 / 3) * 10 + (1024 * 1024);
@@ -1383,6 +1454,8 @@ async function imagesWithImageGen(payload, session = {}) {
 	if (!prompt) {
 		return { success: false, message: 'No image prompt was provided.' };
 	}
+	const pathError = codexReferencePathsError(payload);
+	if (pathError) return pathError;
 	fs.mkdirSync(generatedImagesDir, { recursive: true });
 	const before = listGeneratedImages(generatedImagesDir);
 	const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'alorbach-codex-image-'));
@@ -1435,6 +1508,8 @@ async function imagesWithImageGen(payload, session = {}) {
 	const newImages = detectNewImage(before, after, {
 		startedAt: expectedStartTime,
 		namedPaths: imagePathsFromJsonEvents(run.structured),
+		threadId: codexThreadIdFromStructured(run.structured),
+		rootDir: generatedImagesDir,
 	});
 	const stdout = (run.stdout || '').trim();
 	const stderr = (run.stderr || '').trim();
@@ -1680,10 +1755,12 @@ module.exports = {
 	checkStatusAsync,
 	codexChatModelUnsupported,
 	codexImageFailureFromOutput,
+	codexThreadIdFromStructured,
 	codexJsonUnsupported,
 	codexOutputSchemaUnsupported,
 	collectImageAttachments,
 	detectNewImage,
+	imageAspectHint,
 	execCapabilities,
 	imagePrompt,
 	imagePathsFromJsonEvents,
