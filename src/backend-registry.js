@@ -582,8 +582,17 @@ const GROK_IMAGE_ASPECT_CHOICES = [
 	{ value: '5:2', label: 'Banner · 5:2' },
 ];
 
+// Grok Imagine picks its own pixel size; the tool takes only prompt and aspect_ratio.
+// Resolution is accepted as a guidance-only hint so clients that always send a
+// resolution tier (for example 1k/2k) are not refused. It never reaches the tool.
+const GROK_IMAGE_RESOLUTION_CHOICES = [
+	{ value: '1k', label: '1K · hint only, Grok chooses the pixel size' },
+	{ value: '2k', label: '2K · hint only, Grok chooses the pixel size' },
+];
+
 const GROK_IMAGE_TEST_OPTIONS = [
 	testOption('aspect_ratio', 'Aspect ratio', 'tool-arg', GROK_IMAGE_ASPECT_CHOICES),
+	testOption('resolution', 'Resolution', 'guidance', GROK_IMAGE_RESOLUTION_CHOICES),
 ];
 
 const GROK_VIDEO_ASPECT_CHOICES = [

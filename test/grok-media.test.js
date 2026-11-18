@@ -90,11 +90,12 @@ function createFakeGrok(options = {}) {
 		assert.ok(grokImageModel);
 		assert.deepStrictEqual(grokImageModel.job_types, ['images']);
 		assert.ok(grokImageModel.image_capabilities);
-		assert.deepStrictEqual(Object.keys(grokImageModel.image_capabilities.provider_options).sort(), ['aspect_ratio']);
+		assert.deepStrictEqual(Object.keys(grokImageModel.image_capabilities.provider_options).sort(), ['aspect_ratio', 'resolution']);
 		assert.deepStrictEqual(grokImageModel.image_capabilities.supported_output_formats, ['image/jpeg']);
 		assert.strictEqual(grokImageModel.image_capabilities.provider_options.aspect_ratio.delivery, 'native');
 		assert.ok(isCompleteImageCapabilityContract(grokImageModel));
-		assert.deepStrictEqual(grokImageModel.test_options.map((option) => option.key), ['aspect_ratio']);
+		assert.deepStrictEqual(grokImageModel.test_options.map((option) => option.key), ['aspect_ratio', 'resolution']);
+		assert.strictEqual(grokImageModel.test_options[1].delivery, 'guidance');
 		assert.strictEqual(grokImageModel.test_options[0].delivery, 'tool-arg');
 		assert.ok(grokImageModel.test_options[0].choices.some((choice) => choice.value === '21:9'));
 		assert.ok(grokImageModel.test_options[0].choices.some((choice) => choice.value === '5:2'));

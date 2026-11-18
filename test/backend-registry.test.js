@@ -178,9 +178,10 @@ function captureCliSpawn(calls) {
 	assert.ok(openAiVideoModel.test_options.every((option) => option.delivery === 'direct'));
 	assert.ok(!models.some((model) => model.backend === 'cursor-cli' && model.type === 'image'));
 	const grokImageModel = { id: 'model-relay:grok-cli:image', type: 'image', backend: 'grok-cli', ready: true, job_types: ['images'], image_capabilities: GROK_IMAGE_CAPABILITIES };
-	assert.deepStrictEqual(Object.keys(grokImageModel.image_capabilities.provider_options).sort(), ['aspect_ratio']);
+	assert.deepStrictEqual(Object.keys(grokImageModel.image_capabilities.provider_options).sort(), ['aspect_ratio', 'resolution']);
+	assert.strictEqual(grokImageModel.image_capabilities.provider_options.resolution.delivery, 'guidance');
 	assert.deepStrictEqual(grokImageModel.image_capabilities.supported_output_formats, ['image/jpeg']);
-	assert.deepStrictEqual(grokImageModel.image_capabilities.supported_sizes, []);
+	assert.deepStrictEqual(grokImageModel.image_capabilities.supported_sizes, ['1k', '2k']);
 	assert.strictEqual(grokImageModel.image_capabilities.provider_options.aspect_ratio.delivery, 'native');
 	assert.strictEqual(grokImageModel.image_capabilities.resolution_mode, 'guidance');
 	assert.strictEqual(grokImageModel.image_capabilities.aspect_ratio_delivery, 'native');
@@ -284,7 +285,13 @@ function captureCliSpawn(calls) {
 	const grokJpegDefault = normalizeImagePayloadForModel({ model: grokImageModel.id, prompt: 'x', resolution: '2k' }, grokImageModel);
 	assert.strictEqual(grokJpegDefault.error, undefined);
 	assert.strictEqual(grokJpegDefault.payload.output_format, 'image/jpeg');
-	assert.strictEqual(grokJpegDefault.payload.resolution, undefined);
+	assert.strictEqual(grokJpegDefault.payload.resolution, '2k', 'resolution is a guidance hint and stays on the payload');
+	const grokGatewayShape = normalizeImagePayloadForModel({ model: grokImageModel.id, prompt: 'x', size: '1024x1024', aspect_ratio: '3:2', output_format: 'image/jpeg', candidate_count: 1, provider_options: { resolution: '2k' } }, grokImageModel);
+	assert.strictEqual(grokGatewayShape.error, undefined, 'the Gateway shape with provider_options.resolution is accepted');
+	assert.strictEqual(grokGatewayShape.payload.resolution, '2k');
+	assert.strictEqual(grokGatewayShape.payload.aspect_ratio, '3:2');
+	assert.strictEqual(grokGatewayShape.payload.size, undefined, 'the generic pixel size does not reach the Grok driver');
+	assert.strictEqual(normalizeImagePayloadForModel({ model: grokImageModel.id, prompt: 'x', provider_options: { resolution: '4k' } }, grokImageModel).error.code, 'relay_image_options_unsupported');
 	assert.strictEqual(normalizeImagePayloadForModel({ model: grokImageModel.id, prompt: 'x', resolution: '2k', output_format: 'image/png' }, grokImageModel).error.code, 'relay_image_options_unsupported');
 	assert.match(grokImageToolGuidance({ aspect_ratio: '16:9' }, 'image_edit', { referenceCount: 2 }), /not as the output canvas/);
 	assert.doesNotMatch(grokImageToolGuidance({ aspect_ratio: '16:9' }, 'image_gen', { referenceCount: 2 }), /multi-image edit/);
