@@ -1,0 +1,23 @@
+test/image-attachments.test.js
+  s_05413d9c344e69::t_bd9e2ee5698738 109
+  s_05413d9c344e69::t_ca57573512d4dd 125
+src/codex.js
+  s_05413d9c344e69::t_9a60b5356a86b2 1141-1144,1151-1157
+  s_05413d9c344e69::t_a128b664519424 1367
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4b429d172331a943899e03e5ecd10eeec23ee9bb",
+  "prompts": {},
+  "sessions": {
+    "s_05413d9c344e69": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c16e5f87-ee1b-423d-825c-aeee9667e44b",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
